@@ -1,0 +1,590 @@
+{
+  "_meta": {
+    "purpose": "Tiered ground-truth benchmark for the Backoffice DES sizing engine's Required-HC chain (Stage 1 workload -> Stage 2 N_min -> Stage 3 DES search -> Stage 4 Gross HC), plus apportionment and the CI acceptance gate. Every scenario's trustedExpected fields carry a `tier` and `authority` explaining WHERE the expected value's truth comes from, so a reader can tell a mathematically-certain check apart from a characterization of current behavior. Do not add a new scenario without stating its tier honestly, even if that means labeling it T3.",
+    "history": "This file previously (pre-2026-08-27) contained scenarios S1/S2/S3/S1b testing a 'Horn's theorem / Absolute SLA feasibility' subsystem (analytical-feasibility.ts, computeAnalyticalFeasibility(), fields absolutePct/absoluteWindow/exactMinimumHC/bindingWindow) that DOES NOT EXIST anywhere in this codebase -- confirmed by grepping the full src/ tree and reading src/types/wfm.ts's SLAPolicyConfig, which has no absolute-SLA fields at all. Those scenarios have been replaced (see scenario_T1_A4/A5/A6 below) with scenarios that validate what actually exists in that role: the real Stage-2 analytical floor (computeAnalyticalNMin) and the DES search's real infeasibility branch (baselineExceedsCap). The former S4/S5 also referenced a nonexistent `des.absoluteAchievedPct` field and misdescribed the dispatch mechanism as an absolute/primary 'Class A/B' split; both are corrected below (see scenario_T3_C1a and scenario_T2_S5, and `dispatch_mechanism`).",
+    "tiering_legend": { "T0_invariant": "Mathematical necessity -- true for ANY correct implementation, independent of this codebase's specific formulas. Checked as a property (often swept over a range), not a single hand-picked number. A T0 failure means the engine violated basic arithmetic or accounting, not just 'drifted' -- treat it as the highest-severity class of finding.", "T1_domain_algebra": "Derived independently from WFM first principles / docs/wfm/*.md, worked out by hand or via a small pure-function call, BEFORE looking at what the engine returns. Catches a wrong formula. Where the independent derivation and this codebase's own documentation (docs/wfm/) disagree with the shipped code, that disagreement is recorded explicitly in `known_discrepancies` below rather than silently resolved.", "T2_hand_traced_des": "The DES's specified dispatch rules (Earliest-Deadline-First via latestSafeStart, parked-before-new) applied by hand to a concrete, fully-enumerated case set. Catches a wrong formula IF the rules were applied correctly -- verified here by explicit proof steps, not just asserted.", "T3_characterization": "This is what the code currently does, pinned as a regression lock or a documented convention (sometimes a deliberate design decision per docs/wfm/07-known-defects-and-decisions.md). CANNOT by itself prove the formula is right -- it only catches drift from today's behavior. Never cite a T3 scenario as evidence the underlying math is correct." },
+    "required_timezone": "Asia/Dubai",
+    "timezone_note": "Every date literal in this file is an un-zoned ISO string (no 'Z'/offset), e.g. '2026-10-05T09:00:00', parsed via `new Date(iso)` as LOCAL wall-clock time -- exactly matching how the engine's own calendar.ts computes calendar-day boundaries (setHours(0,0,0,0), getDay()) in local time. Because both sides of every comparison are local-time-relative, and none of this file's dates (2026-10-05..2026-10-12) cross a DST transition in common zones (EU DST ends 2026-10-25; US DST ends 2026-11-01), the numbers in this file are in fact TZ-invariant as constructed. `required_timezone` is still enforced by the runner as a defensive guard for any future scenario that is NOT constructed this carefully -- it records the timezone this file was authored and hand-verified under (Asia/Dubai, UTC+4, no DST), so a scenario added carelessly on a DST boundary fails loudly instead of silently producing wrong numbers on another machine.",
+    "how_to_run_this": "npx tsx scripts/verify-trusted-source.mts (also npm run test:trusted-source). Imports computeAnalyticalNMin, searchOptimalHC, calculateStaffingRequirement, effectivePrimaryTarget from ../src/utils/hc-search and runBackofficeDES, allocateAgentsToCategories from ../src/utils/des-engine -- the real, exported entry points. No analytical-feasibility.ts or computeAnalyticalFeasibility() reference remains anywhere in this file.",
+    "tolerance_policy": "Exact integer/HC/boolean/string fields: 0 tolerance. Percentage/ratio fields: +/-0.1 absolute (the app's own display rounding is 1 decimal place). Minute/hour totals: +/-0.5 (date-math floating point). Any field not listed for a scenario is not checked for that scenario.",
+    "dispatch_mechanism": { "claim": "Dispatch order is Earliest-Deadline-First, with parked (previously-started) cases always dispatched ahead of brand-new cases, each group ranked by a single urgency field derived from the Primary deadline.", "source_functions": "src/utils/des-engine.ts: pickNextCase() (des-engine.ts:248-274, called by dispatchSingleQueue) and its comparator compareByUrgency() (des-engine.ts:237-246).", "mechanism": ["pickNextCase splits the queue into 'parked' (parkCount>0 OR remainingWorkMinutes<totalAhtMinutes -- i.e. a case that has already been worked on and set aside) and 'new' (everything else). Parked always wins over new when any parked case exists (des-engine.ts:270).","Within each group, compareByUrgency ranks by latestSafeStart ascending, tie-broken by category priority, then arrival time (FIFO), then a synthetic id for total determinism.","There is exactly ONE latestSafeStart per case (des-engine.ts:416-419), computed as subtractWorkingTime(primaryDeadline, remainingAht, calendar) -- derived only from the Primary deadline. There is no separate absolute-deadline-derived urgency field, no 'Class A / Class B' split, and no compareClassA/compareClassB function anywhere in the codebase; the previous version of this file described a mechanism that does not exist."], "verified": "Confirmed by reading des-engine.ts directly (lines 175-274, 416-419), and re-derived independently against a concrete multi-day case set in scenario_T2_S5_multiday_backlog_corrected below (see its dispatch_proof)." },
+    "known_discrepancies": [
+      { "id": "GROSS-HC-ROUND-VS-CEIL", "finding": "CLAUDE.md's frozen Required-HC-chain decision #7 states Stage 4 Gross HC is '...per-category gross-up, then sum, then a single ceil'. The actual code (src/utils/hc-search.ts:226, `const grossHCTotal = Math.round(sumGrossHC);`) uses Math.round, not Math.ceil -- and this is not an accidental slip: the app's own UI prints the formula as `Gross_HC = round(sum gross_hc_c)` in three separate places (src/App.tsx:525, src/components/ResultsFlow.tsx:1021 and :1178, src/components/SensitivityFlow.tsx). Demonstrated concretely in scenario_T1_A2b below: sum=11.1111 rounds to 11 but would ceil to 12.", "resolution": "Human decision (2026-08-27): trust the code and the UI (round is correct, consistently shipped and labeled); CLAUDE.md's decision #7 wording is stale and should be corrected separately to say 'round' rather than 'ceil'. This file's trustedExpected values use round() and are NOT failures against current app output.", "action_needed": "Update CLAUDE.md's Required-HC Chain decision #7 wording from 'a single ceil' to 'a single round' (or equivalent) so the documented decision matches the shipped, UI-labeled behavior. Out of scope for this file -- flagged here for whoever owns CLAUDE.md." },
+      { "id": "NMIN-FLOOR-VS-CEIL", "finding": "docs/wfm/04-capacity-planning-and-sizing.md:37 documents `N_min = ceil( Workload_hours / (OccCap x agentHours x Adherence) )`, with an explicit invariant stated two lines later: 'below this, capacity is less than demand and backlog grows without bound'. The actual code (src/utils/hc-search.ts:89, own comment: 'Stage 2 analytical floor: floor(...)') uses Math.floor, not Math.ceil. This is not purely cosmetic: in scenario_T1_A4 below, floor(500/28.9)=17, and 17 agents' capacity (17*28.9=491.3h) is BELOW the 500h demand -- violating the doc's own stated invariant for what N_min is supposed to guarantee.", "resolution": "Human decision (2026-08-27): trust the current code (floor) as ground truth for this file pass/fail. CONFIRMED FINAL 2026-08-28 -- no further discussion: floor is correct behavior. docs/wfm/04-capacity-planning-and-sizing.md has been corrected to document floor and to explain that the Stage 3 CI-gated DES search, not the Stage 2 analytical ratio alone, is what actually guarantees feasibility -- the stale ceil/invariant wording is gone. See docs/wfm/07-known-defects-and-decisions.md D40 (resolved) for the full writeup.", "action_needed": "None -- resolved 2026-08-28 by correcting the documentation to match the code. No code change, zero effect on shipped output." }
+    ],
+    "known_asymmetries_documented_not_asserted": [
+      { "id": "PRIMARY-TARGET-SLACK-ASYMMETRY", "finding": "The Stage-3 search's CI acceptance gate compares against effectivePrimaryTarget(sla.primaryPct, sla) (hc-search.ts:278-287), which is slack-adjusted downward when sla.slaAcceptanceSlackEnabled is true (e.g. 80% official -> 76% effective at 5% slack). But DESResult.passesPrimarySLA (des-engine.ts:1347, exposed on every runBackofficeDES result) compares primaryAchievedPct against the RAW, un-slacked sla.primaryPct. A headcount can therefore be accepted by the search (mean/CI-bound >= 76%) while its own finalDESResult.passesPrimarySLA reports false (achieved% < 80%).", "why_not_asserted_numerically": "Reproducing this with an exact hand-derived percentage would require a case whose primaryAchievedPct lands strictly between the slack-adjusted floor and the raw target (e.g. between 76% and 80%), which depends on stochastic arrival-jitter dynamics this file's authors are not willing to hand-simulate without running the app (that would violate this file's own standard of independent derivation). Pinned here as a documented, code-verified mechanism (T1 -- effectivePrimaryTarget's arithmetic itself IS asserted, see scenario_T1_A7) rather than as a numerically-asserted end-to-end scenario." }
+    ]
+  },
+  "scenario_T0_work_and_case_conservation": {
+    "tier": "T0_invariant",
+    "authority": "Work conservation and case accounting are true for any correct discrete-event simulator: a completed case's handling minutes are drawn from a fixed, deterministic per-case AHT (confirmed: only arrival TIME is randomized in this engine, never service duration -- des-engine.ts:463 vs :466), so total handling minutes can never exceed offered workload, and every case is in exactly one of {completed, unfinished}.",
+    "description": "Runs the real DES at two headcounts on a 5-day, 800-case fixture and checks conservation properties that must hold regardless of dispatch order, apportionment, or any other engine-internal choice.",
+    "check": "invariant_conservation",
+    "inputs": {
+      "calendar": { "is24x7": false, "workingDays": [1,2,3,4,5], "dailyOpenHour": 9, "dailyOpenMinute": 0, "dailyCloseHour": 17, "dailyCloseMinute": 0, "holidays": [] },
+      "labor": { "dailyProductiveHours": 8, "adherencePct": 1, "workingDaysPerWeek": 5, "offDaysPerWeek": 2, "contractualHoursSource": "derived", "shifts": [] },
+      "categories": [
+        { "id": "c1", "name": "General", "ahtMinutes": 30, "shrinkagePct": 0.2, "priority": 1 }
+      ],
+      "sla": { "primaryPct": 80, "primaryWindow": 8, "primaryUnit": "hours", "boAsaEnabled": false, "boAsaTarget": 60, "boAsaUnit": "minutes", "asaClockBasis": "business_window", "clockBasis": "business_time", "clockStartPolicy": "arrival", "occupancyCapEnabled": false, "occupancyCapPct": 85 },
+      "openingWIP": [],
+      "intervals": [
+        { "start": "2026-10-05T09:00:00", "end": "2026-10-05T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-06T09:00:00", "end": "2026-10-06T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-07T09:00:00", "end": "2026-10-07T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-08T09:00:00", "end": "2026-10-08T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-09T09:00:00", "end": "2026-10-09T09:30:00", "volume": 160, "category": "General" }
+      ]
+    },
+    "totalOfferedWorkloadMinutes": 24000,
+    "variants": [
+      { "name": "HC=7", "operationalHC": 7, "seed": 777 },
+      { "name": "HC=11", "operationalHC": 11, "seed": 12345 }
+    ],
+    "trustedExpected": {
+      "per_variant": {
+        "HC=7": { "totalHandlingMinutes": 24000, "completedCases": 800, "unfinishedCases": 0, "totalCases": 800 },
+        "HC=11": { "totalHandlingMinutes": 24000, "completedCases": 800, "unfinishedCases": 0, "totalCases": 800 }
+      },
+      "assert_for_every_variant": ["totalHandlingMinutes <= totalOfferedWorkloadMinutes (24000)","unfinishedCases === 0 implies totalHandlingMinutes === totalOfferedWorkloadMinutes exactly","completedCases + unfinishedCases === totalCases","totalCases === sum(intervals[].volume) === 800","0 <= primaryAchievedPct <= 100","occupancyPct === Math.min(100, rawOccupancyPct)"]
+    }
+  },
+  "scenario_T0_primary_sla_monotonicity_sweep": {
+    "tier": "T0_invariant",
+    "authority": "More agents can never make on-time completion strictly worse when every other input is held fixed and the same seed (hence the same case set, via Common Random Numbers) is reused -- adding capacity can only help or be neutral. This must hold for ANY correct implementation, not just this one.",
+    "description": "Sweeps operationalHC from 7 to 14 on the same fixture and seed used in scenario_T0_work_and_case_conservation, asserting primaryAchievedPct is non-decreasing at every step. Includes five already-independently-verified points (see scenario_T2_S5) as a sanity cross-check within the sweep, not as its own derivation.",
+    "check": "invariant_monotonic_sweep",
+    "inputs": {
+      "calendar": { "is24x7": false, "workingDays": [1,2,3,4,5], "dailyOpenHour": 9, "dailyOpenMinute": 0, "dailyCloseHour": 17, "dailyCloseMinute": 0, "holidays": [] },
+      "labor": { "dailyProductiveHours": 8, "adherencePct": 1, "workingDaysPerWeek": 5, "offDaysPerWeek": 2, "contractualHoursSource": "derived", "shifts": [] },
+      "categories": [
+        { "id": "c1", "name": "General", "ahtMinutes": 30, "shrinkagePct": 0.2, "priority": 1 }
+      ],
+      "sla": { "primaryPct": 80, "primaryWindow": 8, "primaryUnit": "hours", "boAsaEnabled": false, "boAsaTarget": 60, "boAsaUnit": "minutes", "asaClockBasis": "business_window", "clockBasis": "business_time", "clockStartPolicy": "arrival", "occupancyCapEnabled": false, "occupancyCapPct": 85 },
+      "openingWIP": [],
+      "intervals": [
+        { "start": "2026-10-05T09:00:00", "end": "2026-10-05T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-06T09:00:00", "end": "2026-10-06T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-07T09:00:00", "end": "2026-10-07T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-08T09:00:00", "end": "2026-10-08T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-09T09:00:00", "end": "2026-10-09T09:30:00", "volume": 160, "category": "General" }
+      ]
+    },
+    "seed": 777,
+    "field": "primaryAchievedPct",
+    "hcSweepRange": [7,14],
+    "trustedExpected": {
+      "monotone_non_decreasing": true,
+      "knownPoints": { "7": 24, "8": 40, "9": 70, "10": 100, "11": 100 }
+    }
+  },
+  "scenario_T0_determinism": {
+    "tier": "T0_invariant",
+    "authority": "The engine's only source of randomness is a seeded PRNG consumed exclusively for intra-interval arrival-time jitter (des-engine.ts:466); AHT is deterministic per case (des-engine.ts:463). Two runs with an identical seed and identical inputs must therefore be byte-identical on every headline field -- any divergence is a real ordering/tie-break bug (e.g. unstable Map/Set iteration), not tolerable noise.",
+    "description": "Runs runBackofficeDES twice with identical inputs and seed, asserts exact equality on the fields a planner reads.",
+    "check": "invariant_determinism",
+    "inputs": {
+      "calendar": { "is24x7": false, "workingDays": [1,2,3,4,5], "dailyOpenHour": 9, "dailyOpenMinute": 0, "dailyCloseHour": 17, "dailyCloseMinute": 0, "holidays": [] },
+      "labor": { "dailyProductiveHours": 8, "adherencePct": 1, "workingDaysPerWeek": 5, "offDaysPerWeek": 2, "contractualHoursSource": "derived", "shifts": [] },
+      "categories": [
+        { "id": "c1", "name": "General", "ahtMinutes": 30, "shrinkagePct": 0.2, "priority": 1 }
+      ],
+      "sla": { "primaryPct": 80, "primaryWindow": 8, "primaryUnit": "hours", "boAsaEnabled": false, "boAsaTarget": 60, "boAsaUnit": "minutes", "asaClockBasis": "business_window", "clockBasis": "business_time", "clockStartPolicy": "arrival", "occupancyCapEnabled": false, "occupancyCapPct": 85 },
+      "openingWIP": [],
+      "operationalHC": 11,
+      "seed": 12345,
+      "intervals": [
+        { "start": "2026-10-05T09:00:00", "end": "2026-10-05T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-06T09:00:00", "end": "2026-10-06T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-07T09:00:00", "end": "2026-10-07T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-08T09:00:00", "end": "2026-10-08T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-09T09:00:00", "end": "2026-10-09T09:30:00", "volume": 160, "category": "General" }
+      ]
+    },
+    "fieldsMustBeIdentical": ["totalHandlingMinutes","occupancyPct","rawOccupancyPct","primaryAchievedPct","completedCases","unfinishedCases","totalCases"]
+  },
+  "scenario_T0_house_monotonicity_sweep": {
+    "tier": "T0_invariant",
+    "authority": "A divisor (Webster/Sainte-Lague) apportionment method is house-monotone BY CONSTRUCTION: seats are only ever added, never reassigned or removed, as N increases by 1. This is a property of the algorithm class, not this codebase specifically -- CLAUDE.md decision #10 requires this codebase to use exactly such a method (never largest-remainder/Hamilton) precisely because Hamilton is NOT house-monotone and was measured to produce 14 monotonicity violations and 21 starved silos over N=1..200 on real data.",
+    "description": "Calls the real allocateAgentsToCategories at every N from 1 to 200 for a fixed 3-category workload and asserts no category's seat count ever decreases when N increases by 1.",
+    "check": "invariant_house_monotonic_sweep",
+    "workloadMinutes": { "CategoryA": 100, "CategoryB": 50, "CategoryC": 30 },
+    "nRange": [1,200],
+    "trustedExpected": { "no_category_ever_decreases_as_n_increases": true, "seats_sum_to_n_at_every_step": true }
+  },
+  "scenario_T1_A2a_grosshc_harmonic_blend": {
+    "tier": "T1_domain_algebra",
+    "authority": "Hand-derived from the frozen Stage-4 chain (CLAUDE.md decisions #6-#7: per-category gross-up, harmonic -- not arithmetic -- effective-shrinkage blend, sum, then round) applied to a deliberately equal-split, widely-different-shrinkage input, computed BEFORE looking at the engine's output. Chosen specifically so the harmonic and arithmetic blends diverge, discriminating a real implementation bug (arithmetic blending) from correct behavior.",
+    "description": "Two categories with equal 50/50 operational-HC share (CatA 5, CatB 5, via equal workload) but very different shrinkage (10% vs 50%). Correct (harmonic, per-category-then-sum) total: 5/0.9 + 5/0.5 = 5.5556 + 10 = 15.5556 -> round 16. An arithmetic-blended implementation would average the shrinkage first (mean 30%) and compute 10/0.7 = 14.2857 -> round 14, a DIFFERENT and wrong total -- this scenario would catch that bug.",
+    "check": "calculateStaffingRequirement",
+    "inputs": {
+      "operationalHC": 10,
+      "categories": [
+        { "id": "a", "name": "CatA", "ahtMinutes": 30, "shrinkagePct": 0.1, "priority": 1 },
+        { "id": "b", "name": "CatB", "ahtMinutes": 30, "shrinkagePct": 0.5, "priority": 1 }
+      ],
+      "intervals": [
+        { "start": "2026-10-05T09:00:00", "end": "2026-10-05T09:30:00", "volume": 100, "category": "CatA" },
+        { "start": "2026-10-05T09:00:00", "end": "2026-10-05T09:30:00", "volume": 100, "category": "CatB" }
+      ],
+      "openingWIP": [],
+      "calendar": { "is24x7": false, "workingDays": [1,2,3,4,5], "dailyOpenHour": 9, "dailyOpenMinute": 0, "dailyCloseHour": 17, "dailyCloseMinute": 0, "holidays": [] },
+      "labor": { "dailyProductiveHours": 8, "adherencePct": 1, "workingDaysPerWeek": 5, "offDaysPerWeek": 2, "contractualHoursSource": "derived", "shifts": [] },
+      "horizonStart": "2026-10-05T09:00:00",
+      "horizonEnd": "2026-10-09T17:00:00",
+      "bindingConstraint": "test_stage4_harmonic_blend"
+    },
+    "workingOut": "workingDaysInHorizon=5 (Mon09:00->Fri17:00). agentHours=8*5=40. offPct=0 (labor.offDaysPerWeek=2 == calendarClosedDays=2, so extraOffDays=0) => operationalHCWithOff=10. Each category workloadHours=100*30/60=50, total=100, share=0.5 each => opHCCat=10*0.5=5 each. grossHC_A=5/0.9=5.55556, grossHC_B=5/0.5=10.0, sumGrossHC=15.55556 => grossHCTotal=round(15.55556)=16. harmonicDenomSum=0.5/0.9+0.5/0.5=1.55556 => effectiveShrinkagePct=1-1/1.55556=0.35714 => rounded to 3dp = 0.357. requiredProductiveHoursTotal=5*40+5*40=400. fteGrossSum=5.55556+10.0=15.55556 => 15.56. fteNet=400/40=10.",
+    "trustedExpected": {
+      "operationalHCWithOff": 10,
+      "offPct": 0,
+      "grossHCTotal": 16,
+      "effectiveShrinkagePct": 0.357,
+      "fteGrossHeadline": 15.56,
+      "fteNet": 10,
+      "requiredProductiveHoursTotal": 400,
+      "contractualProductiveHours": 40,
+      "perCategory": {
+        "CatA": { "operationalHC": 5, "grossHC": 5.56, "workloadHours": 50, "categoryShare": 0.5 },
+        "CatB": { "operationalHC": 5, "grossHC": 10, "workloadHours": 50, "categoryShare": 0.5 }
+      }
+    }
+  },
+  "scenario_T1_A2b_grosshc_round_not_ceil": {
+    "tier": "T1_domain_algebra",
+    "authority": "Same Stage-4 chain, deliberately chosen so the pooled fractional sum has a fractional part BELOW 0.5 (11.1111), making round() and ceil() diverge (11 vs 12) -- a live, numeric demonstration backing known_discrepancies.GROSS-HC-ROUND-VS-CEIL rather than just citing the source line. Also demonstrates a sanity property that must hold for ANY correct weighted blend: when every category shares the SAME shrinkage rate, the harmonic-blended effective rate must equal that same rate exactly, regardless of the workload split.",
+    "description": "Two categories, both 10% shrinkage, unequal 4/6 operational-HC split (via unequal workload volumes). Correct total: 4/0.9 + 6/0.9 = 4.4444 + 6.6667 = 11.1111 -> round 11 (NOT ceil's 12). effectiveShrinkagePct must land at exactly 0.100 (uniform-rate sanity check).",
+    "check": "calculateStaffingRequirement",
+    "inputs": {
+      "operationalHC": 10,
+      "categories": [
+        { "id": "c", "name": "CatC", "ahtMinutes": 30, "shrinkagePct": 0.1, "priority": 1 },
+        { "id": "d", "name": "CatD", "ahtMinutes": 30, "shrinkagePct": 0.1, "priority": 1 }
+      ],
+      "intervals": [
+        { "start": "2026-10-05T09:00:00", "end": "2026-10-05T09:30:00", "volume": 200, "category": "CatC" },
+        { "start": "2026-10-05T09:00:00", "end": "2026-10-05T09:30:00", "volume": 300, "category": "CatD" }
+      ],
+      "openingWIP": [],
+      "calendar": { "is24x7": false, "workingDays": [1,2,3,4,5], "dailyOpenHour": 9, "dailyOpenMinute": 0, "dailyCloseHour": 17, "dailyCloseMinute": 0, "holidays": [] },
+      "labor": { "dailyProductiveHours": 8, "adherencePct": 1, "workingDaysPerWeek": 5, "offDaysPerWeek": 2, "contractualHoursSource": "derived", "shifts": [] },
+      "horizonStart": "2026-10-05T09:00:00",
+      "horizonEnd": "2026-10-09T17:00:00",
+      "bindingConstraint": "test_stage4_round_not_ceil"
+    },
+    "workingOut": "workloadHours: CatC=200*30/60=100, CatD=300*30/60=150, total=250. share_C=0.4, share_D=0.6. operationalHCWithOff=10 (offPct=0). opHCCat_C=4, opHCCat_D=6. grossHC_C=4/0.9=4.44444, grossHC_D=6/0.9=6.66667, sumGrossHC=11.11111 => grossHCTotal=round(11.11111)=11 (ceil would give 12 -- this is the discriminator). harmonicDenomSum=0.4/0.9+0.6/0.9=1/0.9=1.11111 => effectiveShrinkagePct=1-1/1.11111=1-0.9=0.100 exactly.",
+    "trustedExpected": {
+      "grossHCTotal": 11,
+      "grossHCTotal_would_be_under_ceil_not_used_by_app": 12,
+      "effectiveShrinkagePct": 0.1,
+      "fteGrossHeadline": 11.11,
+      "fteNet": 10,
+      "requiredProductiveHoursTotal": 400,
+      "perCategory": {
+        "CatC": { "operationalHC": 4, "grossHC": 4.44, "categoryShare": 0.4 },
+        "CatD": { "operationalHC": 6, "grossHC": 6.67, "categoryShare": 0.6 }
+      }
+    }
+  },
+  "scenario_T1_A2c_extraoff_coverage_ratio": {
+    "tier": "T1_domain_algebra",
+    "authority": "Hand-derived from the frozen Stage-4 chain's OFF adjustment (src/utils/hc-search.ts computeExtraOffPct + calculateStaffingRequirement), applied BEFORE looking at the engine's output. Agents only supply capacity on calendar-OPEN days, so the seat-to-roster multiplier is the coverage ratio openDaysPerWeek/coverageDays, where coverageDays = openDaysPerWeek - extraOffDays -- NOT (1 + extraOffDays/7), which divides by the calendar week instead of the open week. Chosen with a 6-open/2-off configuration (the canonical example in PRD.md Stage 4) specifically because the two formulas diverge there: (1+1/7)=1.142857 vs the correct 6/5=1.2, so this scenario discriminates the real fix from the pre-2026-08-28 defect it replaced.",
+    "description": "Same two-category 50/50-share, 10%/50%-shrinkage shape as scenario_T1_A2a, but the calendar is open 6 days/week (Saturday added) while labor keeps 2 off days/week -- one of those off days falls on a day the business is already closed (irrelevant, calendarClosedDays=1), leaving exactly 1 extra off day beyond calendar closure. Correct: coverageDays=6-1=5, roster uplift=6/5-1=20% (NOT offPct=1/7=14.3%), Net Op=floor(10*6/5)=12 exactly (chosen to divide evenly, isolating the ratio-vs-/7 defect from the separate floor-vs-fractional-multiplier float-precision hazard, which is covered instead by scripts/verify-sizing-fixes.mts Suite D40.2). Also cross-checks that effectiveShrinkagePct is IDENTICAL to scenario_T1_A2a's 0.357 despite the non-zero roster uplift -- OFF must never mix into the shrinkage blend.",
+    "check": "calculateStaffingRequirement",
+    "inputs": {
+      "operationalHC": 10,
+      "categories": [
+        { "id": "a", "name": "CatA", "ahtMinutes": 30, "shrinkagePct": 0.1, "priority": 1 },
+        { "id": "b", "name": "CatB", "ahtMinutes": 30, "shrinkagePct": 0.5, "priority": 1 }
+      ],
+      "intervals": [
+        { "start": "2026-10-05T09:00:00", "end": "2026-10-05T09:30:00", "volume": 100, "category": "CatA" },
+        { "start": "2026-10-05T09:00:00", "end": "2026-10-05T09:30:00", "volume": 100, "category": "CatB" }
+      ],
+      "openingWIP": [],
+      "calendar": { "is24x7": false, "workingDays": [1,2,3,4,5,6], "dailyOpenHour": 9, "dailyOpenMinute": 0, "dailyCloseHour": 17, "dailyCloseMinute": 0, "holidays": [] },
+      "labor": { "dailyProductiveHours": 8, "adherencePct": 1, "workingDaysPerWeek": 5, "offDaysPerWeek": 2, "contractualHoursSource": "derived", "shifts": [] },
+      "horizonStart": "2026-10-05T09:00:00",
+      "horizonEnd": "2026-10-09T17:00:00",
+      "bindingConstraint": "test_stage4_extraoff_coverage_ratio"
+    },
+    "workingOut": "openDaysPerWeek=6 (workingDays length), calendarClosedDays=7-6=1. labor.offDaysPerWeek=2 => extraOffDays=max(0,2-1)=1. coverageDays=6-1=5. rosterUpliftPct=6/5-1=0.2 (NOT the old offPct=1/7=0.142857, which is kept only as a display fraction). operationalHCWithOff=floor(10*6/5)=floor(12)=12. workingDaysInHorizon=5 (Mon09:00->Fri17:00, same horizon as A2a -- the calendar's added Saturday isn't reached by this horizon, so it affects only the OFF math, not agentHours). agentHours=8*5=40. Each category workloadHours=100*30/60=50, share=0.5 => opHCCat=12*0.5=6 each. grossHC_A=6/0.9=6.66667, grossHC_B=6/0.5=12.0, sumGrossHC=18.66667 => grossHCTotal=round(18.66667)=19. harmonicDenomSum=0.5/0.9+0.5/0.5=1.55556 => effectiveShrinkagePct=1-1/1.55556=0.35714 => 0.357 -- IDENTICAL to A2a's 0.357, confirming OFF is not mixed into shrinkage even though the roster uplift here is 20% vs A2a's 0%. reqProdHrsCat=6*8*5=240 each => total=480. fteNet=480/40=12 (equals Net Op). fteGrossSum=6.66667+12.0=18.66667 => 18.67.",
+    "trustedExpected": {
+      "operationalHC": 10,
+      "extraOffDays": 1,
+      "openDaysPerWeek": 6,
+      "coverageDays": 5,
+      "rosterUpliftPct": 0.2,
+      "rosterInfeasible": false,
+      "operationalHCWithOff": 12,
+      "grossHCTotal": 19,
+      "effectiveShrinkagePct": 0.357,
+      "fteGrossHeadline": 18.67,
+      "fteNet": 12,
+      "requiredProductiveHoursTotal": 480,
+      "contractualProductiveHours": 40,
+      "perCategory": {
+        "CatA": { "operationalHC": 6, "grossHC": 6.67, "workloadHours": 50, "categoryShare": 0.5 },
+        "CatB": { "operationalHC": 6, "grossHC": 12, "workloadHours": 50, "categoryShare": 0.5 }
+      }
+    }
+  },
+  "scenario_T1_A3_webster_apportionment": {
+    "tier": "T1_domain_algebra",
+    "authority": "Hand-traced against the actual divisor-method algorithm as implemented (des-engine.ts:316-355): Phase 1 seeds exactly one seat to every category with nonzero workload (a starvation guard specific to this implementation, not textbook Webster, noted explicitly here rather than glossed over), Phase 2 assigns remaining seats one at a time by highest quotient workload/(2*seats+1).",
+    "description": "Workloads [A:100, B:50, C:30] minutes. At N=5: Phase 1 gives each of A/B/C one seat (3 used, 2 remain); Phase 2 quotients favor A twice (100/3=33.3, then 100/5=20, both exceeding B's 50/3=16.7 and C's 30/3=10) -> final {A:3,B:1,C:1}. At N=6 (recomputed from scratch, not incrementally): Phase 1 same 3 seats; Phase 2's three remaining seats go A(100/3=33.3), A(100/5=20), then B(50/3=16.7 beats A's 100/7=14.3) -> final {A:3,B:2,C:1}. Confirms house-monotonicity between N=5 and N=6 (B:1->2, nothing decreases) as a concrete instance of scenario_T0_house_monotonicity_sweep's swept property.",
+    "check": "allocateAgentsToCategories",
+    "workloadMinutes": { "A": 100, "B": 50, "C": 30 },
+    "variants": [
+      {
+        "n": 5,
+        "expectedSeats": { "A": 3, "B": 1, "C": 1 }
+      },
+      {
+        "n": 6,
+        "expectedSeats": { "A": 3, "B": 2, "C": 1 }
+      }
+    ]
+  },
+  "scenario_T1_A4_analytical_floor_formula": {
+    "tier": "T1_domain_algebra",
+    "authority": "Direct hand-application of computeAnalyticalNMin's own closed-form (src/utils/hc-search.ts:71-90), cross-checked against docs/wfm/04-capacity-planning-and-sizing.md's Stage-2 description -- see known_discrepancies.NMIN-FLOOR-VS-CEIL for where the doc and the shipped code disagree (doc says ceil, code says floor; this scenario asserts the CODE's floor() behavior as ground truth per the 2026-08-27 human decision recorded there, NOT because floor is independently proven correct).",
+    "description": "Calls computeAnalyticalNMin directly (no search, no simulation) with and without a workload-reduction adjustment.",
+    "check": "computeAnalyticalNMin",
+    "baseParams": {
+      "totalWorkloadHours": 500,
+      "labor": { "dailyProductiveHours": 8, "adherencePct": 0.85, "contractualHoursSource": "derived" },
+      "workingDaysInHorizon": 5,
+      "occupancyCapEnabled": true,
+      "occupancyCapPct": 85
+    },
+    "workingOut": "oMax=clamp(85,50,100)/100=0.85. agentHours=8*5=40. effectiveAdherence=clamp(0.85,0.1,1.0)=0.85. denominator=0.85*40*0.85=28.9. No reduction: 500/28.9=17.301 -> floor=17 (max(1,.)=17). With 20% reduction: effectiveWorkloadHours=500*0.8=400, 400/28.9=13.841 -> floor=13.",
+    "variants": [
+      {
+        "name": "no_reduction",
+        "paramsOverride": {},
+        "expected": 17
+      },
+      {
+        "name": "with_20pct_reduction",
+        "paramsOverride": { "workloadReductionEnabled": true, "workloadReductionPct": 20 },
+        "expected": 13
+      }
+    ]
+  },
+  "scenario_T1_A5_search_floor_binding": {
+    "tier": "T1_domain_algebra",
+    "authority": "Hand-derived from computeAnalyticalNMin's formula for the floor, combined with scenario_T2_S5's independently-proven per-HC pass table (same fixture) to determine whether the search stops immediately at that floor.",
+    "description": "Reuses the 5-day/160-per-day/AHT-30 fixture. totalWorkloadHours=400, workingDaysInHorizon=5, agentHours=40, no occupancy cap => nMinAnalytical=floor(400/40)=10. scenario_T2_S5 independently proves HC=10 already achieves 100% primaryAchievedPct >= the 80% target, so searchOptimalHC's startN=10 passes immediately with no leap-up/walk-down -- recommendedHC=10=nMinAnalytical, bindingConstraintType='analytical_baseline'.",
+    "check": "searchOptimalHC",
+    "inputs": {
+      "calendar": { "is24x7": false, "workingDays": [1,2,3,4,5], "dailyOpenHour": 9, "dailyOpenMinute": 0, "dailyCloseHour": 17, "dailyCloseMinute": 0, "holidays": [] },
+      "labor": { "dailyProductiveHours": 8, "adherencePct": 1, "workingDaysPerWeek": 5, "offDaysPerWeek": 2, "contractualHoursSource": "derived", "shifts": [] },
+      "categories": [
+        { "id": "c1", "name": "General", "ahtMinutes": 30, "shrinkagePct": 0.2, "priority": 1 }
+      ],
+      "sla": { "primaryPct": 80, "primaryWindow": 8, "primaryUnit": "hours", "boAsaEnabled": false, "boAsaTarget": 60, "boAsaUnit": "minutes", "asaClockBasis": "business_window", "clockBasis": "business_time", "clockStartPolicy": "arrival", "occupancyCapEnabled": false, "occupancyCapPct": 85 },
+      "openingWIP": [],
+      "intervals": [
+        { "start": "2026-10-05T09:00:00", "end": "2026-10-05T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-06T09:00:00", "end": "2026-10-06T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-07T09:00:00", "end": "2026-10-07T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-08T09:00:00", "end": "2026-10-08T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-09T09:00:00", "end": "2026-10-09T09:30:00", "volume": 160, "category": "General" }
+      ],
+      "userMaxHC": 50,
+      "seed": 777,
+      "replications": 1
+    },
+    "trustedExpected": { "nMinAnalytical": 10, "recommendedHC": 10, "isInfeasible": false, "bindingConstraintType": "analytical_baseline", "bindingConstraintDescription": "Steady-State Workload Capacity Baseline (N_min)" }
+  },
+  "scenario_T1_A6_infeasible_at_cap": {
+    "tier": "T1_domain_algebra",
+    "authority": "Hand-derived from computeAnalyticalNMin's formula and the exact baselineExceedsCap branch condition/message template read directly from src/utils/hc-search.ts:983-1006 (quoted verbatim, not paraphrased).",
+    "description": "A single massive-volume interval whose analytical floor (62) exceeds userMaxHC (50), landing in the baselineExceedsCap infeasibility branch. Confirmed findImpossibleCategories does NOT trigger first (30min AHT <= 480min window), so this genuinely tests the intended branch.",
+    "check": "searchOptimalHC",
+    "inputs": {
+      "calendar": { "is24x7": false, "workingDays": [1,2,3,4,5], "dailyOpenHour": 9, "dailyOpenMinute": 0, "dailyCloseHour": 17, "dailyCloseMinute": 0, "holidays": [] },
+      "labor": { "dailyProductiveHours": 8, "adherencePct": 1, "workingDaysPerWeek": 5, "offDaysPerWeek": 2, "contractualHoursSource": "derived", "shifts": [] },
+      "categories": [
+        { "id": "c1", "name": "General", "ahtMinutes": 30, "shrinkagePct": 0.2, "priority": 1 }
+      ],
+      "sla": { "primaryPct": 80, "primaryWindow": 8, "primaryUnit": "hours", "boAsaEnabled": false, "boAsaTarget": 60, "boAsaUnit": "minutes", "asaClockBasis": "business_window", "clockBasis": "business_time", "clockStartPolicy": "arrival", "occupancyCapEnabled": false, "occupancyCapPct": 85 },
+      "openingWIP": [],
+      "intervals": [
+        { "start": "2026-10-05T09:00:00", "end": "2026-10-05T09:30:00", "volume": 1000, "category": "General" }
+      ],
+      "userMaxHC": 50,
+      "seed": 777,
+      "replications": 1
+    },
+    "workingOut": "totalWorkloadHours=1000*30/60=500. horizon=[Mon09:00,Mon09:30) => workingDaysInHorizon=1. agentHours=8*1=8. oMax=1 (cap disabled). nMinAnalytical=floor(500/8)=62. searchCap=max(1,50)=50. 62>50 => baselineExceedsCap=true.",
+    "trustedExpected": { "nMinAnalytical": 62, "isInfeasible": true, "recommendedHC": null, "primaryDrivenHC": 50, "bindingConstraintType": "analytical_baseline", "bindingConstraintDescription": "Infeasible at User Cap (N = 50)", "infeasibleReason": "Steady-state workload baseline N_min (62 agents) strictly exceeds the configured user max search ceiling of 50 agents. The required workload cannot be completed within this headcount cap. Increase userMaxHC or adjust volume / AHT assumptions." }
+  },
+  "scenario_T1_A7_effective_primary_target_slack": {
+    "tier": "T1_domain_algebra",
+    "authority": "Direct call to the pure, exported function effectivePrimaryTarget (src/utils/hc-search.ts:278-287) -- no simulation, no engine internals, just its own documented arithmetic (official x (1-slack/100), rounded to 1 decimal).",
+    "description": "Pins the CI-gate's slack-adjusted acceptance floor and documents the known_asymmetries_documented_not_asserted.PRIMARY-TARGET-SLACK-ASYMMETRY: this adjusted value is what the search's CI gate compares against, while DESResult.passesPrimarySLA (des-engine.ts:1347) always compares against the raw, un-adjusted officialPct.",
+    "check": "effectivePrimaryTarget",
+    "variants": [
+      {
+        "name": "slack_disabled",
+        "officialPct": 80,
+        "sla": { "slaAcceptanceSlackEnabled": false },
+        "expected": 80
+      },
+      {
+        "name": "slack_5pct",
+        "officialPct": 80,
+        "sla": { "slaAcceptanceSlackEnabled": true, "slaAcceptanceSlackPct": 5 },
+        "expected": 76
+      },
+      {
+        "name": "slack_20pct",
+        "officialPct": 80,
+        "sla": { "slaAcceptanceSlackEnabled": true, "slaAcceptanceSlackPct": 20 },
+        "expected": 64
+      }
+    ]
+  },
+  "scenario_T2_S5_multiday_backlog_corrected": {
+    "tier": "T2_hand_traced_des",
+    "authority": "Fully re-derived this session with the CORRECT deadline model, after the original derivation was found to rest on a false premise (see dispatch_proof below). The 24.0/40.0/70.0/100.0/100.0 pass-rate numbers are UNCHANGED from the file's previous version, but their justification is entirely new and independently re-verified step by step, not copied forward. Independent cross-check: the existing scripts/verify-fixes.mts 'TRUSTED-SOURCE' suite (lines 2501-2573) asserts these same 5 numbers, but note it shares this scenario's exact fixture and seed, so it is a same-fixture regression lock, NOT independent corroboration -- it could not have caught the original false premise either. The only genuinely independent check these percentages have ever had is the hand-trace below.",
+    "description": "Five identical days of 160 arrivals (30-min AHT, 09:00-09:30 window) against a Mon-Fri 09:00-17:00 calendar and an 8-business-hour Primary SLA. Deliberately saturated (fresh volume 160/day exceeds every tested capacity below HC=10) so a deterministic day-by-day backlog recurrence applies.",
+    "false_premise_in_original_file": "The file previously claimed 'a Day-1 case has primaryDeadline = Day-1 close (17:00)'. This is FALSE for essentially all 160 Day-1 cases: addWorkingTime(Mon 09:20, 480min, calendar) = Tue 09:20 (traced by hand against calendar.ts:187-243), not Mon 17:00. Only an arrival at exactly 09:00:00.000 gets a same-day-close deadline, which the seeded PRNG produces with probability ~1/1,800,000 per case (offsets are uniform over a 1,800,000ms window). The deadline is actually arrival + 1 business day (same clock time, next open day).",
+    "dispatch_proof": ["1. Every case's deadline = addWorkingTime(arrival, 480min, calendar). For an arrival at time T on day D (T > 09:00:00.000), this lands at time T on day D+1 (next open day) -- i.e. deadlines fall in [09:00:00.000, 09:29:59.999] on the NEXT open day, mirroring the arrival spread.","2. The earliest ANY agent can complete a case queued into a later day is that day's open (09:00) + 30min AHT = 09:30:00.000 at best, since every agent is occupied from open. Every backlog case's deadline is <= 09:29:59.999 on that same day. Therefore: a case NOT processed on its arrival day can NEVER meet its deadline, at ANY headcount -- backlog always fails.","3. EDF dispatch (compareByUrgency, latestSafeStart ascending) puts backlog ahead of same-day fresh work: a Day-1 backlog case's latestSafeStart is subtractWorkingTime(Tue ~09:20, 30min) = Mon ~16:50 (day 1), strictly earlier than a Day-2 fresh case's latestSafeStart = subtractWorkingTime(Wed ~09:20, 30min) = Tue ~16:40 (day 2). Backlog is dispatched first, confirmed via the actual comparator, not assumed.","4. Combining 1-3: the operative rule is 'a case passes Primary SLA iff it is fully processed on its own arrival day' -- which reproduces the ORIGINAL recurrence's pass counts exactly, even though the original's stated REASON (same-day-close deadline) was wrong. Let cap=HC*16 (16 cases/agent/day exactly, since 480min/30min AHT has no remainder), F=160 daily fresh arrivals, B_d=backlog entering day d (B_1=0): capacity clears backlog first, remainder (up to F) goes to fresh cases same-day (these pass); B_(d+1)=B_d+F-cap.","5. Seed-invariance, now PROVEN rather than asserted: every arrival offset in [0,30min) yields a deadline in [next-open, next-open+30min), and completion is either same-day (unconditional pass, comfortably inside the deadline) or >= next-open+30min (unconditional fail, per step 2). The pass/fail outcome depends ONLY on which day a case is processed, never on its specific offset within that day -- so the result is identical for every seed. QED."],
+    "hand_worked_table": { "HC=7 (cap=112/day)": "fresh-pass per day: [112,64,16,0,0] -> 192/800 = 24.0%", "HC=8 (cap=128/day)": "fresh-pass per day: [128,96,64,32,0] -> 320/800 = 40.0%", "HC=9 (cap=144/day)": "fresh-pass per day: [144,128,112,96,80] -> 560/800 = 70.0%", "HC=10 (cap=160/day)": "fresh-pass per day: [160,160,160,160,160] -> 800/800 = 100.0% (cap=F, no backlog ever forms)", "HC=11 (cap=176/day)": "same as HC=10: 100.0% (surplus capacity)" },
+    "check": "runBackofficeDES",
+    "inputs": {
+      "calendar": { "is24x7": false, "workingDays": [1,2,3,4,5], "dailyOpenHour": 9, "dailyOpenMinute": 0, "dailyCloseHour": 17, "dailyCloseMinute": 0, "holidays": [] },
+      "labor": { "dailyProductiveHours": 8, "adherencePct": 1, "workingDaysPerWeek": 5, "offDaysPerWeek": 2, "contractualHoursSource": "derived", "shifts": [] },
+      "categories": [
+        { "id": "c1", "name": "General", "ahtMinutes": 30, "shrinkagePct": 0.2, "priority": 1 }
+      ],
+      "sla": { "primaryPct": 80, "primaryWindow": 8, "primaryUnit": "hours", "boAsaEnabled": false, "boAsaTarget": 60, "boAsaUnit": "minutes", "asaClockBasis": "business_window", "clockBasis": "business_time", "clockStartPolicy": "arrival", "occupancyCapEnabled": false, "occupancyCapPct": 85 },
+      "openingWIP": [],
+      "intervals": [
+        { "start": "2026-10-05T09:00:00", "end": "2026-10-05T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-06T09:00:00", "end": "2026-10-06T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-07T09:00:00", "end": "2026-10-07T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-08T09:00:00", "end": "2026-10-08T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-09T09:00:00", "end": "2026-10-09T09:30:00", "volume": 160, "category": "General" }
+      ]
+    },
+    "seed": 777,
+    "per_hc_table": {
+      "7": { "primaryAchievedPct": 24, "totalHandlingMinutes": 24000, "completedCases": 800, "totalCases": 800, "occupancyPct": 100, "rawOccupancyPct": 142.9 },
+      "8": { "primaryAchievedPct": 40, "totalHandlingMinutes": 24000, "completedCases": 800, "totalCases": 800, "occupancyPct": 100, "rawOccupancyPct": 125 },
+      "9": { "primaryAchievedPct": 70, "totalHandlingMinutes": 24000, "completedCases": 800, "totalCases": 800, "occupancyPct": 100, "rawOccupancyPct": 111.1 },
+      "10": { "primaryAchievedPct": 100, "totalHandlingMinutes": 24000, "completedCases": 800, "totalCases": 800, "occupancyPct": 100, "rawOccupancyPct": 100 },
+      "11": { "primaryAchievedPct": 100, "totalHandlingMinutes": 24000, "completedCases": 800, "totalCases": 800, "occupancyPct": 90.9, "rawOccupancyPct": 90.9 }
+    },
+    "trustedExpected_search": { "userMaxHC": 50, "seed": 777, "replications": 1, "recommendedHC": 10 }
+  },
+  "scenario_T3_C1a_occupancy_convention_adherence_1": {
+    "tier": "T3_characterization",
+    "authority": "This is a deliberate, documented DESIGN CONVENTION (docs/wfm/07-known-defects-and-decisions.md: D19 fixed, D2 re-examined 2026-08-27 and upheld as not-a-bug), not a mathematical necessity -- occupancy is demand divided by PLANNED-horizon capacity (so it can legitimately exceed 100%, expressing overload magnitude), clamped for display only. Pinned here as a regression lock, cross-corroborated by the pre-existing scripts/verify-fixes.mts 'BUG-OCC-ROOT' suite (same fixture, same seeds, same numbers).",
+    "description": "Comfortably-staffed run (HC=11 against a ~10-agent requirement, ~10% slack) so every case completes same-day with zero cross-day spillover, making the occupancy arithmetic exactly predictable by hand.",
+    "check": "runBackofficeDES",
+    "inputs": {
+      "calendar": { "is24x7": false, "workingDays": [1,2,3,4,5], "dailyOpenHour": 9, "dailyOpenMinute": 0, "dailyCloseHour": 17, "dailyCloseMinute": 0, "holidays": [] },
+      "labor": { "dailyProductiveHours": 8, "adherencePct": 1, "workingDaysPerWeek": 5, "offDaysPerWeek": 2, "contractualHoursSource": "derived", "shifts": [] },
+      "categories": [
+        { "id": "c1", "name": "General", "ahtMinutes": 30, "shrinkagePct": 0.2, "priority": 1 }
+      ],
+      "sla": { "primaryPct": 80, "primaryWindow": 8, "primaryUnit": "hours", "boAsaEnabled": false, "boAsaTarget": 60, "boAsaUnit": "minutes", "asaClockBasis": "business_window", "clockBasis": "business_time", "clockStartPolicy": "arrival", "occupancyCapEnabled": false, "occupancyCapPct": 85 },
+      "openingWIP": [],
+      "operationalHC": 11,
+      "seed": 12345,
+      "intervals": [
+        { "start": "2026-10-05T09:00:00", "end": "2026-10-05T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-06T09:00:00", "end": "2026-10-06T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-07T09:00:00", "end": "2026-10-07T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-08T09:00:00", "end": "2026-10-08T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-09T09:00:00", "end": "2026-10-09T09:30:00", "volume": 160, "category": "General" }
+      ]
+    },
+    "workingOut": "dailyPresentHours=8*clamp(1.0,0.1,1.0)=8 exactly. totalAvailableProductiveMinutes=11*5*480=26400. totalHandlingMinutes=5*4800=24000 (zero spillover, 10% capacity slack). occupancyPct=rawOccupancyPct=round(24000/26400*1000)/10=90.9.",
+    "trustedExpected": { "totalHandlingMinutes": 24000, "totalAvailableProductiveMinutes": 26400, "occupancyPct": 90.9, "rawOccupancyPct": 90.9, "primaryAchievedPct": 100, "completedCases": 800, "unfinishedCases": 0, "totalCases": 800 }
+  },
+  "scenario_T3_C1b_occupancy_convention_adherence_scaled": {
+    "tier": "T3_characterization",
+    "authority": "Same convention as T3_C1a, but pins the ADHERENCE-SCALING factor the previous version of this file omitted from its documented formula: dailyPresentHours = dailyProductiveHours x clamp(adherencePct,0.1,1.0) (des-engine.ts:577-579), not raw dailyProductiveHours.",
+    "description": "Identical fixture to T3_C1a but adherencePct=0.85, and headcount raised to 13 (from ~11.76 required) to preserve the same ~10% comfortable-slack, zero-spillover design as T3_C1a -- assumed by direct analogy to that scenario's verified slack margin, not independently re-simulated case-by-case; flagged T3 rather than T1 for exactly that reason, and any mismatch here should be reported as a discrepancy to investigate, not silently reconciled.",
+    "check": "runBackofficeDES",
+    "inputs": {
+      "calendar": { "is24x7": false, "workingDays": [1,2,3,4,5], "dailyOpenHour": 9, "dailyOpenMinute": 0, "dailyCloseHour": 17, "dailyCloseMinute": 0, "holidays": [] },
+      "labor": { "dailyProductiveHours": 8, "adherencePct": 0.85, "workingDaysPerWeek": 5, "offDaysPerWeek": 2, "contractualHoursSource": "derived", "shifts": [] },
+      "categories": [
+        { "id": "c1", "name": "General", "ahtMinutes": 30, "shrinkagePct": 0.2, "priority": 1 }
+      ],
+      "sla": { "primaryPct": 80, "primaryWindow": 8, "primaryUnit": "hours", "boAsaEnabled": false, "boAsaTarget": 60, "boAsaUnit": "minutes", "asaClockBasis": "business_window", "clockBasis": "business_time", "clockStartPolicy": "arrival", "occupancyCapEnabled": false, "occupancyCapPct": 85 },
+      "openingWIP": [],
+      "operationalHC": 13,
+      "seed": 12345,
+      "intervals": [
+        { "start": "2026-10-05T09:00:00", "end": "2026-10-05T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-06T09:00:00", "end": "2026-10-06T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-07T09:00:00", "end": "2026-10-07T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-08T09:00:00", "end": "2026-10-08T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-09T09:00:00", "end": "2026-10-09T09:30:00", "volume": 160, "category": "General" }
+      ]
+    },
+    "workingOut": "dailyPresentHours=8*0.85=6.8. dailyBudgetMinutes=408/agent/day, daily demand=4800min, HC=13 -> capacity=5304min/day (10.5% slack, same order as T3_C1a's 10%). totalAvailableProductiveMinutes=13*5*408=26520. Assuming (by analogy) zero spillover: totalHandlingMinutes=24000. occupancyPct=rawOccupancyPct=round(24000/26520*1000)/10=90.5.",
+    "trustedExpected": { "totalAvailableProductiveMinutes": 26520, "occupancyPct": 90.5, "rawOccupancyPct": 90.5, "completedCases": 800, "totalCases": 800 }
+  },
+  "scenario_T3_R1_unmatched_category_silently_defaulted": {
+    "tier": "T3_characterization",
+    "authority": "Characterizes a real robustness trap found during this audit: hc-search.ts:887-919's workload loop does `categoryMap.get(interval.category) || {ahtMinutes:30, shrinkagePct:0.2, priority:1}` -- a typo'd or unconfigured category name is silently defaulted, never rejected or warned about.",
+    "description": "One configured category 'Email' (AHT=20min), but the single demand interval's category field is 'Emial' (typo, does not match). If matched correctly, totalWorkloadHours=100*20/60=33.33h -> nMinAnalytical=floor(33.33/8)=4. If silently defaulted to AHT=30 (the actual behavior), totalWorkloadHours=100*30/60=50h -> nMinAnalytical=floor(50/8)=6. The scenario asserts 6, proving the silent-default path is what actually executes -- a planner who mistypes a CSV segment name gets a plausible-looking but wrong headcount with no error.",
+    "check": "searchOptimalHC",
+    "inputs": {
+      "calendar": { "is24x7": false, "workingDays": [1,2,3,4,5], "dailyOpenHour": 9, "dailyOpenMinute": 0, "dailyCloseHour": 17, "dailyCloseMinute": 0, "holidays": [] },
+      "labor": { "dailyProductiveHours": 8, "adherencePct": 1, "workingDaysPerWeek": 5, "offDaysPerWeek": 2, "contractualHoursSource": "derived", "shifts": [] },
+      "categories": [
+        { "id": "e1", "name": "Email", "ahtMinutes": 20, "shrinkagePct": 0.2, "priority": 1 }
+      ],
+      "sla": { "primaryPct": 80, "primaryWindow": 8, "primaryUnit": "hours", "boAsaEnabled": false, "boAsaTarget": 60, "boAsaUnit": "minutes", "asaClockBasis": "business_window", "clockBasis": "business_time", "clockStartPolicy": "arrival", "occupancyCapEnabled": false, "occupancyCapPct": 85 },
+      "openingWIP": [],
+      "intervals": [
+        { "start": "2026-10-05T09:00:00", "end": "2026-10-05T09:30:00", "volume": 100, "category": "Emial" }
+      ],
+      "userMaxHC": 500,
+      "seed": 777,
+      "replications": 1
+    },
+    "trustedExpected": { "nMinAnalytical": 6, "nMinAnalytical_if_category_had_matched": 4 }
+  },
+  "scenario_T3_R2_invalid_date_interval_asymmetry": {
+    "tier": "T3_characterization",
+    "authority": "Characterizes a second robustness trap: the workload sum (hc-search.ts:887-919) iterates the RAW `intervals` array, while the horizon min/max (hc-search.ts:865-882) iterates `validIntervals`, which drops rows with an unparseable start/end date (hc-search.ts:847-849). A row with a bad date still contributes its full volume to the workload numerator but does NOT extend the horizon denominator.",
+    "description": "One valid Monday interval (volume=100) plus one interval with an unparseable date string (volume=1000, same category). If both were excluded/included symmetrically, totalWorkloadHours would be just the valid row's 100*20/60=33.33h -> nMinAnalytical=4. Actual asymmetric behavior: totalWorkloadHours includes BOTH volumes ((100+1000)*20/60=366.67h) while the horizon is derived from the valid row alone (1 day, agentHours=8) -> nMinAnalytical=floor(366.67/8)=45, an 11x inflation purely from one malformed row that should arguably have been excluded from the numerator too (or rejected upstream by data-quality validation before reaching this function).",
+    "check": "searchOptimalHC",
+    "inputs": {
+      "calendar": { "is24x7": false, "workingDays": [1,2,3,4,5], "dailyOpenHour": 9, "dailyOpenMinute": 0, "dailyCloseHour": 17, "dailyCloseMinute": 0, "holidays": [] },
+      "labor": { "dailyProductiveHours": 8, "adherencePct": 1, "workingDaysPerWeek": 5, "offDaysPerWeek": 2, "contractualHoursSource": "derived", "shifts": [] },
+      "categories": [
+        { "id": "g1", "name": "General", "ahtMinutes": 20, "shrinkagePct": 0.2, "priority": 1 }
+      ],
+      "sla": { "primaryPct": 80, "primaryWindow": 8, "primaryUnit": "hours", "boAsaEnabled": false, "boAsaTarget": 60, "boAsaUnit": "minutes", "asaClockBasis": "business_window", "clockBasis": "business_time", "clockStartPolicy": "arrival", "occupancyCapEnabled": false, "occupancyCapPct": 85 },
+      "openingWIP": [],
+      "intervals": [
+        { "start": "2026-10-05T09:00:00", "end": "2026-10-05T09:30:00", "volume": 100, "category": "General" },
+        { "start": "invalid-date-value", "end": "invalid-date-value", "volume": 1000, "category": "General" }
+      ],
+      "userMaxHC": 500,
+      "seed": 777,
+      "replications": 1
+    },
+    "trustedExpected": { "nMinAnalytical": 45 }
+  },
+  "scenario_T3_R4_seed_zero_coercion": {
+    "tier": "T3_characterization",
+    "authority": "Characterizes createPrng's fallback (des-engine.ts:277-278: `let s = Math.floor(seed) || 123456789;`) -- a seed of 0 is falsy in JS and is silently coerced to 123456789, NOT treated as a valid distinct seed.",
+    "description": "Runs the T3_C1a fixture twice, once with seed:0 and once with seed:123456789, asserting IDENTICAL output -- proving 0 is not actually usable as a seed value distinct from 123456789 in this engine, a footgun for anyone assuming seed:0 is a normal, distinguishable input.",
+    "check": "invariant_seed_zero_coercion",
+    "inputs": {
+      "calendar": { "is24x7": false, "workingDays": [1,2,3,4,5], "dailyOpenHour": 9, "dailyOpenMinute": 0, "dailyCloseHour": 17, "dailyCloseMinute": 0, "holidays": [] },
+      "labor": { "dailyProductiveHours": 8, "adherencePct": 1, "workingDaysPerWeek": 5, "offDaysPerWeek": 2, "contractualHoursSource": "derived", "shifts": [] },
+      "categories": [
+        { "id": "c1", "name": "General", "ahtMinutes": 30, "shrinkagePct": 0.2, "priority": 1 }
+      ],
+      "sla": { "primaryPct": 80, "primaryWindow": 8, "primaryUnit": "hours", "boAsaEnabled": false, "boAsaTarget": 60, "boAsaUnit": "minutes", "asaClockBasis": "business_window", "clockBasis": "business_time", "clockStartPolicy": "arrival", "occupancyCapEnabled": false, "occupancyCapPct": 85 },
+      "openingWIP": [],
+      "operationalHC": 11,
+      "intervals": [
+        { "start": "2026-10-05T09:00:00", "end": "2026-10-05T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-06T09:00:00", "end": "2026-10-06T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-07T09:00:00", "end": "2026-10-07T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-08T09:00:00", "end": "2026-10-08T09:30:00", "volume": 160, "category": "General" },
+        { "start": "2026-10-09T09:00:00", "end": "2026-10-09T09:30:00", "volume": 160, "category": "General" }
+      ]
+    },
+    "seedA": 0,
+    "seedB": 123456789,
+    "fieldsMustBeIdentical": ["totalHandlingMinutes","occupancyPct","primaryAchievedPct","completedCases"]
+  },
+  "scenario_T3_D8_offhours_wallclock_sync": {
+    "tier": "T3_characterization",
+    "authority": "Regression pin for D8 (docs/wfm/07-known-defects-and-decisions.md): searchOptimalHC previously contained an off-hours mitigation (hc-search.ts:1443-1455, removed 2026-08-28) that rewrote sla.clockStartPolicy from 'arrival' to 'next_open' whenever >15% of volume arrived outside business hours. Under clockBasis:'wall_clock' that made an honestly-infeasible config (a 9-5 team cannot meet a 1-hour wall-clock deadline on a 2am arrival) falsely report feasible at HC=24. This scenario pins the CORRECT post-fix answer (infeasible) for the sync entry point. Pair with scenario_T3_D8_offhours_wallclock_async, which must agree -- if a future change reintroduces divergence between the two entry points, one of this pair will fail while the other still passes.",
+    "description": "5 working days, 89% of volume arriving at 02:00/22:00 (outside the 09:00-17:00 window), 11% at 10:00/14:00 (inside). clockBasis='wall_clock', clockStartPolicy='arrival', primaryWindow=1 hour. An off-hours arrival's 1-hour wall-clock deadline expires while the team is closed -- genuinely unmeetable, so isInfeasible:true is the truthful answer, not a defect.",
+    "check": "searchOptimalHC",
+    "inputs": {
+      "calendar": { "is24x7": false, "workingDays": [1,2,3,4,5], "dailyOpenHour": 9, "dailyOpenMinute": 0, "dailyCloseHour": 17, "dailyCloseMinute": 0, "holidays": [] },
+      "labor": { "dailyProductiveHours": 8, "adherencePct": 1, "workingDaysPerWeek": 5, "offDaysPerWeek": 2, "contractualHoursSource": "derived", "shifts": [] },
+      "categories": [
+        { "id": "g1", "name": "General", "ahtMinutes": 20, "shrinkagePct": 0.2, "priority": 1 }
+      ],
+      "sla": { "primaryPct": 80, "primaryWindow": 1, "primaryUnit": "hours", "boAsaEnabled": false, "boAsaTarget": 60, "boAsaUnit": "minutes", "asaClockBasis": "business_window", "clockBasis": "wall_clock", "clockStartPolicy": "arrival", "occupancyCapEnabled": false, "occupancyCapPct": 85 },
+      "openingWIP": [],
+      "userMaxHC": 200,
+      "seed": 42,
+      "replications": 10,
+      "intervals": [
+        { "start": "2026-10-05T10:00:00", "end": "2026-10-05T11:00:00", "volume": 5, "category": "General" },
+        { "start": "2026-10-05T14:00:00", "end": "2026-10-05T15:00:00", "volume": 5, "category": "General" },
+        { "start": "2026-10-05T02:00:00", "end": "2026-10-05T03:00:00", "volume": 40, "category": "General" },
+        { "start": "2026-10-05T22:00:00", "end": "2026-10-05T23:00:00", "volume": 40, "category": "General" },
+        { "start": "2026-10-06T10:00:00", "end": "2026-10-06T11:00:00", "volume": 5, "category": "General" },
+        { "start": "2026-10-06T14:00:00", "end": "2026-10-06T15:00:00", "volume": 5, "category": "General" },
+        { "start": "2026-10-06T02:00:00", "end": "2026-10-06T03:00:00", "volume": 40, "category": "General" },
+        { "start": "2026-10-06T22:00:00", "end": "2026-10-06T23:00:00", "volume": 40, "category": "General" },
+        { "start": "2026-10-07T10:00:00", "end": "2026-10-07T11:00:00", "volume": 5, "category": "General" },
+        { "start": "2026-10-07T14:00:00", "end": "2026-10-07T15:00:00", "volume": 5, "category": "General" },
+        { "start": "2026-10-07T02:00:00", "end": "2026-10-07T03:00:00", "volume": 40, "category": "General" },
+        { "start": "2026-10-07T22:00:00", "end": "2026-10-07T23:00:00", "volume": 40, "category": "General" },
+        { "start": "2026-10-08T10:00:00", "end": "2026-10-08T11:00:00", "volume": 5, "category": "General" },
+        { "start": "2026-10-08T14:00:00", "end": "2026-10-08T15:00:00", "volume": 5, "category": "General" },
+        { "start": "2026-10-08T02:00:00", "end": "2026-10-08T03:00:00", "volume": 40, "category": "General" },
+        { "start": "2026-10-08T22:00:00", "end": "2026-10-08T23:00:00", "volume": 40, "category": "General" },
+        { "start": "2026-10-09T10:00:00", "end": "2026-10-09T11:00:00", "volume": 5, "category": "General" },
+        { "start": "2026-10-09T14:00:00", "end": "2026-10-09T15:00:00", "volume": 5, "category": "General" },
+        { "start": "2026-10-09T02:00:00", "end": "2026-10-09T03:00:00", "volume": 40, "category": "General" },
+        { "start": "2026-10-09T22:00:00", "end": "2026-10-09T23:00:00", "volume": 40, "category": "General" }
+      ]
+    },
+    "trustedExpected": { "nMinAnalytical": 3, "isInfeasible": true, "recommendedHC": null, "bindingConstraintType": "analytical_baseline" }
+  },
+  "scenario_T3_D8_offhours_wallclock_async": {
+    "tier": "T3_characterization",
+    "authority": "Same as scenario_T3_D8_offhours_wallclock_sync, but exercised through searchOptimalHCAsync -- the entry point App.tsx and SensitivityFlow.tsx actually call. Before this scenario existed, no trusted-source check ever called searchOptimalHCAsync at all, so the shipped code path was unvalidated by this file. Identical inputs and expected values to the sync pair confirm the two entry points agree post-D8-fix.",
+    "description": "Identical setup to scenario_T3_D8_offhours_wallclock_sync. Must produce the same result -- any future one-sided change to either search entry point (D11 duplication risk) will break exactly one of this pair.",
+    "check": "searchOptimalHCAsync",
+    "inputs": {
+      "calendar": { "is24x7": false, "workingDays": [1,2,3,4,5], "dailyOpenHour": 9, "dailyOpenMinute": 0, "dailyCloseHour": 17, "dailyCloseMinute": 0, "holidays": [] },
+      "labor": { "dailyProductiveHours": 8, "adherencePct": 1, "workingDaysPerWeek": 5, "offDaysPerWeek": 2, "contractualHoursSource": "derived", "shifts": [] },
+      "categories": [
+        { "id": "g1", "name": "General", "ahtMinutes": 20, "shrinkagePct": 0.2, "priority": 1 }
+      ],
+      "sla": { "primaryPct": 80, "primaryWindow": 1, "primaryUnit": "hours", "boAsaEnabled": false, "boAsaTarget": 60, "boAsaUnit": "minutes", "asaClockBasis": "business_window", "clockBasis": "wall_clock", "clockStartPolicy": "arrival", "occupancyCapEnabled": false, "occupancyCapPct": 85 },
+      "openingWIP": [],
+      "userMaxHC": 200,
+      "seed": 42,
+      "replications": 10,
+      "intervals": [
+        { "start": "2026-10-05T10:00:00", "end": "2026-10-05T11:00:00", "volume": 5, "category": "General" },
+        { "start": "2026-10-05T14:00:00", "end": "2026-10-05T15:00:00", "volume": 5, "category": "General" },
+        { "start": "2026-10-05T02:00:00", "end": "2026-10-05T03:00:00", "volume": 40, "category": "General" },
+        { "start": "2026-10-05T22:00:00", "end": "2026-10-05T23:00:00", "volume": 40, "category": "General" },
+        { "start": "2026-10-06T10:00:00", "end": "2026-10-06T11:00:00", "volume": 5, "category": "General" },
+        { "start": "2026-10-06T14:00:00", "end": "2026-10-06T15:00:00", "volume": 5, "category": "General" },
+        { "start": "2026-10-06T02:00:00", "end": "2026-10-06T03:00:00", "volume": 40, "category": "General" },
+        { "start": "2026-10-06T22:00:00", "end": "2026-10-06T23:00:00", "volume": 40, "category": "General" },
+        { "start": "2026-10-07T10:00:00", "end": "2026-10-07T11:00:00", "volume": 5, "category": "General" },
+        { "start": "2026-10-07T14:00:00", "end": "2026-10-07T15:00:00", "volume": 5, "category": "General" },
+        { "start": "2026-10-07T02:00:00", "end": "2026-10-07T03:00:00", "volume": 40, "category": "General" },
+        { "start": "2026-10-07T22:00:00", "end": "2026-10-07T23:00:00", "volume": 40, "category": "General" },
+        { "start": "2026-10-08T10:00:00", "end": "2026-10-08T11:00:00", "volume": 5, "category": "General" },
+        { "start": "2026-10-08T14:00:00", "end": "2026-10-08T15:00:00", "volume": 5, "category": "General" },
+        { "start": "2026-10-08T02:00:00", "end": "2026-10-08T03:00:00", "volume": 40, "category": "General" },
+        { "start": "2026-10-08T22:00:00", "end": "2026-10-08T23:00:00", "volume": 40, "category": "General" },
+        { "start": "2026-10-09T10:00:00", "end": "2026-10-09T11:00:00", "volume": 5, "category": "General" },
+        { "start": "2026-10-09T14:00:00", "end": "2026-10-09T15:00:00", "volume": 5, "category": "General" },
+        { "start": "2026-10-09T02:00:00", "end": "2026-10-09T03:00:00", "volume": 40, "category": "General" },
+        { "start": "2026-10-09T22:00:00", "end": "2026-10-09T23:00:00", "volume": 40, "category": "General" }
+      ]
+    },
+    "trustedExpected": { "nMinAnalytical": 3, "isInfeasible": true, "recommendedHC": null, "bindingConstraintType": "analytical_baseline" }
+  }
+}

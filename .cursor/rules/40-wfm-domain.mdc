@@ -1,0 +1,36 @@
+---
+description: Points at the workforce-planning domain reference in docs/wfm. Load when working on sizing, forecasting, shrinkage, occupancy, SLA, or simulation logic.
+globs: src/utils/**,src/types/**,src/components/**
+---
+
+# Workforce-Planning Domain Reference
+
+This engine encodes contact-centre workforce-planning methodology. The terms are precise
+and easy to get subtly wrong — "occupancy" vs "utilisation", "shrinkage" vs "adherence",
+"headcount" vs "FTE" are distinct quantities that are routinely conflated, and conflating
+them produces a plausible-looking number that is wrong.
+
+**Before changing any sizing, shrinkage, occupancy, SLA, forecasting, or simulation logic,
+consult `docs/wfm/`:**
+
+| Doc | Use it when |
+|---|---|
+| `01-glossary-and-metrics.md` | Any metric definition. **Contains the hours taxonomy** (paid → contracted → scheduled → productive → delivered) — the single most common source of double-counting bugs. |
+| `02-copc-standards.md` | Service/quality targets, why an occupancy ceiling sits alongside the SLA target, deferred-transaction responsiveness. |
+| `03-forecasting.md` | Arrival vs workload forecasting, intraday profiles, accuracy measures, why bias matters more than MAPE for capacity. |
+| `04-capacity-planning-and-sizing.md` | The workload→FTE chain, shrinkage gross-up, backlog carry-in, when Erlang applies and when it does not. |
+| `05-scheduling.md` | Turning a sizing number into a roster; coverage vs requirement. |
+| `06-simulation-des.md` | DES mechanics, replications, Common Random Numbers, CI-gated acceptance, and the **monotonicity requirement** the headcount search depends on. |
+| `07-known-defects-and-decisions.md` | Decision log. Check before "fixing" something that may be deliberate; append when you resolve a defect. |
+
+## Two rules that prevent most domain bugs
+
+**Never introduce a factor twice.** Shrinkage belongs in the operational→gross conversion,
+not in the capacity baseline. Adherence belongs in per-agent capacity. If a factor appears
+in both the numerator and denominator of the same ratio, it cancels — and someone will
+later "fix" one side and silently break it.
+
+**Know which population a rate is over.** Occupancy over *planned* capacity answers "do I
+have enough people?"; occupancy over *actual on-duty* minutes answers "how hard did the
+people I had work?". Both are valid; they are not interchangeable, and this codebase
+deliberately uses the first for the sizing constraint.

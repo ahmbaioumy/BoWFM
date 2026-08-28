@@ -1,0 +1,6 @@
+{
+  "name": "Backoffice WFM Sizing Engine",
+  "description": "Deterministic Discrete Event Simulation (DES) sizing for backoffice contact center workforce management with SLA, ASA, and shrinkage math.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

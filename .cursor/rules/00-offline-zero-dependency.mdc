@@ -1,0 +1,60 @@
+---
+description: Hard guardrail - this product ships as a single self-contained HTML file that must run with zero network connections. Never introduce runtime dependencies, network calls, or external assets.
+alwaysApply: true
+---
+
+# Offline / Zero-Dependency Contract
+
+This product ships as **one self-contained HTML file** (`BoWFM.html`) that a planner
+opens directly from disk (`file://`), often on a locked-down corporate machine with no
+internet access. Everything below is a hard constraint, not a preference.
+
+## Never introduce into `src/`
+
+Network primitives:
+- `fetch(`, `XMLHttpRequest`, `WebSocket`, `EventSource`, `navigator.sendBeacon`, `importScripts(`
+- dynamic `import()` of a remote URL
+- any analytics, telemetry, error reporting, or "phone home" call
+
+External assets:
+- CDN `<script>` / `<link>` tags, remote stylesheets, web fonts (Google Fonts included),
+  remote images, remote source maps
+
+Ambient environment reads (they imply infrastructure that will not exist at runtime):
+- `process.env`, `import.meta.env`
+- `localStorage`, `sessionStorage`, `indexedDB`, `document.cookie`
+
+If a feature seems to need one of these, it needs a different design. Say so rather than
+adding the dependency.
+
+## No new runtime dependencies
+
+`dependencies` in `package.json` is closed. Implement new capability in plain TypeScript
+in-repo instead. Adding a runtime dependency requires explicit human approval and a stated
+reason why it cannot be written in-repo.
+
+Four unused packages (`@google/genai`, `express`, `dotenv`, `motion`) were removed because
+they were declared but never imported. Do not reintroduce them. Build/test tooling
+(`vite`, `tsx`, `typescript`, `tailwindcss`, `esbuild`) is devDependency-only and is fine —
+it never reaches the artifact.
+
+## The build guards are load-bearing
+
+`scripts/build-standalone.mts` throws if the built HTML still references remote CSS, remote
+JS, or a CDN host. **Never weaken, bypass, or comment out these guards** to make a build
+pass. A build that only succeeds with the guards removed is a build that broke the product.
+
+Absolute URLs that are *identifiers rather than fetches* are acceptable and expected:
+W3C XML namespace URIs (`http://www.w3.org/2000/svg` etc.), React's error-doc URL inside a
+message string, and the Tailwind attribution comment. Nothing else.
+
+## Verification
+
+After any change touching dependencies, assets, or the build:
+
+```bash
+npm run lint && npm test && npm run build:standalone
+```
+
+Suite D9 in `scripts/verify-sizing-fixes.mts` enforces every rule on this page. If you
+change what is allowed, change that suite deliberately — never silently.

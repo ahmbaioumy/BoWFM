@@ -1,0 +1,18 @@
+@import "tailwindcss";
+
+html,
+body {
+  margin: 0;
+  overflow: clip;
+  height: 100%;
+  background: #f1f5f9; /* slate-100 — no white flash if anything gaps */
+}
+
+#root {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: clip; /* hidden still allows focus-driven scrolling; clip does not */
+  min-height: 0;
+}

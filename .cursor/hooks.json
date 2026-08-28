@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "stop": [
+      {
+        "command": "node .cursor/hooks/ensure-artifact-fresh.mjs",
+        "timeout": 60,
+        "loop_limit": 2
+      }
+    ]
+  }
+}

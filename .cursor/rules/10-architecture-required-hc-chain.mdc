@@ -1,0 +1,101 @@
+---
+description: Map of the Required-HC calculation chain, and the list of design decisions that are deliberate and must NOT be "simplified". Read before touching src/utils.
+alwaysApply: true
+---
+
+# The Required-HC Chain — and what is frozen
+
+This app sizes headcount for **backoffice deferred-case work**: non-real-time
+case/ticket processing judged against a turnaround SLA, where backlog legitimately
+queues across days. It is *not* a real-time voice/chat queueing model.
+
+## The four stages
+
+**Stage 1 — Demand → Workload** (`hc-search.ts` `calculateStaffingRequirement`, and the
+baseline block in `searchOptimalHC*`)
+```
+Workload_hours = Σ_intervals (volume × AHT_category / 60)
+               + Σ_openingWIP (remainingWorkMinutes / 60)
+```
+
+**Stage 2 — Workload → analytical baseline `N_min`** (operational HC)
+```
+N_min = ceil( Workload_hours / (OccCap × DailyProductiveHours × Adherence × WorkingDays) )
+```
+Shrinkage is deliberately **absent** here. `N_min` is *operational* (on-duty) headcount;
+shrinkage is applied later, in Stage 4.
+
+**Stage 3 — `N_min` → recommended operational HC** (`searchOptimalHC` /
+`searchOptimalHCAsync`): leap upward to a passing ceiling, then walk down by −1 to the
+minimum N whose 95% CI clears every constraint. Runs R replications of the DES per
+candidate under Common Random Numbers.
+
+**Stage 4 — operational HC → Gross HC / FTE** (`calculateStaffingRequirement`)
+```
+opHC_c    = operationalHC × share_c
+grossHC_c = opHC_c / (1 − shrinkage_c)
+GrossHC   = ceil( Σ grossHC_c )
+effShrink = 1 − 1 / Σ( share_c / (1 − shrinkage_c) )      // harmonic
+```
+
+## FROZEN — deliberate decisions, do not "improve"
+
+Each of these looks like something worth simplifying and is not. Changing any of them
+requires explicit human approval.
+
+1. **DES, not Erlang-C.** Erlang-C models real-time queueing with abandonment. Deferred
+   backoffice work is deadline-based with legitimate multi-day queueing. Simulating
+   individual cases ageing against their own deadlines is the correct model. There is no
+   Erlang formula in this codebase and that is intentional.
+
+2. **Earliest-Deadline-First dispatch** (`CaseMinHeap.compare`, `des-engine.ts`). Cases
+   are ordered by `latestSafeStart` — the last moment work can begin and still hit the
+   deadline. EDF is optimal for on-time completion. Do not replace with FIFO or static
+   priority. `latestSafeStart` is derived by walking *backwards* through the business
+   calendar (`subtractWorkingTime`), not by wall-clock subtraction.
+
+3. **Occupancy is a demand ÷ planned-capacity ratio, not realised utilisation.** The
+   denominator is deliberately the **planned horizon** capacity, so `rawOccupancyPct` can
+   exceed 100% to express overload magnitude ("you need 43% more capacity"). Extending the
+   denominator across the backlog-drain window would make an undersized team look
+   adequately utilised because it took extra weeks — the opposite of the signal a capacity
+   planner needs. See `BUG-OCC-ROOT` in `scripts/verify-fixes.mts`. The per-agent
+   `busy/(busy+idle)` figure in `ResultsFlow.tsx` is a *different, legitimate* metric.
+
+4. **`N_min` is a hard floor for the search.** The simulation grants up to 14 drain days
+   past the horizon. Without the floor, a headcount below the steady-state capacity line
+   could "pass" purely by exploiting that finite-horizon edge effect while being
+   unsustainable in a repeating period.
+
+5. **Shrinkage excluded from Stage 2, applied only in Stage 4.** Applying it in both
+   places is the classic WFM double-count error.
+
+6. **Harmonic (not arithmetic) effective-shrinkage blend.** Workload-weighted arithmetic
+   mean of shrinkage rates is mathematically wrong here.
+
+7. **Per-category gross-up, then sum, then a single `ceil`.** Not blended-then-grossed,
+   and not per-category ceilings (which over-round systematically).
+
+8. **CI-gated acceptance, not single-run.** A candidate passes only if the 95% CI bound
+   clears the target — lower bound for SLA attainment, upper bound for occupancy/ASA caps.
+
+9. **Common Random Numbers.** `precomputedCaseSets` deliberately reuses identical arrival
+   realisations across candidate N values. This is variance reduction, not redundancy.
+
+10. **House-monotone agent apportionment** (`allocateAgentsToCategories`). The walk-down
+    search stops at the first failing N, which is only valid if pass/fail is monotone in N.
+    The allocator therefore uses a divisor (Webster/Sainte-Laguë) method and assigns agents
+    one at a time. **Never** replace it with largest-remainder/Hamilton — that reintroduces
+    the apportionment "Alabama paradox" (measured: 14 reversals over N=1..200, including a
+    silo dropping to zero agents). See `docs/wfm/06-simulation-des.md`.
+
+## Where things live
+
+| Concern | File |
+|---|---|
+| DES event loop, dispatch, occupancy, agent apportionment | `src/utils/des-engine.ts` |
+| Baseline `N_min`, CI search, shrinkage/FTE staffing math | `src/utils/hc-search.ts` |
+| All business-time / calendar arithmetic | `src/utils/calendar.ts` |
+| CSV ingestion + data-quality validation | `src/utils/csv-parser.ts` |
+| Domain types | `src/types/wfm.ts` |
+| Domain reference | `docs/wfm/` |

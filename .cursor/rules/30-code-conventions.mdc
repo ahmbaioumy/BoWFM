@@ -1,0 +1,58 @@
+---
+description: Code conventions for the sizing engine - no console output, no duplicated algorithms, all time math through calendar.ts, rounding only at the presentation boundary.
+globs: src/**
+---
+
+# Code Conventions
+
+## No console output in `src/`
+
+Engine code ships inside the artifact a planner runs. `console.log` / `debug` / `info` are
+banned in `src/` (enforced by suite D9). Five leftover debug statements in `hc-search.ts`
+were removed for this reason. If you need visibility during development, use the test
+suites, not logging in shipped code. `console.warn`/`console.error` for genuine
+user-facing faults are acceptable — debug tracing is not.
+
+## Never duplicate an algorithm
+
+`searchOptimalHC` and `searchOptimalHCAsync` are ~500 lines of near-identical logic. They
+have already drifted: the sync version silently rewrites `sla.clockStartPolicy` when >15%
+of volume arrives off-hours, and the async version — **which is the one the UI actually
+calls** (`App.tsx`) — does not. The same input can therefore size differently depending on
+the entry point.
+
+Do not add a third copy, and do not fix a bug in one without the other. The correct
+resolution is one shared implementation that the async variant wraps with progress
+callbacks and yields.
+
+The same hazard exists between `CaseMinHeap.compare` (used by the real dispatch loop) and
+`pickNextCase`/`compareByUrgency` (used only by the test harnesses). Two orderings that can
+diverge means the harness may validate behaviour that does not ship.
+
+## All time math goes through `calendar.ts`
+
+Never hand-roll `Date` arithmetic in engine code. Business-hours math is subtle — holidays,
+weekends, daily open/close, half-open horizon boundaries — and it is centralised in
+`src/utils/calendar.ts` for exactly that reason. Use `addWorkingTime`,
+`subtractWorkingTime`, `workingDuration`, `isWorking`, `nextOpen`,
+`getCalendarWorkingDaysInHorizon`.
+
+Note `getCalendarWorkingDaysInHorizon` treats the horizon as **half-open** `[start, end)`.
+An inclusive bound counts a trailing zero-demand day whenever `horizonEnd` lands exactly on
+midnight — which happens for whole-day interval data and *always* for 24x7 calendars.
+
+## Round only at the presentation boundary
+
+Keep full precision through the calculation chain; round when producing output for display
+or for a stored result field. Rounding mid-chain compounds. Compare floats with a tolerance
+(`Math.abs(a - b) <= tol`), never `===`.
+
+## Determinism
+
+The engine must be reproducible for a given seed. Anything that introduces
+run-to-run variance breaks the CI-gated search:
+- `Map`/`Set` iteration order depends on insertion order — sort explicitly when order
+  affects a result (e.g. `allocateAgentsToCategories` sorts category names for
+  deterministic tie-breaking).
+- Never use `Math.random()`. Use the seeded `createPrng` in `des-engine.ts`.
+- Never use `Date.now()` or `new Date()` for anything that affects a computed result.

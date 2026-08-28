@@ -1,0 +1,12 @@
+node_modules/
+build/
+dist/
+dist-standalone/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+ci-90-95.txt
+ci-search-compare.txt
+ci-sensitivity-out.txt

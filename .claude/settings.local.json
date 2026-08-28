@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(npx tsx *)",
+      "Bash(rm scratch-repro-t3-1.mts)",
+      "Bash(npm test *)",
+      "Bash(echo \"EXIT: $?\")",
+      "Read(//tmp/**)"
+    ]
+  }
+}

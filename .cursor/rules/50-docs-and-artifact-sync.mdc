@@ -1,0 +1,69 @@
+---
+description: After every implementation, sync PRD.md and project_context.md, then rebuild BoWFM.html when shippable code changed.
+alwaysApply: true
+---
+
+# Docs & Artifact Sync (Definition of Done)
+
+An implementation is **incomplete** until the as-built docs and (when applicable) the
+shipped artifact match the code. Do this after code + tests, before claiming done.
+
+**Do not wait for the user to ask.** Syncing `PRD.md` / `project_context.md` and rebuilding
+`BoWFM.html` is part of the same turn as the code change — not a follow-up the user must
+request.
+
+## When this applies
+
+Any change that affects product behavior, UI, engine logic, types, build scripts,
+defaults, DQ rules, tests that change expected behavior, or the shipped artifact.
+
+**UI-only JSX reorders still count** — if it ships in the bundle, run
+`npm run build:standalone` and `npm run check:artifact`.
+
+## Working directory
+
+If the Cursor workspace is the parent folder (`Bo_4Final-main (2)/`) rather than the app
+repo, run all npm commands from `Bo_4Final-main/` (where `package.json` and `src/` live).
+`BoWFM.html` is written at that app root.
+
+## Mandatory order
+
+1. **Code + tests** — existing rules still apply (offline contract, frozen HC chain,
+   testing protocol).
+2. **Update `PRD.md`** — as-built, not aspirational:
+   - Behavior / UI / requirements → relevant §1–§10
+   - New limitation → §10
+   - New or resolved backlog item → §11 (same P0 / P1 / P2 / G ID style; remove resolved)
+   - Bump Version / Date in the header table when product behavior changes
+3. **Update `project_context.md`**:
+   - Architecture / getting-started / commands → §2–§4
+   - Engine / search behavior → §5
+   - New frozen decision → §6
+   - Conventions / testing → §8–§9
+   - New common workflow → §10
+   - Drift risks, open items, recently fixed → §11
+4. **Rebuild the deliverable** when `src/`, `scripts/build-standalone.mts`,
+   Vite / Tailwind / build config, or anything that reaches the bundle changed:
+
+```bash
+npm run build:standalone
+```
+
+Confirm `BoWFM.html` at the app root is updated (mtime ≥ newest watched source).
+Do not skip for "small" UI/engine fixes — that file **is** the product. Never weaken
+`scripts/build-standalone.mts` offline guards to make the build pass.
+
+5. **Gate** — run `npm run check:artifact` (also runs at the end of `npm test`).
+   A project `stop` hook (`.cursor/hooks/ensure-artifact-fresh.mjs`) will follow up
+   automatically if you try to finish with a stale `BoWFM.html`.
+
+## Explicit skips
+
+- Pure doc / rule edits with no code or build impact → update docs only; no rebuild
+- Questions / exploration with no implementation → no doc or artifact churn
+
+## Completion check
+
+Before finishing, state which of the three were updated (`PRD.md`, `project_context.md`,
+`BoWFM.html`), or why the rebuild was skipped. If you rebuilt, mention that
+`npm run check:artifact` passed.

@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .claude/hooks/ensure-artifact-fresh.mjs",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}
