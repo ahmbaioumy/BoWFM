@@ -104,5 +104,3 @@ Every behavioural fix needs a test that **fails before the fix and passes after*
 framework may be added — that would breach the zero-dependency rule; both suites use a
 plain assert helper. See
 [`.cursor/rules/20-testing-protocol.mdc`](.cursor/rules/20-testing-protocol.mdc).
-
-<!-- auto-push hook test 2026-08-28T16:33:13Z -->
