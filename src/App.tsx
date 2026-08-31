@@ -183,7 +183,16 @@ export function App() {
   const [searchOutput, setSearchOutput] = useState<HCSearchOutput | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [showProgressModal, setShowProgressModal] = useState(false);
-  const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
+  // Reset confirmation gate. 'reset' = plain Sidebar Reset click. { type: 'upload' | 'sample' }
+  // carries the pending action to run AFTER the shared reset body, so uploading new data (or
+  // loading a sample) into a tab that already has data/settings loaded is forced through the
+  // same "you are about to lose your current work" confirmation as Reset itself — a stale
+  // prior session can no longer silently blend into a fresh upload. null = modal closed.
+  type PendingResetAction =
+    | 'reset'
+    | { type: 'upload'; text: string; filename: string }
+    | { type: 'sample'; sampleType: 'claims' | 'support' | 'healthcare' };
+  const [pendingResetAction, setPendingResetAction] = useState<PendingResetAction | null>(null);
   const [searchProgress, setSearchProgress] = useState<SearchProgressState | null>(null);
   const [simulationError, setSimulationError] = useState<string | null>(null);
   const [importNotification, setImportNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -224,8 +233,19 @@ export function App() {
     });
   }, [intervals, columnMapping, categories, calendar, labor, sla, openingWIP]);
 
-  // Handle File Upload
+  // Handle File Upload. If a prior session already has data loaded, route through the reset
+  // confirmation first (see pendingResetAction) rather than blending the new file into
+  // whatever calendar/labor/SLA/categories/opening-WIP a previous upload left behind. A
+  // brand-new tab with nothing loaded yet applies the file immediately — nothing to lose.
   function handleFileUpload(text: string, filename: string) {
+    if (rawRows.length > 0) {
+      setPendingResetAction({ type: 'upload', text, filename });
+      return;
+    }
+    applyFileUpload(text, filename);
+  }
+
+  function applyFileUpload(text: string, filename: string) {
     setSimulationError(null);
     setSearchOutput(null);
 
@@ -246,8 +266,16 @@ export function App() {
     setCurrentTab('mapping');
   }
 
-  // Load Validated Sample Datasets
+  // Load Validated Sample Datasets. Same stale-session guard as handleFileUpload above.
   function handleLoadSample(sampleType: 'claims' | 'support' | 'healthcare') {
+    if (rawRows.length > 0) {
+      setPendingResetAction({ type: 'sample', sampleType });
+      return;
+    }
+    applyLoadSample(sampleType);
+  }
+
+  function applyLoadSample(sampleType: 'claims' | 'support' | 'healthcare') {
     setSimulationError(null);
     setSearchOutput(null);
 
@@ -396,10 +424,16 @@ export function App() {
 
   // Reset All State
   function handleResetAll() {
-    setShowResetConfirmModal(true);
+    setPendingResetAction('reset');
   }
 
+  // Single confirm handler for the Sidebar's plain Reset AND for a new upload/sample-load
+  // requested while a prior session already had data loaded (pendingResetAction carries
+  // which). The full-reset body always runs first, then the pending action (if any) applies
+  // against the freshly-defaulted state — a new upload can never blend with stale state.
   function handleConfirmResetAll() {
+    const action = pendingResetAction;
+
     setCalendar(DEFAULT_CALENDAR);
     setLabor(DEFAULT_LABOR);
     setSla(DEFAULT_SLA);
@@ -415,13 +449,28 @@ export function App() {
     setShowProgressModal(false);
     setSearchProgress(null);
     setParamsPanelOpen(false);
-    setShowResetConfirmModal(false);
+    setPendingResetAction(null);
     setCurrentFlow('demand');
     setCurrentTab('upload');
-    setImportNotification({
-      type: 'success',
-      message: 'All configuration parameters, demand data, and simulation results have been reset to defaults.',
-    });
+
+    if (action && action !== 'reset' && action.type === 'upload') {
+      applyFileUpload(action.text, action.filename);
+      setImportNotification({
+        type: 'success',
+        message: 'Previous configuration and data were reset before loading the new file.',
+      });
+    } else if (action && action !== 'reset' && action.type === 'sample') {
+      applyLoadSample(action.sampleType);
+      setImportNotification({
+        type: 'success',
+        message: 'Previous configuration and data were reset before loading the sample dataset.',
+      });
+    } else {
+      setImportNotification({
+        type: 'success',
+        message: 'All configuration parameters, demand data, and simulation results have been reset to defaults.',
+      });
+    }
     setTimeout(() => {
       setImportNotification(null);
     }, 4500);
@@ -738,9 +787,9 @@ export function App() {
 
       {/* Confirmation Modal for Resetting All Data & Parameters */}
       <ResetConfirmModal
-        isOpen={showResetConfirmModal}
+        isOpen={pendingResetAction !== null}
         onConfirm={handleConfirmResetAll}
-        onCancel={() => setShowResetConfirmModal(false)}
+        onCancel={() => setPendingResetAction(null)}
       />
     </div>
   );
