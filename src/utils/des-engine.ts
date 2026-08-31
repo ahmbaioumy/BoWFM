@@ -506,6 +506,31 @@ export function generateCaseEntities(params: {
 }
 
 /**
+ * Effective adherence, clamped to [0.1, 1.0]; non-finite/missing → 1.0 (100%).
+ *
+ * FIXED 2026-08-31: every call site previously inlined `labor.adherencePct || 1.0`, which
+ * treats an explicit 0 as "unset" and silently returns 100% adherence — the opposite of the
+ * clamp's intent, which is to floor an implausibly low value at 10%. `??` alone would let a
+ * NaN through, so the finite check is explicit.
+ */
+export function resolveEffectiveAdherence(labor: Pick<LaborConfig, 'adherencePct'>): number {
+  const raw = labor.adherencePct;
+  if (!Number.isFinite(raw)) return 1.0;
+  return Math.min(1.0, Math.max(0.1, raw as number));
+}
+
+/**
+ * Shift-start grid granularity in minutes, clamped to >= 5; non-finite/missing → 30.
+ * Same `||` → explicit-finite-check rationale as resolveEffectiveAdherence: an explicit 0
+ * is an invalid granularity to be clamped, not a signal to fall back to the 30 default.
+ */
+export function resolveShiftSlapMinutes(labor: Pick<LaborConfig, 'shiftSlapMinutes'>): number {
+  const raw = labor.shiftSlapMinutes;
+  if (!Number.isFinite(raw)) return 30;
+  return Math.max(5, Math.round(raw as number));
+}
+
+/**
  * Resolves the occupancy ceiling all gates must use. The ceiling is always in force:
  * occupancyCapEnabled selects a custom target (clamped 50-100) rather than switching a
  * ceiling on/off. Off = the 100% default (physical feasibility only — no policy applied).
@@ -602,7 +627,7 @@ export function runBackofficeDES(params: {
   }
 
   // Effective labor capacity and daily budget per agent
-  const effectiveAdherence = Math.min(1.0, Math.max(0.1, labor.adherencePct || 1.0));
+  const effectiveAdherence = resolveEffectiveAdherence(labor);
   const dailyPresentHours = labor.dailyProductiveHours * effectiveAdherence;
   const dailyBudgetMinutes = dailyPresentHours * 60;
 
@@ -1768,7 +1793,7 @@ export function verifyAgentTimelineInvariants(
     return { valid: errors.length === 0, errors };
   }
 
-  const effectiveAdherence = Math.min(1.0, Math.max(0.1, labor.adherencePct || 1.0));
+  const effectiveAdherence = resolveEffectiveAdherence(labor);
   const dailyBudgetMinutes = labor.dailyProductiveHours * effectiveAdherence * 60;
 
   // 1. sum(minutes where state==='busy') === totalHandlingMinutes (0.01 tolerance)

@@ -929,7 +929,7 @@ export function ConfigFlow({
               <div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                    Workload HC Reduction
+                    Workload Reduction
                   </span>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input
@@ -951,7 +951,7 @@ export function ConfigFlow({
                   </label>
                 </div>
                 <span className="text-[11px] text-slate-500">
-                  N_min = floor(Workload × (1 − reduction%) / (Occupancy × agentHours × Adherence)). OFF = no reduction. DES may still size above if SLA binds. Rounding can mask small %.
+                  Discounts handling time by the given %, so the whole chain sizes against the reduced workload — N_min, the occupancy floor, the DES simulation, and Gross HC. Use it for an assumed efficiency or deflection gain. OFF = no reduction. Integer rounding can absorb a small %.
                 </span>
               </div>
 

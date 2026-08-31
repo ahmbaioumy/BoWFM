@@ -1192,7 +1192,7 @@ export function ResultsFlow({
                   <div className="text-[11px] font-mono bg-white p-2 rounded border border-slate-200 text-slate-700">
                     Formula:{' '}
                     <code>
-                      N_min = floor( Workload{searchOutput.workloadReductionAppliedPct ? ` × (1 − ${searchOutput.workloadReductionAppliedPct}%)` : ''} / (Occupancy × agentHours × Adherence) ) = {rosterFloor}
+                      N_min = floor( Workload{searchOutput.workloadReductionAppliedPct ? ` [already reduced ${searchOutput.workloadReductionAppliedPct}%]` : ''} / (Occupancy × agentHours × Adherence) ) = {rosterFloor}
                       {' '}(agentHours={staffing.contractualProductiveHours}h, {staffing.contractualHoursSource})
                     </code>
                   </div>
@@ -1218,7 +1218,7 @@ export function ResultsFlow({
                     {sla.confidenceLevelPct ?? 95}% CI Lower Bound ≥ {primaryTargetLabel}.
                   </p>
                   <div className="text-[11px] font-mono bg-white p-2 rounded border border-slate-200 text-slate-700">
-                    Final Operational Headcount: <code>N_op = max(N_min, Primary_Required) = max({rosterFloor}, {primaryHC}) = {staffing.operationalHC}</code>{searchOutput.workloadReductionAppliedPct && <span className="text-amber-700"> (N_min reduced {searchOutput.workloadReductionAppliedPct}%)</span>}
+                    Final Operational Headcount: <code>N_op = max(N_min, Primary_Required) = max({rosterFloor}, {primaryHC}) = {staffing.operationalHC}</code>{searchOutput.workloadReductionAppliedPct && <span className="text-amber-700"> (whole chain sized on workload reduced {searchOutput.workloadReductionAppliedPct}%)</span>}
                   </div>
                 </div>
               </div>

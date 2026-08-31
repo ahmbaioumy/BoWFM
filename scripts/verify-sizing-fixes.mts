@@ -37,8 +37,10 @@ import {
 import {
   allocateAgentsToCategories,
   generateCaseEntities,
+  resolveEffectiveAdherence,
   resolveMinAgentsPerInterval,
   resolveOccupancyCapPct,
+  resolveShiftSlapMinutes,
   runBackofficeDES,
   verifyAgentTimelineInvariants,
 } from '../src/utils/des-engine';
@@ -2651,6 +2653,208 @@ console.log('\n--- Suite D41: Non-blocking DQ warnings (off days, override scale
     assert(dq.issues.every((i) => i.severity !== 'error'), 'D41.D2 no issue in this fixture is severity:error', `severities=${JSON.stringify(dq.issues.map((i) => i.severity))}`);
     assert(dq.passed === true, 'D41.D3 dqResult.passed stays true with multiple simultaneous warnings', `passed=${dq.passed}`);
   }
+}
+
+// =================================================================
+// Suite D42 — WLR-DEAD + BIND-LABEL: the two param-audit defects (2026-08-31)
+//
+// (1) WLR-DEAD. Workload reduction used to be applied ONLY inside computeAnalyticalNMin.
+//     The search starts at startN = max(N_min, N_occ) and never explores below it, and
+//     computeOccupancyFloor did not take the reduction — so under the default derived-hours
+//     basis both floors share a denominator, giving N_occ = ceil(X) >= floor(X·(1−r)) = N_min
+//     for every r. startN was pinned to the UN-reduced N_occ and a 50% reduction moved
+//     neither recommendedHC nor grossHC. The reduction is now applied once, to category AHT,
+//     so all four stages size against the same reduced workload.
+//     Pre-fix, D42.1/D42.2/D42.3 fail (every value identical to the 0% baseline).
+//
+// (2) BIND-LABEL. The binding-constraint label tested `recommendedHC === nMinAnalytical`, but
+//     the search starts at N_occ = N_min + 1 in 533 of 540 swept workloads, so the test was
+//     almost never true even when the floor was exactly what bound — control fell through to
+//     the default "Primary SLA … Target" string. Planners were told SLA was binding in the
+//     very runs where sweeping the SLA target across 50–99% provably moved nothing.
+//     Pre-fix, D42.7/D42.8 fail (bindingConstraintType === 'statistical_primary_sla').
+// =================================================================
+console.log('\n--- Suite D42: workload reduction reaches the recommendation + honest binding label ---');
+{
+  // 10 business days, Mon–Fri 09:00–17:00, 30 cases/hour × 8h = 240/day at AHT 30m.
+  const catsD42: CategoryConfig[] = [{ id: 'c1', name: 'General', ahtMinutes: 30, shrinkagePct: 0.2, priority: 1 }];
+  const laborD42: LaborConfig = { ...LABOR, dailyProductiveHours: 7.5 };
+  const slaD42Base: SLAPolicyConfig = {
+    primaryPct: 80, primaryWindow: 8, primaryUnit: 'hours',
+    boAsaEnabled: false, boAsaTarget: 4, boAsaUnit: 'hours',
+    asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'arrival',
+    occupancyCapEnabled: false, occupancyCapPct: 85, confidenceLevelPct: 95,
+  };
+
+  function intervalsD42(volPerHour: number): StandardInterval[] {
+    const out: StandardInterval[] = [];
+    let idx = 0;
+    for (let d = 0; d < 14; d++) {
+      const day = new Date(2026, 2, 2 + d);
+      if (!BIZ_CAL.workingDays.includes(day.getDay())) continue;
+      for (let h = 9; h < 17; h++) {
+        out.push({
+          intervalIndex: idx++,
+          start: new Date(2026, 2, 2 + d, h, 0),
+          end: new Date(2026, 2, 2 + d, h + 1, 0),
+          category: 'General',
+          volume: volPerHour,
+        });
+      }
+    }
+    return out;
+  }
+
+  const ivD42 = intervalsD42(30);
+  const runAsyncD42 = (sla: SLAPolicyConfig) =>
+    searchOptimalHCAsync({
+      intervals: ivD42, openingWIP: [], categories: catsD42, calendar: BIZ_CAL,
+      labor: laborD42, sla, seed: 12345, userMaxHC: 200, replications: 8,
+    });
+  const runSyncD42 = (sla: SLAPolicyConfig) =>
+    searchOptimalHC({
+      intervals: ivD42, openingWIP: [], categories: catsD42, calendar: BIZ_CAL,
+      labor: laborD42, sla, seed: 12345, userMaxHC: 200, replications: 8,
+    });
+  const withReduction = (pct: number): SLAPolicyConfig => ({
+    ...slaD42Base, workloadReductionEnabled: true, workloadReductionPct: pct,
+  });
+
+  const baseD42 = await runAsyncD42(slaD42Base);
+  const red20D42 = await runAsyncD42(withReduction(20));
+  const red50D42 = await runAsyncD42(withReduction(50));
+
+  // --- D42.1: the reduction actually moves the recommendation (the whole point) ---
+  assert(
+    red20D42.recommendedHC !== null && baseD42.recommendedHC !== null &&
+      red20D42.recommendedHC < baseD42.recommendedHC,
+    'D42.1 20% workload reduction LOWERS recommendedHC (pre-fix: identical)',
+    `base=${baseD42.recommendedHC} reduced20=${red20D42.recommendedHC}`
+  );
+  assert(
+    red50D42.recommendedHC !== null && red20D42.recommendedHC !== null &&
+      red50D42.recommendedHC < red20D42.recommendedHC,
+    'D42.2 50% reduction lowers it further still (monotone in the reduction %)',
+    `reduced20=${red20D42.recommendedHC} reduced50=${red50D42.recommendedHC}`
+  );
+
+  // --- D42.3: Stage 4 follows too — Gross HC is not left at the un-reduced figure ---
+  assert(
+    red50D42.staffing.grossHCTotal < baseD42.staffing.grossHCTotal,
+    'D42.3 reduction flows through to Gross HC (Stage 4), not just the floor',
+    `base=${baseD42.staffing.grossHCTotal} reduced50=${red50D42.staffing.grossHCTotal}`
+  );
+
+  // --- D42.4: N_occ honours the reduction now, so it can no longer pin startN ---
+  assert(
+    (red50D42.occupancyFeasibleFloor ?? 0) < (baseD42.occupancyFeasibleFloor ?? 0),
+    'D42.4 N_occ is computed on the reduced workload (pre-fix it ignored the reduction and pinned startN)',
+    `base nOcc=${baseD42.occupancyFeasibleFloor} reduced50 nOcc=${red50D42.occupancyFeasibleFloor}`
+  );
+
+  // --- D42.5: single application — reduction must not be double-counted ---
+  // 50% off a workload whose un-reduced N_min is M must land on floor(M_exact/2), never
+  // floor(M_exact/4). Guard via the reported before/after pair.
+  assert(
+    red50D42.nMinBeforeReduction === baseD42.nMinAnalytical,
+    'D42.5 nMinBeforeReduction reports the UN-reduced baseline (display figure intact)',
+    `nMinBeforeReduction=${red50D42.nMinBeforeReduction} unreduced nMin=${baseD42.nMinAnalytical}`
+  );
+  assert(
+    red50D42.nMinAnalytical >= Math.floor(baseD42.nMinAnalytical / 2) - 1 &&
+      red50D42.nMinAnalytical <= Math.floor(baseD42.nMinAnalytical / 2) + 1,
+    'D42.6 50% reduction halves N_min once, not twice (no double-application)',
+    `unreduced=${baseD42.nMinAnalytical} reduced=${red50D42.nMinAnalytical}`
+  );
+
+  // --- D42.7: OFF remains an exact no-op ---
+  const offExplicitD42 = await runAsyncD42({ ...slaD42Base, workloadReductionEnabled: false, workloadReductionPct: 30 });
+  assert(
+    offExplicitD42.recommendedHC === baseD42.recommendedHC &&
+      offExplicitD42.staffing.grossHCTotal === baseD42.staffing.grossHCTotal,
+    'D42.7 workloadReductionEnabled:false is an exact no-op even with a pct set',
+    `off=${offExplicitD42.recommendedHC}/${offExplicitD42.staffing.grossHCTotal} base=${baseD42.recommendedHC}/${baseD42.staffing.grossHCTotal}`
+  );
+  assert(
+    offExplicitD42.workloadReductionAppliedPct === undefined && offExplicitD42.nMinBeforeReduction === undefined,
+    'D42.8 OFF run reports neither workloadReductionAppliedPct nor nMinBeforeReduction',
+    `applied=${offExplicitD42.workloadReductionAppliedPct} before=${offExplicitD42.nMinBeforeReduction}`
+  );
+
+  // --- D42.9: sync/async parity on the reduction (D11 drift guard) ---
+  const syncRed50D42 = runSyncD42(withReduction(50));
+  assert(
+    syncRed50D42.nMinAnalytical === red50D42.nMinAnalytical &&
+      syncRed50D42.occupancyFeasibleFloor === red50D42.occupancyFeasibleFloor,
+    'D42.9 sync/async parity: identical N_min and N_occ under reduction',
+    `sync=${syncRed50D42.nMinAnalytical}/${syncRed50D42.occupancyFeasibleFloor} async=${red50D42.nMinAnalytical}/${red50D42.occupancyFeasibleFloor}`
+  );
+
+  // --- D42.10 / D42.11: binding label tells the truth about the capacity floor ---
+  // Base run passes at its very first candidate (startN), so no DES gate set the number.
+  assert(
+    baseD42.bindingConstraintType === 'analytical_baseline',
+    'D42.10 floor-bound run reports analytical_baseline (pre-fix: statistical_primary_sla)',
+    `got ${baseD42.bindingConstraintType} — "${baseD42.bindingConstraintDescription}"`
+  );
+  assert(
+    !baseD42.bindingConstraintDescription.includes('Primary SLA'),
+    'D42.11 floor-bound run does NOT name Primary SLA as the binding constraint',
+    `got "${baseD42.bindingConstraintDescription}"`
+  );
+
+  // With an occupancy cap the floor rises to N_occ > N_min — the label must name N_occ,
+  // and must still not claim SLA. This is the exact configuration that used to mislabel.
+  const cappedD42 = await runAsyncD42({ ...slaD42Base, occupancyCapEnabled: true, occupancyCapPct: 75 });
+  assert(
+    cappedD42.bindingConstraintType === 'analytical_baseline' &&
+      cappedD42.recommendedHC === cappedD42.occupancyFeasibleFloor,
+    'D42.12 occupancy-floor-bound run reports analytical_baseline at exactly N_occ',
+    `type=${cappedD42.bindingConstraintType} recHC=${cappedD42.recommendedHC} nOcc=${cappedD42.occupancyFeasibleFloor}`
+  );
+  assert(
+    cappedD42.bindingConstraintDescription.includes('N_occ') &&
+      !cappedD42.bindingConstraintDescription.includes('Primary SLA'),
+    'D42.13 description names the occupancy-feasible floor, not Primary SLA',
+    `got "${cappedD42.bindingConstraintDescription}"`
+  );
+
+  // --- D42.14: the label is not stuck the other way — a genuinely SLA-bound run still says so.
+  // Turnaround window at 30m against AHT 30m forces the DES to climb above the floor.
+  const slaBoundD42 = await runAsyncD42({ ...slaD42Base, primaryWindow: 30, primaryUnit: 'minutes' });
+  assert(
+    slaBoundD42.recommendedHC !== null &&
+      slaBoundD42.recommendedHC > Math.max(slaBoundD42.nMinAnalytical, slaBoundD42.occupancyFeasibleFloor ?? 0),
+    'D42.14 tight-TAT run climbs above both floors (the DES really is binding here)',
+    `recHC=${slaBoundD42.recommendedHC} nMin=${slaBoundD42.nMinAnalytical} nOcc=${slaBoundD42.occupancyFeasibleFloor}`
+  );
+  assert(
+    slaBoundD42.bindingConstraintType === 'statistical_primary_sla',
+    'D42.15 genuinely SLA-bound run is still labelled statistical_primary_sla (no over-correction)',
+    `got ${slaBoundD42.bindingConstraintType} — "${slaBoundD42.bindingConstraintDescription}"`
+  );
+
+  // --- D42.16 / D42.17: `||` → explicit-finite-check resolvers (an explicit 0 is clamped,
+  // not silently treated as "unset"). ---
+  assert(
+    resolveEffectiveAdherence({ adherencePct: 0 }) === 0.1,
+    'D42.16 adherencePct:0 clamps to the 0.1 floor (pre-fix `|| 1.0` returned 100%)',
+    `got ${resolveEffectiveAdherence({ adherencePct: 0 })}`
+  );
+  assert(
+    resolveEffectiveAdherence({ adherencePct: undefined as unknown as number }) === 1.0 &&
+      resolveEffectiveAdherence({ adherencePct: NaN }) === 1.0 &&
+      resolveEffectiveAdherence({ adherencePct: 0.85 }) === 0.85,
+    'D42.17 adherence resolver: missing/NaN → 1.0, in-range value passes through',
+    `undef=${resolveEffectiveAdherence({ adherencePct: undefined as unknown as number })} nan=${resolveEffectiveAdherence({ adherencePct: NaN })} val=${resolveEffectiveAdherence({ adherencePct: 0.85 })}`
+  );
+  assert(
+    resolveShiftSlapMinutes({ shiftSlapMinutes: 0 }) === 5 &&
+      resolveShiftSlapMinutes({ shiftSlapMinutes: undefined }) === 30 &&
+      resolveShiftSlapMinutes({ shiftSlapMinutes: 15 }) === 15,
+    'D42.18 slap resolver: explicit 0 clamps to 5, missing → 30, valid passes through',
+    `zero=${resolveShiftSlapMinutes({ shiftSlapMinutes: 0 })} undef=${resolveShiftSlapMinutes({ shiftSlapMinutes: undefined })} val=${resolveShiftSlapMinutes({ shiftSlapMinutes: 15 })}`
+  );
 }
 
 console.log('\n==================================================');

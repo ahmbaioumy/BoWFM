@@ -543,15 +543,59 @@ effect while being unsustainable in a repeating period.
 > what it accepts. Tests `BUG-J` (`scripts/verify-fixes.mts`) and `D11.4`–`D11.8`
 > (`scripts/verify-sizing-fixes.mts`) pin the new floor values.
 
-> **Second Update (explicit human approval):** A **Workload HC Reduction** toggle now allows
-> planners to discount `N_min` by a user-specified %. This is an opt-in lever that re-exposes
-> the finite-horizon edge-effect risk: a discounted `N_min` can now pass by exploiting the
-> drain window when the true steady-state is higher. Mitigation: the toggle is OFF by default
-> (preserving the guardrail for all existing runs), DES/CI gates still bind above a discounted
-> floor (the search is DES-authoritative, not overridden), and results visibly label where the
-> reduction was applied and show both the reduced and unreduced `N_min`. Use only with explicit
-> planner intent and awareness of the trade-off. Tests pinning the reduced-floor math are `D12.*`
-> in `scripts/verify-sizing-fixes.mts`.
+> **Second Update (explicit human approval):** A **Workload Reduction** toggle now allows
+> planners to discount modelled workload by a user-specified %. This is an opt-in lever that
+> re-exposes the finite-horizon edge-effect risk: a discounted workload can now pass by
+> exploiting the drain window when the true steady-state is higher. Mitigation: the toggle is
+> OFF by default (preserving the guardrail for all existing runs), DES/CI gates still bind
+> above the discounted floor (the search is DES-authoritative, not overridden), and results
+> visibly label where the reduction was applied and show both the reduced and unreduced
+> `N_min`. Use only with explicit planner intent and awareness of the trade-off. Tests pinning
+> the reduced-floor math are `D12.*` in `scripts/verify-sizing-fixes.mts`.
+
+> **Third Update — `WLR-DEAD`, fixed 2026-08-31.** The reduction above was applied **only**
+> inside `computeAnalyticalNMin`, which made it a guaranteed **no-op on the recommendation**.
+> The search starts at `startN = max(N_min, N_occ)` and never explores below it, and
+> `computeOccupancyFloor` did not take the reduction — under the default derived-hours basis
+> both floors share a denominator, so `N_occ = ceil(X)` while `N_min = floor(X·(1−r))`, i.e.
+> `N_occ >= N_min` for every `r`. `startN` was pinned to the un-reduced `N_occ`. Measured on
+> the real engine: a **50% reduction moved neither `recommendedHC` (16 → 16) nor `grossHC`
+> (20 → 20)**. Discounting only the analytic floor could never have worked anyway, because
+> `generateCaseEntities` still simulated full demand and the DES occupancy gate would have
+> pushed any lower candidate straight back up.
+>
+> The reduction is now applied **once, to category AHT** (`applyWorkloadReductionToCategories`
+> in `hc-search.ts`), so all four stages size against the same reduced workload. AHT is the
+> right single point of application: `workload = volume × AHT`, so a `(1 − r)` factor reduces
+> workload by exactly `r%` with no integer-rounding loss, leaves case counts (and therefore
+> every SLA attainment denominator) untouched, and is seen identically by Stage 2 floors,
+> Stage 3 DES and Stage 4 gross-up because all three derive workload from `cat.ahtMinutes`.
+> `computeAnalyticalNMin` is deliberately **no longer** passed `workloadReduction*` — the
+> workload it receives is already reduced, and passing both would double-apply. Post-fix
+> measurement: 50% reduction → `recommendedHC` 16 → 8, `grossHC` 20 → 10. Tests: `D42.1`–`D42.9`.
+> Opening WIP with an explicit `remainingWorkMinutes` is **not** discounted (measured work in
+> flight, not a forecast assumption); unconfigured categories keep the un-reduced 30-min default.
+
+> **`BIND-LABEL`, fixed 2026-08-31.** `bindingConstraintType` was decided by
+> `recommendedHC === nMinAnalytical`, but the search starts at `max(N_min, N_occ)` and
+> `N_occ = N_min + 1` in **533 of 540** swept workloads, so that test almost never fired even
+> when the floor was exactly what bound. Control fell through to the default
+> `statistical_primary_sla` / "Primary SLA … Target" description — surfaced to planners at
+> `ResultsFlow.tsx:516`, `:1533`, `:2258`. The result: the UI named SLA as the binding
+> constraint in precisely the runs where sweeping the SLA target across 50–99% provably moved
+> nothing. Both search paths now capture `searchStartN` and attribute the result to the
+> capacity floor whenever `recommendedHC === searchStartN`, naming `N_occ` when the occupancy
+> floor is the higher of the two. A genuinely SLA-bound run (turnaround window near AHT) is
+> still labelled `statistical_primary_sla` — pinned by `D42.14`/`D42.15` against
+> over-correction. Tests: `D42.10`–`D42.15`.
+>
+> **Known modelling property (not a defect), measured 2026-08-31:** SLA targets are inelastic
+> across most of their range. Once headcount clears the workload, EDF dispatch on deferrable
+> work finishes cases far inside any multi-hour window, so attainment snaps to 100% and the
+> target has nothing to bite on. Sweeping Primary % 50→99 or the window 2h→48h changed the
+> recommendation by zero agents; the gate only bound once the window approached AHT (30–60 min
+> against a 30-min AHT). Expect workload, occupancy cap, adherence and productive hours to be
+> the real levers. See PRD §10 `L16`.
 
 ### 6.4a Extra OFF is a coverage ratio, not a calendar-week fraction
 *Looks like:* `(1 + extraOffDays/7)` — off days as a share of the 7-day week, symmetric with

@@ -30,7 +30,7 @@ import {
   getValidSlapStarts,
   isWorkingDay,
 } from './calendar';
-import { allocateAgentsToCategories, generateCaseEntities, resolveMinAgentsPerInterval, resolveOccupancyCapPct, runBackofficeDES } from './des-engine';
+import { allocateAgentsToCategories, generateCaseEntities, resolveEffectiveAdherence, resolveMinAgentsPerInterval, resolveOccupancyCapPct, resolveShiftSlapMinutes, runBackofficeDES } from './des-engine';
 
 /**
  * Net extra OFF (post-DES) and the roster coverage uplift derived from it.
@@ -122,7 +122,7 @@ export function computeAnalyticalNMin(params: {
     ? totalWorkloadHours * (1 - clampWorkloadReductionPct(workloadReductionPct) / 100)
     : totalWorkloadHours;
   const oMax = resolveOccupancyCapPct({ occupancyCapEnabled, occupancyCapPct }) / 100;
-  const effectiveAdherence = Math.min(1.0, Math.max(0.1, labor.adherencePct || 1.0));
+  const effectiveAdherence = resolveEffectiveAdherence(labor);
   const { agentHours } = resolveAgentHoursForNMin(labor, workingDaysInHorizon);
   const denominator = oMax * agentHours * effectiveAdherence;
   return denominator > 0 ? Math.max(1, Math.floor(effectiveWorkloadHours / denominator)) : 1;
@@ -147,7 +147,7 @@ export function computeOccupancyFloor(params: {
 }): number {
   const { totalWorkloadHours, labor, workingDaysInHorizon, occupancyCapEnabled, occupancyCapPct } = params;
   const days = Math.max(1, workingDaysInHorizon);
-  const effectiveAdherence = Math.min(1.0, Math.max(0.1, labor.adherencePct || 1.0));
+  const effectiveAdherence = resolveEffectiveAdherence(labor);
   const capacityHoursPerAgent = labor.dailyProductiveHours * effectiveAdherence * days;
   const occCap = resolveOccupancyCapPct({ occupancyCapEnabled, occupancyCapPct }) / 100;
   const denominator = capacityHoursPerAgent * occCap;
@@ -545,9 +545,9 @@ export function computeCandidatePlacementDistribution(params: {
   // (dailyProductiveHours × adherence × 60, des-engine.ts) — computeOccupancyFloor already
   // gets this right a few hundred lines away in this same file.
   const shiftLengthMinutes = labor.dailyProductiveHours * 60;
-  const effectiveAdherence = Math.min(1.0, Math.max(0.1, labor.adherencePct || 1.0));
+  const effectiveAdherence = resolveEffectiveAdherence(labor);
   const capacityMinutes = shiftLengthMinutes * effectiveAdherence;
-  const slapMinutes = Math.max(5, Math.round(labor.shiftSlapMinutes || 30));
+  const slapMinutes = resolveShiftSlapMinutes(labor);
   const validStarts = getValidSlapStarts(calendar, shiftLengthMinutes, slapMinutes);
   if (validStarts.length === 0) return null;
 
@@ -613,7 +613,7 @@ export function buildCoverageRepairDistribution(params: {
   if (n <= 0 || minAgentsPerInterval <= 0) return null;
 
   const shiftLengthMinutes = labor.dailyProductiveHours * 60;
-  const slapMinutes = Math.max(5, Math.round(labor.shiftSlapMinutes || 30));
+  const slapMinutes = resolveShiftSlapMinutes(labor);
   const validStarts = getValidSlapStarts(calendar, shiftLengthMinutes, slapMinutes);
   if (validStarts.length === 0) return null;
   const windowLengthMinutes = getDailyWindowLengthHours(calendar) * 60;
@@ -883,6 +883,39 @@ export function clampWorkloadReductionPct(raw: unknown): number {
   const n = typeof raw === 'number' ? raw : parseFloat(String(raw ?? ''));
   if (!Number.isFinite(n)) return 5;
   return Math.min(50, Math.max(1, Math.round(n)));
+}
+
+/**
+ * Applies the workload reduction to the handling time of every category, returning the
+ * category set every downstream stage should size against.
+ *
+ * FIXED 2026-08-31 (WLR-DEAD). Before this, the reduction was applied ONLY inside
+ * computeAnalyticalNMin, which made it a guaranteed no-op on the recommendation:
+ *   - the search starts at startN = max(N_min, N_occ) and never explores below it;
+ *   - computeOccupancyFloor (N_occ) did not take the reduction, so under the default
+ *     derived-hours basis both floors share a denominator and N_occ = ceil(X) while
+ *     N_min = floor(X·(1−r)), i.e. N_occ >= N_min for every r.
+ * startN was therefore pinned to the UN-reduced N_occ, and a measured sweep confirmed a 50%
+ * reduction moved neither recommendedHC nor grossHC. Discounting only the analytic floor
+ * could never work anyway: generateCaseEntities still simulated full demand, so the DES
+ * occupancy gate would have pushed any lower candidate straight back up.
+ *
+ * Reducing AHT is the coherent single point of application: workload = volume × AHT, so a
+ * factor of (1 − r) on AHT reduces workload by exactly r% with no integer-rounding loss,
+ * leaves case counts (and therefore every SLA attainment denominator) untouched, and is
+ * seen identically by all four stages — Stage 2 floors, Stage 3 DES, and Stage 4 gross-up —
+ * because they all derive workload from cat.ahtMinutes.
+ *
+ * Categories present in the demand data but absent from config keep the parser's 30-minute
+ * default un-reduced; configure a category to bring it under the reduction.
+ */
+export function applyWorkloadReductionToCategories(
+  categories: CategoryConfig[],
+  sla: Pick<SLAPolicyConfig, 'workloadReductionEnabled' | 'workloadReductionPct'>
+): CategoryConfig[] {
+  if (!sla.workloadReductionEnabled) return categories;
+  const factor = 1 - clampWorkloadReductionPct(sla.workloadReductionPct) / 100;
+  return categories.map((c) => ({ ...c, ahtMinutes: c.ahtMinutes * factor }));
 }
 
 /**
@@ -1481,6 +1514,13 @@ export function searchOptimalHC(params: {
     queueArchitecture = 'pooled',
   } = params;
 
+  // Workload reduction is applied ONCE, here, by discounting category AHT — see
+  // applyWorkloadReductionToCategories. Every stage below (N_min, N_occ, DES case
+  // generation, Stage 4 gross-up) then sizes against the same reduced workload.
+  // rawCategories is retained only to report nMinBeforeReduction.
+  const rawCategories = categories;
+  categories = applyWorkloadReductionToCategories(categories, sla);
+
   const validIntervals = intervals.filter(
     (it) => it.start && !isNaN(it.start.getTime()) && it.end && !isNaN(it.end.getTime())
   );
@@ -1509,8 +1549,12 @@ export function searchOptimalHC(params: {
   // 1. Calculate Analytical Baseline (N_min)
   const categoryMap = new Map<string, CategoryConfig>();
   categories.forEach((c) => categoryMap.set(c.name, c));
+  // Un-reduced AHT, used only to report the nMinBeforeReduction display figure.
+  const rawCategoryMap = new Map<string, CategoryConfig>();
+  rawCategories.forEach((c) => rawCategoryMap.set(c.name, c));
 
   let totalWorkloadHours = 0;
+  let totalWorkloadHoursRaw = 0;
   let peakIntervalVolume = 0;
 
   for (const interval of intervals) {
@@ -1523,6 +1567,8 @@ export function searchOptimalHC(params: {
       priority: 1,
     };
     totalWorkloadHours += (interval.volume * cat.ahtMinutes) / 60;
+    totalWorkloadHoursRaw +=
+      (interval.volume * (rawCategoryMap.get(interval.category)?.ahtMinutes ?? 30)) / 60;
   }
 
   for (const wip of openingWIP) {
@@ -1533,30 +1579,38 @@ export function searchOptimalHC(params: {
       shrinkagePct: 0.2,
       priority: 1,
     };
+    // An explicit remainingWorkMinutes is measured work already in flight, not a forecast
+    // assumption, so the reduction does not discount it. WIP without one inherits the
+    // category's (reduced) AHT.
     const fallbackAht = cat.ahtMinutes;
-    const remMin =
-      wip.remainingWorkMinutes === undefined || wip.remainingWorkMinutes === null
-        ? fallbackAht
-        : Math.max(0, wip.remainingWorkMinutes);
+    const hasExplicitRemaining =
+      wip.remainingWorkMinutes !== undefined && wip.remainingWorkMinutes !== null;
+    const remMin = hasExplicitRemaining
+      ? Math.max(0, wip.remainingWorkMinutes as number)
+      : fallbackAht;
     totalWorkloadHours += remMin / 60;
+    totalWorkloadHoursRaw +=
+      (hasExplicitRemaining
+        ? Math.max(0, wip.remainingWorkMinutes as number)
+        : (rawCategoryMap.get(wip.category)?.ahtMinutes ?? 30)) / 60;
   }
 
   const nMinBeforeReduction = computeAnalyticalNMin({
-    totalWorkloadHours,
+    totalWorkloadHours: totalWorkloadHoursRaw,
     labor,
     workingDaysInHorizon,
     occupancyCapEnabled: sla.occupancyCapEnabled,
     occupancyCapPct: sla.occupancyCapPct,
   });
 
+  // No workloadReduction* passed: totalWorkloadHours is ALREADY reduced (via category AHT).
+  // Passing it here as well would double-apply the discount.
   const nMinAnalytical = computeAnalyticalNMin({
     totalWorkloadHours,
     labor,
     workingDaysInHorizon,
     occupancyCapEnabled: sla.occupancyCapEnabled,
     occupancyCapPct: sla.occupancyCapPct,
-    workloadReductionEnabled: sla.workloadReductionEnabled,
-    workloadReductionPct: sla.workloadReductionPct,
   });
 
   // 3. Search Bounds & User Max HC Enforcement
@@ -1592,7 +1646,7 @@ export function searchOptimalHC(params: {
   // starting point or gate — see the startN comment below for why including it there let an
   // overstated N_sla bypass the walk-down safety net.
   let placementFeasibleFloor: number | undefined;
-  let placementSlapMinutes = Math.max(5, Math.round(labor.shiftSlapMinutes || 30));
+  let placementSlapMinutes = resolveShiftSlapMinutes(labor);
   const representativeCases = precomputedCaseSets[0]?.cases as CaseEntity[] | undefined;
   // 24x7 RE-ENABLED (2026-08-28, 24x7 multi-start) — see the removed is24x7 guard in
   // computeCandidatePlacementDistribution. Note: buildOneDayDemandGrid still buckets ALL
@@ -1603,7 +1657,7 @@ export function searchOptimalHC(params: {
   if (labor.shiftPlacementEnabled && representativeCases) {
     const shiftLengthMinutes = labor.dailyProductiveHours * 60;
     // Capacity, not span — see Gap B comment in computeCandidatePlacementDistribution above.
-    const effectiveAdherence = Math.min(1.0, Math.max(0.1, labor.adherencePct || 1.0));
+    const effectiveAdherence = resolveEffectiveAdherence(labor);
     const capacityMinutes = shiftLengthMinutes * effectiveAdherence;
     const validStarts = getValidSlapStarts(calendar, shiftLengthMinutes, placementSlapMinutes);
     if (validStarts.length > 0) {
@@ -1725,6 +1779,9 @@ export function searchOptimalHC(params: {
   let infeasibleReason: string | undefined;
   let recommendedHC: number | null = null;
   let evalN = searchCap;
+  // The N the search actually started from — max(N_min, N_occ), not N_min. Needed to
+  // attribute the binding constraint correctly; see the label block near the end.
+  let searchStartN: number | null = null;
 
   const impossibleCheck = findImpossibleCategories({ categories, intervals: validIntervals, openingWIP, sla, calendar });
   const hasImpossibleCategory = impossibleCheck.impossibleCategories.length > 0;
@@ -1772,6 +1829,7 @@ export function searchOptimalHC(params: {
       searchCap,
       Math.max(1, nMinAnalytical, occupancyFeasibleFloor)
     );
+    searchStartN = startN;
     const startEval = evaluateN(startN);
 
     if (startEval.passesAllConstraints) {
@@ -1906,9 +1964,23 @@ export function searchOptimalHC(params: {
   } else if (isInfeasible) {
     bindingConstraintType = 'analytical_baseline';
     bindingConstraintDescription = `Infeasible at User Cap (N = ${searchCap})`;
-  } else if (recommendedHC === nMinAnalytical) {
+  } else if (recommendedHC !== null && searchStartN !== null && recommendedHC === searchStartN) {
+    // The search passed at its very first candidate, so it never had to climb above the
+    // analytic capacity floor — that floor, not any DES gate, is what set this number.
+    //
+    // FIXED 2026-08-31 (BIND-LABEL). This used to test `recommendedHC === nMinAnalytical`,
+    // but the search starts at startN = max(N_min, N_occ), and under the default
+    // derived-hours basis both floors share a denominator, so N_occ = ceil(X) while
+    // N_min = floor(X) — i.e. N_occ = N_min + 1 in 533 of 540 swept workloads. The old test
+    // was therefore almost never true even when the floor was exactly what bound, and
+    // control fell through to the default "Primary SLA … Target" description. Planners were
+    // told SLA was binding in precisely the runs where sweeping the SLA target across
+    // 50–99% provably moved nothing.
     bindingConstraintType = 'analytical_baseline';
-    bindingConstraintDescription = 'Steady-State Workload Capacity Baseline (N_min)';
+    bindingConstraintDescription =
+      occupancyFeasibleFloor > nMinAnalytical
+        ? `Occupancy-Feasible Capacity Floor (N_occ = ${occupancyFeasibleFloor} at ≤ ${resolveOccupancyCapPct(sla)}% occupancy)`
+        : 'Steady-State Workload Capacity Baseline (N_min)';
   } else if (sla.boAsaEnabled && primaryPassedResult && !primaryPassedResult.representativeResult.passesBOASA) {
     bindingConstraintType = 'bo_asa_cap';
     bindingConstraintDescription = `Backoffice ASA Target (≤ ${sla.boAsaTarget} ${sla.boAsaUnit})`;
@@ -2040,6 +2112,13 @@ export async function searchOptimalHCAsync(params: {
     shouldCancel,
   } = params;
 
+  // Workload reduction is applied ONCE, here, by discounting category AHT — see
+  // applyWorkloadReductionToCategories. Every stage below (N_min, N_occ, DES case
+  // generation, Stage 4 gross-up) then sizes against the same reduced workload.
+  // rawCategories is retained only to report nMinBeforeReduction.
+  const rawCategories = categories;
+  categories = applyWorkloadReductionToCategories(categories, sla);
+
   const validIntervals = intervals.filter(
     (it) => it.start && !isNaN(it.start.getTime()) && it.end && !isNaN(it.end.getTime())
   );
@@ -2067,8 +2146,12 @@ export async function searchOptimalHCAsync(params: {
   // 1. Calculate Analytical Baseline (N_min)
   const categoryMap = new Map<string, CategoryConfig>();
   categories.forEach((c) => categoryMap.set(c.name, c));
+  // Un-reduced AHT, used only to report the nMinBeforeReduction display figure.
+  const rawCategoryMap = new Map<string, CategoryConfig>();
+  rawCategories.forEach((c) => rawCategoryMap.set(c.name, c));
 
   let totalWorkloadHours = 0;
+  let totalWorkloadHoursRaw = 0;
   let peakIntervalVolume = 0;
 
   for (const interval of intervals) {
@@ -2081,6 +2164,8 @@ export async function searchOptimalHCAsync(params: {
       priority: 1,
     };
     totalWorkloadHours += (interval.volume * cat.ahtMinutes) / 60;
+    totalWorkloadHoursRaw +=
+      (interval.volume * (rawCategoryMap.get(interval.category)?.ahtMinutes ?? 30)) / 60;
   }
 
   for (const wip of openingWIP) {
@@ -2091,30 +2176,38 @@ export async function searchOptimalHCAsync(params: {
       shrinkagePct: 0.2,
       priority: 1,
     };
+    // An explicit remainingWorkMinutes is measured work already in flight, not a forecast
+    // assumption, so the reduction does not discount it. WIP without one inherits the
+    // category's (reduced) AHT.
     const fallbackAht = cat.ahtMinutes;
-    const remMin =
-      wip.remainingWorkMinutes === undefined || wip.remainingWorkMinutes === null
-        ? fallbackAht
-        : Math.max(0, wip.remainingWorkMinutes);
+    const hasExplicitRemaining =
+      wip.remainingWorkMinutes !== undefined && wip.remainingWorkMinutes !== null;
+    const remMin = hasExplicitRemaining
+      ? Math.max(0, wip.remainingWorkMinutes as number)
+      : fallbackAht;
     totalWorkloadHours += remMin / 60;
+    totalWorkloadHoursRaw +=
+      (hasExplicitRemaining
+        ? Math.max(0, wip.remainingWorkMinutes as number)
+        : (rawCategoryMap.get(wip.category)?.ahtMinutes ?? 30)) / 60;
   }
 
   const nMinBeforeReduction = computeAnalyticalNMin({
-    totalWorkloadHours,
+    totalWorkloadHours: totalWorkloadHoursRaw,
     labor,
     workingDaysInHorizon,
     occupancyCapEnabled: sla.occupancyCapEnabled,
     occupancyCapPct: sla.occupancyCapPct,
   });
 
+  // No workloadReduction* passed: totalWorkloadHours is ALREADY reduced (via category AHT).
+  // Passing it here as well would double-apply the discount.
   const nMinAnalytical = computeAnalyticalNMin({
     totalWorkloadHours,
     labor,
     workingDaysInHorizon,
     occupancyCapEnabled: sla.occupancyCapEnabled,
     occupancyCapPct: sla.occupancyCapPct,
-    workloadReductionEnabled: sla.workloadReductionEnabled,
-    workloadReductionPct: sla.workloadReductionPct,
   });
 
   onProgress?.({
@@ -2189,12 +2282,12 @@ export async function searchOptimalHCAsync(params: {
   // 24x7 RE-ENABLED (2026-08-28, 24x7 multi-start) — see searchOptimalHC's identical comment
   // on the demand-grid caveat for 24x7 placement quality.
   let placementFeasibleFloor: number | undefined;
-  const placementSlapMinutes = Math.max(5, Math.round(labor.shiftSlapMinutes || 30));
+  const placementSlapMinutes = resolveShiftSlapMinutes(labor);
   const representativeCases = precomputedCaseSets[0]?.cases as CaseEntity[] | undefined;
   if (labor.shiftPlacementEnabled && representativeCases) {
     const shiftLengthMinutes = labor.dailyProductiveHours * 60;
     // Capacity, not span — see Gap B comment in computeCandidatePlacementDistribution.
-    const effectiveAdherence = Math.min(1.0, Math.max(0.1, labor.adherencePct || 1.0));
+    const effectiveAdherence = resolveEffectiveAdherence(labor);
     const capacityMinutes = shiftLengthMinutes * effectiveAdherence;
     const validStarts = getValidSlapStarts(calendar, shiftLengthMinutes, placementSlapMinutes);
     if (validStarts.length > 0) {
@@ -2370,6 +2463,9 @@ export async function searchOptimalHCAsync(params: {
   let infeasibleReason: string | undefined;
   let recommendedHC: number | null = null;
   let evalN = searchCap;
+  // The N the search actually started from — max(N_min, N_occ), not N_min. Needed to
+  // attribute the binding constraint correctly; see the label block near the end.
+  let searchStartN: number | null = null;
 
   const impossibleCheck = findImpossibleCategories({ categories, intervals: validIntervals, openingWIP, sla, calendar });
   const hasImpossibleCategory = impossibleCheck.impossibleCategories.length > 0;
@@ -2414,6 +2510,7 @@ export async function searchOptimalHCAsync(params: {
       searchCap,
       Math.max(1, nMinAnalytical, occupancyFeasibleFloor)
     );
+    searchStartN = startN;
     const startEval = await evaluateAsync(
       startN,
       30,
@@ -2599,9 +2696,23 @@ export async function searchOptimalHCAsync(params: {
   } else if (isInfeasible) {
     bindingConstraintType = 'analytical_baseline';
     bindingConstraintDescription = `Infeasible at User Cap (N = ${searchCap})`;
-  } else if (recommendedHC === nMinAnalytical) {
+  } else if (recommendedHC !== null && searchStartN !== null && recommendedHC === searchStartN) {
+    // The search passed at its very first candidate, so it never had to climb above the
+    // analytic capacity floor — that floor, not any DES gate, is what set this number.
+    //
+    // FIXED 2026-08-31 (BIND-LABEL). This used to test `recommendedHC === nMinAnalytical`,
+    // but the search starts at startN = max(N_min, N_occ), and under the default
+    // derived-hours basis both floors share a denominator, so N_occ = ceil(X) while
+    // N_min = floor(X) — i.e. N_occ = N_min + 1 in 533 of 540 swept workloads. The old test
+    // was therefore almost never true even when the floor was exactly what bound, and
+    // control fell through to the default "Primary SLA … Target" description. Planners were
+    // told SLA was binding in precisely the runs where sweeping the SLA target across
+    // 50–99% provably moved nothing.
     bindingConstraintType = 'analytical_baseline';
-    bindingConstraintDescription = 'Steady-State Workload Capacity Baseline (N_min)';
+    bindingConstraintDescription =
+      occupancyFeasibleFloor > nMinAnalytical
+        ? `Occupancy-Feasible Capacity Floor (N_occ = ${occupancyFeasibleFloor} at ≤ ${resolveOccupancyCapPct(sla)}% occupancy)`
+        : 'Steady-State Workload Capacity Baseline (N_min)';
   } else if (sla.boAsaEnabled && primaryPassedResult && !primaryPassedResult.representativeResult.passesBOASA) {
     bindingConstraintType = 'bo_asa_cap';
     bindingConstraintDescription = `Backoffice ASA Target (≤ ${sla.boAsaTarget} ${sla.boAsaUnit})`;
