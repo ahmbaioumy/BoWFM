@@ -104,10 +104,13 @@ shrinkage gross-up, harmonic blend, sum, then a single `round`).
   suite D9). `console.warn`/`console.error` for genuine user-facing faults are fine — debug
   tracing is not.
 - **Never duplicate an algorithm.** `searchOptimalHC` and `searchOptimalHCAsync` are ~500
-  lines of near-identical logic and have already drifted (sync rewrites
-  `sla.clockStartPolicy` under an off-hours-volume condition; async — the one the UI calls
-  from `App.tsx` — does not). Don't add a third copy, and don't fix a bug in one without the
-  other; the correct resolution is one shared implementation the async variant wraps with
+  lines of near-identical logic and have already drifted once (the `sla.clockStartPolicy`
+  off-hours-volume rewrite that used to exist only in sync — defect D8, resolved
+  2026-08-28 by deleting the mitigation from `searchOptimalHC` rather than porting it to
+  async; neither function rewrites `clockStartPolicy` today). That root cause — the
+  duplication itself (D11) — is still open. Don't add a third copy, and don't fix a bug
+  in one without the other; the correct resolution is one shared implementation the
+  async variant wraps with
   progress callbacks. Same hazard between `CaseMinHeap.compare` (real dispatch) and
   `pickNextCase`/`compareByUrgency` (test harnesses only).
 - **All time math goes through `calendar.ts`.** Never hand-roll `Date` arithmetic in engine
