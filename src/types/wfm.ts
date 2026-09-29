@@ -73,6 +73,11 @@ export interface LaborConfig {
  * tolerance of that level's MINIMUM. Omitted = defaults (2 pp / 1 case / 5 min, whole horizon).
  */
 export interface DispatchFairnessConfig {
+  /**
+   * Fair agent assignment on/off. Default true. false restores the exact legacy pick — the
+   * newest-returned idle agent (LIFO stack) — and therefore the pre-fairness recommended HC.
+   */
+  enabled?: boolean;
   /** Utilisation band, percentage points above the least-utilised candidate. Default 2. */
   utilTolerancePp?: number;
   /** Cases-completed band above the candidate with the fewest. Default 1. */

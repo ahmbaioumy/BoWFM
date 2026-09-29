@@ -300,6 +300,7 @@ export const DEFAULT_DISPATCH_FAIRNESS: Required<DispatchFairnessConfig> = {
   countTolerance: 1,
   workloadToleranceMin: 5,
   resetDaily: false,
+  enabled: true,
 };
 
 /** Missing / non-finite / negative tolerances fall back to the default; resetDaily is a strict boolean. */
@@ -310,6 +311,7 @@ export function resolveDispatchFairness(cfg?: DispatchFairnessConfig): Required<
     countTolerance: pick(cfg?.countTolerance, DEFAULT_DISPATCH_FAIRNESS.countTolerance),
     workloadToleranceMin: pick(cfg?.workloadToleranceMin, DEFAULT_DISPATCH_FAIRNESS.workloadToleranceMin),
     resetDaily: cfg?.resetDaily === true,
+    enabled: cfg?.enabled !== false,
   };
 }
 
@@ -1263,8 +1265,12 @@ export function runBackofficeDES(params: {
       for (let k = 0; k < idleList.length; ) {
         const a = idleList[k];
         if (agentDailyMinutesRemaining[a] <= 0.01) {
-          idleList[k] = idleList[idleList.length - 1];
-          idleList.pop();
+          if (fairCfg.enabled) {
+            idleList[k] = idleList[idleList.length - 1];
+            idleList.pop();
+          } else {
+            idleList.splice(k, 1); // legacy: keep stack order
+          }
           continue;
         }
         if (staggeredMode) {
@@ -1290,7 +1296,11 @@ export function runBackofficeDES(params: {
       const assignedCase = pickNextCase(queue, currTime);
       if (!assignedCase) break;
 
-      const fair = selectFairAgent(nCand, fairIds, fairUtil, fairCases, fairBusy, fairIdle, fairTol, fairRng, fairSurv);
+      // Legacy (fair assignment OFF): the newest-returned eligible agent — the top of the old
+      // idle stack. This one branch is the ONLY difference between the two modes.
+      const fair = fairCfg.enabled
+        ? selectFairAgent(nCand, fairIds, fairUtil, fairCases, fairBusy, fairIdle, fairTol, fairRng, fairSurv)
+        : { slot: nCand - 1, decidedBy: 'single' as DispatchDecidedBy };
       const agentId = fairIds[fair.slot];
       if (!skipCaseResultsAndTimeline) {
         let runnerUp: AgentFairnessSnapshot | null = null;
@@ -1329,8 +1339,12 @@ export function runBackofficeDES(params: {
       // Swap-remove the chosen agent from the idle list (order in the list carries no meaning now).
       {
         const pos = fairPos[fair.slot];
-        idleList[pos] = idleList[idleList.length - 1];
-        idleList.pop();
+        if (fairCfg.enabled) {
+          idleList[pos] = idleList[idleList.length - 1];
+          idleList.pop();
+        } else {
+          idleList.splice(pos, 1); // legacy: keep stack order
+        }
       }
 
       const agentBudget = agentDailyMinutesRemaining[agentId];
