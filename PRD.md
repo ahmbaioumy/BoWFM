@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft — as-built specification |
-| **Version** | 1.11.0 |
+| **Version** | 1.12.0 |
 | **Date** | 2026-09-29 |
 | **Owner** | _(unassigned)_ |
 | **Product** | Backoffice WFM Sizing Engine |
@@ -344,6 +344,32 @@ tail of the window at zero coverage regardless of headcount (Stage 3a's original
 statement) — but coverage had never been an enforced constraint until now, only a
 side-effect Stage 3a's optimizer might or might not fix. Results show a "Minimum Coverage"
 card next to the Occupancy card when enabled.
+
+**Coverage definition (as-built, 1.12.0 / C6).** An agent is *present* for coverage iff the
+sample instant lies inside its **own shift window** on a working day:
+`dayOpen + startOffset <= t < dayOpen + startOffset + shiftLength`, with
+`shiftLength = dailyProductiveHours x 60` (un-adhered — the same figure the staggered path and
+`getValidSlapStarts` use). Remaining daily budget and busy/idle state are irrelevant: a busy
+agent is present, and an agent whose adherence-reduced budget (`dailyProductiveHours x
+adherence`) is exhausted a few minutes before its shift ends is still on the floor. Budget
+still caps *work* and dispatch eligibility is unchanged. Unstaggered (uniform) layouts have
+`startOffset = 0`, so **a shift shorter than the open day fails coverage for any headcount**
+(structural) — only staggered starts (coverage repair / placement) can cover the tail of the
+window. Fixed shifts (no split shifts) and the 08:00–22:00 window are user-confirmed domain
+facts. Previously presence was the proxy "budget remaining or busy", which made every shift
+"leave" `(1 - adherence) x shiftLength` minutes early: at adherence 0.98 a saturated late
+cohort could never cover the close, repair never passed on real files, and uniform passed only
+by hiring enough agents that some kept unused budget until close (`AJM_Simu.csv` pooled 104,
+against 64 now). Measured effect of the correction (same seeds, N_min unchanged everywhere):
+`AJM_Only` 12→7 / 11→7, `AJM_Simu` 104→64 / 96→66, `EGS_Only` 81→49 / 77→50, `EGS_Only` with
+20% reduction 52→31 / 52→35 (pooled / siloed recommended HC); the three built-in samples are
+unchanged. The Results binding-constraint label reports **Minimum Coverage Floor**
+(`bindingConstraintType: 'min_coverage'`) when the candidate one below the recommendation
+failed coverage alone on the path that decided it (repair when available, else uniform).
+When repair is available and fails on SLA — the usual case on real files, where the forced
+staggered layout costs some SLA — the label stays the SLA gate. Search speed: when uniform is
+structurally unable to pass (non-24×7, floor on, shift < open day) the search evaluates repair
+first and skips the uniform evaluation (`planCoverageRepair`, shared by both searches).
 
 **24×7 — regression fixed, then real multi-start delivered same day (§11 P0-4 now closed).**
 A same-day sequence: the gate above was briefly not enforced for `calendar.is24x7` after an
@@ -843,8 +869,9 @@ Case order is EDF (§7.2) and is frozen. *Who* takes the case used to be the new
 idle agent (a LIFO stack), which concentrated work on a few agents whenever there was spare
 capacity (measured on real data: max/min cases 5.5x to 16x; after the change about 1.02x). The
 selection cascade is described in FR-4.7. It never alters requirements by design and was
-gated: across 125 measured scenarios N_min was identical everywhere and recommended HC
-identical except two (+1; see L17). The legacy pick remains available (toggle OFF).
+gated: N_min is identical everywhere, and since 1.12.0 (coverage presence = shift window) the
+recommended HC is identical between fair and legacy in all 18 re-measured scenarios (see
+L17; before 1.12.0 two scenarios differed by +1). The legacy pick remains available (toggle OFF).
 
 ### 7.3 Planned-horizon occupancy denominator
 See §6.1. Occupancy is a demand ÷ capacity ratio. This was challenged during audit and
@@ -1062,7 +1089,7 @@ Behaviours a user must understand to interpret results correctly.
 | **L14** | **Extra OFF roster uplift (Stage 4) is a flat weekly ratio, not a per-agent rest-day rotation.** It answers "how many total heads are needed," not "which specific head works which specific day" — that is a rostering decision made downstream, outside this tool's scope (see `docs/wfm/05-scheduling.md`: "Sizing number ≠ roster"). The ratio assumes off days are staggered evenly across the team; a small headcount (e.g. 3 heads, 2 off days/week each) cannot actually stagger evenly, so the flat multiplier is an approximation at low N. Separately, a labor policy where off days meet or exceed open days makes coverage arithmetically infeasible (`coverageDays <= 0`) — the engine flags this rather than silently applying no uplift. | For small teams, sanity-check the rounded Net Operational HC against what a real weekly roster can actually stagger. Treat a flagged infeasible-roster result as a labor-policy configuration error, not a sizing answer. |
 | **L15** | **The binding-constraint label distinguishes a capacity floor from an SLA gate.** Fixed 2026-08-31 (`BIND-LABEL`): when the search passes at its first candidate (`startN = max(N_min, N_occ)`) the result is attributed to the capacity floor, naming `N_occ` when the occupancy floor is the higher of the two. Previously the label tested `recommendedHC === nMinAnalytical`, but `N_occ = N_min + 1` in 533 of 540 swept workloads, so that test almost never fired and the label defaulted to "Primary SLA … Target" — telling planners SLA was binding in exactly the runs where sweeping the SLA target across 50–99% provably moved nothing. | If the label reads as a capacity floor, SLA settings will not move the number; change occupancy cap, adherence, productive hours, or workload instead. Tests: `D42.10`–`D42.15` in `scripts/verify-sizing-fixes.mts`. |
 | **L16** | **SLA targets are inelastic across most of their range.** Not a defect — a property of deferrable work. Once headcount clears the workload, EDF dispatch finishes cases far inside any multi-hour window, so attainment snaps to 100% and the target % has nothing to bite on. Measured: with a 30-minute AHT, sweeping Primary % from 50→99 or the turnaround window from 2h→48h changed the recommendation by **zero** agents; the SLA gate only bound once the window approached the AHT itself (30–60 min). | Expect the recommendation to be driven by workload, occupancy cap, adherence and productive hours — not by the SLA block — unless your turnaround target is close to your handling time. Read the binding-constraint label (L15) to see which regime you are in. |
-| **L17** | **Fair agent assignment can raise the recommended HC by 1 in near-capacity runs, because the coverage gate counts "budget remaining" as presence.** Measured 2026-09-29 over 137 scenarios (125 suite/real-data scenarios plus 12 built-in sample runs: 3 samples × pooled/siloed × fair ON/OFF): 2 changed (a 20% workload-reduction fixture, 13→14, gross 16→18; `AJM_Simu.csv` pooled, 103→104, gross 147→149); N_min never changes, and fair OFF reproduces the original numbers everywhere. At ~98% occupancy fair dispatch drains every agent's daily budget together, so for a few seconds to minutes before close no agent has budget left, while the legacy pick leaves a few stragglers with minutes of budget. | Not a capacity error. If the extra agent is unwanted, switch Fair agent assignment OFF (Labor tab) to reproduce the legacy figure. See §11 P0-5. |
+| **L17** | **Fair agent assignment no longer changes the recommended HC (resolved by C6, 1.12.0).** Until 1.12.0 fair assignment could raise the recommendation by 1 in near-capacity runs (a 20% workload-reduction fixture 13→14; `AJM_Simu.csv` pooled 103→104), because the coverage gate counted "budget remaining" as presence and fair dispatch drains every agent's daily budget together at ~98% occupancy. Presence is now the agent's own shift window (FR-5.12), so that artefact is gone. Re-measured 2026-09-29 after the change, fair ON vs OFF: **0 of 18 scenarios differ** (8 real-file runs and 6 built-in samples, each pooled/siloed as applicable, plus the 4 D43.13 pin fixtures); N_min is identical in both modes. The suite pins ON = OFF (D43.13, D45.2). | Fair assignment is HC-neutral. It still changes *who* gets each case (FR-4.7), not how many agents are needed. The toggle remains for reproducing legacy assignment. |
 
 ---
 
@@ -1162,15 +1189,6 @@ in `hc-search.ts` messaging was also corrected (2026-08-28) to say "lowest verif
 — monotonicity of DES pass/fail vs N remains an undischarged, honestly-labeled assumption (see
 D39 empirical sweep in `project_context.md` §9), though the walk-down's safety property (only
 ever returns a verified-passing N) does not depend on it.
-
-**P0-5 — Review the minimum-coverage gate: it drives 30–40% of the recommended HC on real data.**
-Measured 2026-09-29: in unstaggered runs "on shift" means "still has daily budget", so a
-few seconds of simultaneous budget exhaustion on a backlog-heavy first day forces many more
-agents. Replacing it with a gap rule (a zero-coverage gap only counts if it lasts at least the
-shortest case's handling time) drops the recommended HC on the real files from 103 to 64
-(`AJM_Simu.csv` pooled), 96 to 66 (siloed), 81 to 49 (`EGS_Only.csv`), with identical results
-under fair and legacy assignment and no change on the in-repo fixtures. Decide what "someone
-available" should mean before changing it; the frozen floor/ceiling decisions are untouched.
 
 ### P1 — Data loss and usability
 

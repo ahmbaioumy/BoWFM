@@ -1151,7 +1151,11 @@ console.log('\n--- Suite D21: No-regression when shiftPlacementEnabled is off/om
   assert(runOmitted.recommendedHC === runFalse.recommendedHC, 'D21.1 omitted vs explicit-false give identical recommendedHC', `omitted=${runOmitted.recommendedHC} false=${runFalse.recommendedHC}`);
   assert(runOmitted.finalDESResult?.primaryAchievedPct === runFalse.finalDESResult?.primaryAchievedPct, 'D21.2 identical primaryAchievedPct', `${runOmitted.finalDESResult?.primaryAchievedPct} vs ${runFalse.finalDESResult?.primaryAchievedPct}`);
   assert(runOmitted.shiftPlacement === undefined, 'D21.3 shiftPlacement telemetry is undefined when the flag is off', `got ${JSON.stringify(runOmitted.shiftPlacement)}`);
-  assert(runOmitted.finalDESResult?.shiftDistributionUsed === undefined, 'D21.4 finalDESResult.shiftDistributionUsed is undefined when the flag is off', `got ${JSON.stringify(runOmitted.finalDESResult?.shiftDistributionUsed)}`);
+  // D21.4 (updated 2026-09-29, C6): with the flag off this was undefined because coverage repair could never pass (a saturated
+  // late cohort 'left' early under budget-as-presence). Presence is now the agent's own shift window, so the unconditional
+  // coverage repair passes and its minimal layout (<= 2 start times, no SLA-driven placement) is legitimately reported.
+  const usedOmitted = runOmitted.finalDESResult?.shiftDistributionUsed;
+  assert(JSON.stringify(usedOmitted) === JSON.stringify(runFalse.finalDESResult?.shiftDistributionUsed) && (usedOmitted === undefined || (usedOmitted.__POOLED__?.slaps.length ?? 99) <= 2), 'D21.4 flag off: shiftDistributionUsed is identical omitted vs false and is at most the minimal coverage-repair layout', `got ${JSON.stringify(usedOmitted)}`);
   assert(runOmitted.occupancyFeasibleFloor !== undefined && runOmitted.occupancyFeasibleFloor > 0, 'D21.5 occupancyFeasibleFloor is still always computed (diagnostic-only, independent of the flag)', `got ${runOmitted.occupancyFeasibleFloor}`);
 
   // A plain runBackofficeDES call with no shiftDistribution argument must be byte-identical
@@ -2062,8 +2066,12 @@ console.log('\n--- Suite D33: Phase 3 — coverage repair (redistribution before
   });
   assert(searchNoCoverage.recommendedHC !== null, 'D33.6 setup: the same scenario passes SLA on uniform alone once coverage is disabled (isolates the coverage cost)', `recommendedHC=${searchNoCoverage.recommendedHC}`);
   assert(
-    searchWithCoverage.recommendedHC === searchNoCoverage.recommendedHC,
-    'D33.7 coverage costs ZERO extra headcount here — same recommendation with the floor on vs off (redistribution, not more heads)',
+    // Updated 2026-09-29 (C6): was 'costs ZERO extra headcount' (21 = 21). That equality relied on budget-as-presence:
+    // uniform 9h shifts 'covered' a 14h window because agents with unused budget counted as present until close. Fixed
+    // shifts cannot cover 14h from one start, so one seat moves to a late cohort and stops serving the morning peak:
+    // coverage costs exactly one extra head here (22 vs 21).
+    searchWithCoverage.recommendedHC === (searchNoCoverage.recommendedHC ?? -1) + 1,
+    'D33.7 coverage costs exactly ONE extra head here (a 9h shift cannot cover a 14h window; one seat moves to a late cohort)',
     `withCoverage=${searchWithCoverage.recommendedHC} withoutCoverage=${searchNoCoverage.recommendedHC}`
   );
 
@@ -3121,9 +3129,9 @@ console.log('\n--- Suite D43: fair case-to-agent distribution ---');
   // --- D43.13: HC-pinning regression + the OFF toggle reproduces the ORIGINAL (pre-fairness) numbers --
   // Fixtures: pooled (D42.1: 20% workload reduction), siloed, staggered (shift placement), 24x7.
   // OFF = legacy LIFO pick = the pre-change values (captured before the engine edit; D42.1 13/16).
-  // ON (default) = the values gated on 2026-09-29: identical everywhere except D42.1 (+1 HC) because
-  // the coverage gate counts 'budget remaining' as presence and fair dispatch drains every agent's
-  // budget together at ~98% occupancy (PRD §10). N_min is identical in both modes.
+  // ON (default) = identical to OFF on every fixture. Until C6 (2026-09-29) D42.1 was +1 HC under ON (14/18): the coverage
+  // gate counted 'budget remaining' as presence and fair dispatch drains every agent's budget together at ~98% occupancy.
+  // Presence is now the shift window, so that artefact is gone. N_min is identical in both modes.
   {
     const slaPin: SLAPolicyConfig = { ...SLA43, primaryPct: 80, primaryWindow: 8, primaryUnit: 'hours', occupancyCapPct: 85 };
     const d42Iv: StandardInterval[] = [];
@@ -3134,7 +3142,7 @@ console.log('\n--- Suite D43: fair case-to-agent distribution ---');
       for (let h = 9; h < 17; h++) d42Iv.push({ intervalIndex: ixp++, start: new Date(2026, 2, 2 + d, h, 0), end: new Date(2026, 2, 2 + d, h + 1, 0), category: 'General', volume: 30 });
     }
     const pinFx: Record<string, { p: any; nMin: number; off: [number, number]; on: [number, number] }> = {
-      pooled: { p: { intervals: d42Iv, openingWIP: [], categories: [{ ...cat43('General', 30), shrinkagePct: 0.2 }], calendar: BIZ43, labor: { ...LAB43, dailyProductiveHours: 7.5 }, sla: { ...slaPin, workloadReductionEnabled: true, workloadReductionPct: 20 }, seed: 12345, userMaxHC: 200, replications: 8 }, nMin: 12, off: [13, 16], on: [14, 18] },
+      pooled: { p: { intervals: d42Iv, openingWIP: [], categories: [{ ...cat43('General', 30), shrinkagePct: 0.2 }], calendar: BIZ43, labor: { ...LAB43, dailyProductiveHours: 7.5 }, sla: { ...slaPin, workloadReductionEnabled: true, workloadReductionPct: 20 }, seed: 12345, userMaxHC: 200, replications: 8 }, nMin: 12, off: [13, 16], on: [13, 16] },
       siloed: { p: { intervals: ivs43(5, 10, 9, 17, { A: 10, B: 6 }), openingWIP: [], categories: [cat43('A', 20, 1), cat43('B', 30, 2)], calendar: BIZ43, labor: LAB43, sla: slaPin, seed: 42, userMaxHC: 60, replications: 5, queueArchitecture: 'siloed' }, nMin: 12, off: [13, 16], on: [13, 16] },
       staggered: { p: { intervals: ivs43(5, 10, 9, 17, { General: 8 }), openingWIP: [], categories: [cat43('General', 20)], calendar: BIZ43, labor: { ...LAB43, dailyProductiveHours: 6, shiftPlacementEnabled: true, shiftSlapMinutes: 30 }, sla: { ...slaPin, primaryWindow: 4 }, seed: 42, userMaxHC: 60, replications: 5 }, nMin: 7, off: [8, 10], on: [8, 10] },
       c247: { p: { intervals: ivs43(5, 10, 0, 24, { General: 2 }, CAL_24X7), openingWIP: [], categories: [cat43('General', 30)], calendar: CAL_24X7, labor: { ...LAB43, workingDaysPerWeek: 7, offDaysPerWeek: 0 }, sla: slaPin, seed: 42, userMaxHC: 60, replications: 5 }, nMin: 6, off: [6, 8], on: [6, 8] },
