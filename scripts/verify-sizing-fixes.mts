@@ -3343,6 +3343,98 @@ console.log('\n--- Suite D45: availableMinutes accrual ---');
   }
 }
 
+// =================================================================
+// Suite D46 — Coverage presence = inside the agent's own shift window (C6, PRD P0-5)
+//
+// Coverage used to count an agent present only while daily BUDGET remained (or while busy).
+// At adherence 0.98 the budget (470.4 min) is shorter than the 480-min shift, so a saturated
+// late cohort "left" ~9.6 min before close and repair could never pass on real files. Presence
+// is now purely clock-based: dayOpen + startOffset <= t < dayOpen + startOffset + shiftLength.
+// Budget still caps WORK; dispatch eligibility is unchanged.
+// Pre-fix: D46.1, D46.2b, D46.3 (structural) and D46.4 (binding label) fail; D46.5 and the
+// 'control' assertions hold before and after (staggered presence already honoured the shift window).
+// =================================================================
+console.log('\n--- Suite D46: coverage presence = own shift window ---');
+{
+  const WIN46: CalendarConfig = { workingDays: [1, 2, 3, 4, 5], dailyOpenHour: 8, dailyOpenMinute: 0, dailyCloseHour: 22, dailyCloseMinute: 0, holidays: [] };
+  const lab46 = (hours: number, adh: number): LaborConfig => ({ dailyProductiveHours: hours, adherencePct: adh, workingDaysPerWeek: 5, offDaysPerWeek: 2, contractualHoursSource: 'derived', shifts: [] });
+  const sla46: SLAPolicyConfig = {
+    primaryPct: 50, primaryWindow: 5, primaryUnit: 'days', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes',
+    asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'arrival',
+    occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 95, minCoverageEnabled: true, minAgentsPerInterval: 1,
+  };
+  const cat46: CategoryConfig[] = [{ id: 'g', name: 'General', ahtMinutes: 20, shrinkagePct: 0.2, priority: 1 }];
+  const iv46 = (days: number, volPerHalfHour: number): StandardInterval[] => {
+    const out: StandardInterval[] = [];
+    let idx = 0;
+    for (let d = 0; d < days; d++) {
+      for (let h = 8; h < 22; h++) for (const m of [0, 30]) {
+        out.push({ intervalIndex: idx++, start: new Date(2026, 9, 5 + d, h, m), end: new Date(2026, 9, 5 + d, h, m + 30), volume: volPerHalfHour, category: 'General' });
+      }
+    }
+    return out;
+  };
+  const dist46 = (counts: Array<[number, number]>): ShiftDistributionByCategory => ({ __POOLED__: { slapMinutes: 30, slaps: counts.map(([o, n]) => ({ startMinutesFromOpen: o, agentCount: n })) } });
+  const run46 = (hc: number, hours: number, adh: number, vol: number, sd?: ShiftDistributionByCategory) =>
+    runBackofficeDES({ operationalHC: hc, intervals: iv46(3, vol), openingWIP: [], categories: cat46, calendar: WIN46, labor: lab46(hours, adh), sla: sla46, seed: 42, shiftDistribution: sd });
+
+  // D46.1: a saturated late-cohort agent whose budget ends before its shift end is still present
+  // until shift end. 2 agents (08:00 + 14:00 cohorts), adherence 0.98 => budget 470.4 < 480 shift;
+  // 56 cases/day of 20 min saturates both, so the late agent works until its budget is gone.
+  {
+    const r = run46(2, 8, 0.98, 2, dist46([[0, 1], [360, 1]]));
+    assert(r.minCoverageObserved >= 1 && r.passesCoverage, 'D46.1 late-cohort agent whose budget ends before shift end still counts present until shift end (min coverage >= 1)', `minCoverageObserved=${r.minCoverageObserved}`);
+  }
+
+  // D46.2: adherence 0.98, 14h window: repair distribution passes coverage at N=2 (the minimum
+  // that can tile the window), and the search recommends a plausible N.
+  {
+    const cw = undefined;
+    const repair = buildCoverageRepairDistribution({ n: 2, calendar: WIN46, labor: lab46(8, 0.98), minAgentsPerInterval: 1, queueArchitecture: 'pooled', categoryWorkloadMinutes: cw });
+    assert(!!repair, 'D46.2a repair distribution exists at N=2', '');
+    const r = run46(2, 8, 0.98, 2, repair ?? undefined);
+    assert(r.passesCoverage, 'D46.2b saturated adherence-0.98 fixture: repair at N=2 passes coverage', `minCoverageObserved=${r.minCoverageObserved}`);
+    const s = searchOptimalHC({ intervals: iv46(3, 2), openingWIP: [], categories: cat46, calendar: WIN46, labor: lab46(8, 0.98), sla: sla46, seed: 42, userMaxHC: 40, replications: 3 });
+    assert(s.recommendedHC !== null && s.recommendedHC <= 4, 'D46.2c control: search recommends a plausible N (<= 4) for a 2-agent-sized load with coverage on', `recommendedHC=${s.recommendedHC}`);
+  }
+
+  // D46.3: uniform placement with an open day longer than the shift fails coverage for any N
+  // (structural) — extra agents cannot manufacture presence after the shift ends.
+  for (const hc of [1, 5, 20]) {
+    const r = run46(hc, 8, 1.0, 0.2);
+    assert(r.minCoverageObserved === 0 && !r.passesCoverage, `D46.3 uniform, 14h window, 8h shift, N=${hc}: coverage fails structurally (agents gone after 16:00)`, `minCoverageObserved=${r.minCoverageObserved}`);
+  }
+  {
+    const r = run46(5, 14, 1.0, 0.2);
+    assert(r.minCoverageObserved >= 1 && r.passesCoverage, 'D46.3b control: uniform with shift length == open day passes coverage', `minCoverageObserved=${r.minCoverageObserved}`);
+  }
+
+  // D46.4: when coverage is what sets the recommendation, the binding constraint says so — in both
+  // the sync and async search. Load is light enough that SLA/occupancy pass at N=1 (analytic floor
+  // 1) but one agent can never cover a 14h window with 8h shifts, so the search must climb to 2 and
+  // the N-1 candidate fails coverage ONLY. Controls: SLA-driven and floor-driven runs keep their labels.
+  {
+    const p46 = { openingWIP: [], categories: cat46, calendar: WIN46, labor: lab46(8, 0.98), sla: sla46, seed: 42, userMaxHC: 40, replications: 3 };
+    const syncCov = searchOptimalHC({ ...p46, intervals: iv46(3, 0.2) });
+    const asyncCov = await searchOptimalHCAsync({ ...p46, intervals: iv46(3, 0.2) });
+    assert(syncCov.recommendedHC === 2 && syncCov.bindingConstraintType === 'min_coverage' && /coverage/i.test(syncCov.bindingConstraintDescription ?? ''), 'D46.4a sync: coverage-bound recommendation (N=2, floor 1) reports bindingConstraintType min_coverage', `rec=${syncCov.recommendedHC} type=${syncCov.bindingConstraintType} desc=${syncCov.bindingConstraintDescription}`);
+    assert(asyncCov.recommendedHC === syncCov.recommendedHC && asyncCov.bindingConstraintType === syncCov.bindingConstraintType && asyncCov.bindingConstraintDescription === syncCov.bindingConstraintDescription, 'D46.4b async reports the identical recommendation and binding constraint', `async type=${asyncCov.bindingConstraintType}`);
+    const noCov = searchOptimalHC({ ...p46, intervals: iv46(3, 0.2), sla: { ...sla46, minCoverageEnabled: false } });
+    assert(noCov.recommendedHC === 1 && noCov.bindingConstraintType !== 'min_coverage', 'D46.4c control: coverage gate OFF recommends N=1 and never reports min_coverage', `rec=${noCov.recommendedHC} type=${noCov.bindingConstraintType}`);
+    const floorBound = searchOptimalHC({ ...p46, intervals: iv46(3, 4) });
+    assert(floorBound.bindingConstraintType !== 'min_coverage', 'D46.4d control: load-driven recommendation is not labelled coverage', `type=${floorBound.bindingConstraintType}`);
+  }
+
+  // D46.5: an agent outside its shift window is never counted present, even with budget left.
+  // 6h shifts at 08:00 and 16:00 leave 14:00-16:00 uncovered (light demand, budgets untouched).
+  {
+    const r = run46(2, 6, 1.0, 0.2, dist46([[0, 1], [480, 1]]));
+    assert(r.minCoverageObserved === 0 && !r.passesCoverage, 'D46.5 gap between two 6h shifts (14:00-16:00) is a coverage failure even though both agents have unused budget', `minCoverageObserved=${r.minCoverageObserved}`);
+    const ok = run46(3, 6, 1.0, 0.2, dist46([[0, 1], [360, 1], [480, 1]]));
+    assert(ok.minCoverageObserved >= 1 && ok.passesCoverage, 'D46.5b control: 6h shifts at 08:00, 14:00 and 16:00 tile 08:00-22:00 without a gap', `minCoverageObserved=${ok.minCoverageObserved}`);
+  }
+}
+
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');

@@ -45,6 +45,7 @@ const EVENT_TYPE_ORDER: Record<EventType, number> = {
   CasePark: 2,
   AgentAvailable: 3,
   ShiftEnd: 3,
+  CoverageCheck: 3,
   DayClose: 3,
   CaseResume: 4,
   SimulationEnd: 5,
@@ -1124,8 +1125,17 @@ export function runBackofficeDES(params: {
             });
           }
         }
-      } else if (openTime.getTime() >= horizonStart.getTime() && openTime.getTime() <= drainHorizonEnd.getTime()) {
-        scheduleEvent(openTime, 'AgentAvailable', 'SYS_OPEN');
+      } else {
+        if (openTime.getTime() >= horizonStart.getTime() && openTime.getTime() <= drainHorizonEnd.getTime()) {
+          scheduleEvent(openTime, 'AgentAvailable', 'SYS_OPEN');
+        }
+        // Uniform presence ends at open + shiftLength (coverage only — nothing else changes at
+        // that instant: dispatch is unbounded by shift end in this mode). A pure sampling marker
+        // so the coverage sampler observes the drop; skipped when the shift reaches close.
+        const uniformEndMs = openTime.getTime() + shiftLengthMinutes * 60000;
+        if (uniformEndMs < closeTime.getTime() && uniformEndMs >= horizonStart.getTime() && uniformEndMs <= drainHorizonEnd.getTime()) {
+          scheduleEvent(uniformEndMs, 'CoverageCheck', 'SYS_COVERAGE_END');
+        }
       }
       // DayClose is a business-hours-only concept: 24x7 has no closing boundary to hand
       // in-flight work back at — a case in progress across midnight continues uninterrupted
@@ -1154,11 +1164,18 @@ export function runBackofficeDES(params: {
 
   // --- Minimum-coverage tracking (mode-independent — must work under skipCaseResultsAndTimeline,
   // since the CI-gated replications that decide pass/fail always run with it true) -----------
-  // Built entirely from state already maintained in BOTH modes: agentOnShiftToday (has this
-  // agent's own shift started and not yet ended today — staggered only, else trivially "yes"
-  // whenever business is open) and agentDailyMinutesRemaining (decremented at assignment time
-  // regardless of skip mode). An agent counts as on-shift-and-staffing right now iff both are
-  // true. Sampled once at horizonStart, then once per event-processing tick from the main
+  // PRESENCE (C6, 2026-09-29): an agent is present for coverage iff the sample instant lies inside
+  // ITS OWN shift window [dayOpen + startOffset, dayOpen + startOffset + shiftLength) on a working
+  // day — purely a function of the clock and the agent's start offset. Remaining daily budget and
+  // busy/idle state are irrelevant: a busy agent is present, and an agent whose adherence-reduced
+  // budget (dailyProductiveHours x adherence) ran out a few minutes before its shift ends is still
+  // physically on the floor. The previous proxy (budget > 0 || busy) made every shift "leave"
+  // (1 - adherence) x shiftLength minutes early, so a late cohort could never cover the close and
+  // the repair never passed on real files. Budget still caps WORK and dispatch eligibility is
+  // unchanged — only this coverage count changed. Uniform (non-staggered): startOffset = 0 and the
+  // same shiftLength the staggered path uses, so a shift shorter than the open day is a structural
+  // coverage failure that only staggering (repair/placement) can fix.
+  // Sampled once at horizonStart, then once per event-processing tick from the main
   // event loop's own deferred call (see the `nextEv` check near the bottom of the loop) —
   // deferred for the SAME reason logTimelineState is: sampling immediately inside a handler
   // (the original design) let an outgoing cohort's ShiftEnd sample a transient zero a fraction
@@ -1168,27 +1185,20 @@ export function runBackofficeDES(params: {
   // continuous handoffs reported minCoverageObserved=0 despite genuinely unbroken coverage —
   // caught while validating the 24x7 multi-start fix, suite D36).
   let minOnShiftDuringOpenHours = Infinity;
-  function countAgentsOnShiftNow(): number {
-    // agentDailyMinutesRemaining is decremented at ASSIGNMENT time, not completion time — an
-    // agent dispatched their final chunk of budget shows remaining ~0 while STILL actively
-    // busy working it. Checking remaining > 0.01 alone therefore misses currently-busy
-    // agents right at the moment they consume their last minutes, undercounting presence.
-    // Fixed 2026-08-28 (found while validating the 24x7 multi-start fix, suite D36: a
-    // hand-built perfect 3-way tiling with continuous handoffs still reported a false-
-    // positive zero-coverage moment mid-shift, at an ordinary case-completion boundary with
-    // no cohort transition anywhere near it — traced to exactly this). An agent currently in
-    // activeProcessing is on shift by definition, regardless of remaining budget.
+  function countAgentsOnShiftNow(atMs: number): number {
+    const dayOpenMs = getDailyOpenClose(new Date(atMs), calendar).openTime.getTime();
+    const shiftMs = shiftLengthMinutes * 60000;
     let count = 0;
     for (let i = 0; i < operationalHC; i++) {
-      const started = !staggeredMode || agentOnShiftToday![i] === 1;
-      if (started && (agentDailyMinutesRemaining[i] > 0.01 || agentActive[i] === 1)) count++;
+      const startMs = dayOpenMs + agentSlapStartMinutes[i] * 60000;
+      if (atMs >= startMs && atMs < startMs + shiftMs) count++;
     }
     return count;
   }
   function sampleCoverage(atTime: Date) {
     if (operationalHC === 0) return;
     if (!isWorking(atTime, calendar)) return;
-    const c = countAgentsOnShiftNow();
+    const c = countAgentsOnShiftNow(atTime.getTime());
     if (c < minOnShiftDuringOpenHours) minOnShiftDuringOpenHours = c;
   }
 
@@ -1201,9 +1211,6 @@ export function runBackofficeDES(params: {
   let doubleBookedAssignments = 0;
   let completedCount = 0;
   let totalHandlingMinutes = 0;
-  // Called here (not right after sampleCoverage's own definition above) because
-  // countAgentsOnShiftNow reads activeProcessing, which must exist first — harmless either
-  // way since activeProcessing is always empty at horizonStart regardless.
   sampleCoverage(horizonStart);
 
   // Intervals timeline logging (only if !skipCaseResultsAndTimeline)

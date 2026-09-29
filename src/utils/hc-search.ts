@@ -665,6 +665,29 @@ export function buildCoverageRepairDistribution(params: {
 }
 
 /**
+ * Binding-constraint attribution for the minimum-coverage gate — ONE implementation shared by
+ * searchOptimalHC and searchOptimalHCAsync (they must never drift). Coverage is the binding gate
+ * when the candidate one below the recommendation failed for coverage ALONE: every other gate
+ * (SLA, category SLA, ASA, occupancy) already passed there, so only the coverage floor kept the
+ * search from stopping lower. (Added 2026-09-29 with C6: previously such runs were reported as
+ * statistical_primary_sla — e.g. SLA alone needed 61 while coverage set the recommendation.)
+ */
+export function resolveCoverageBinding(
+  belowRecommended: { passesAllConstraints: boolean; failingReasons: string[] } | undefined,
+  sla: SLAPolicyConfig,
+  recommendedHC: number
+): { type: 'min_coverage'; description: string } | null {
+  if (!belowRecommended || belowRecommended.passesAllConstraints) return null;
+  const reasons = belowRecommended.failingReasons;
+  if (reasons.length === 0 || !reasons.every((r) => r.startsWith('Coverage:'))) return null;
+  const minAgents = resolveMinAgentsPerInterval(sla, recommendedHC);
+  return {
+    type: 'min_coverage',
+    description: `Minimum Coverage Floor (≥ ${minAgents} agent${minAgents === 1 ? '' : 's'} on shift at every open interval) — SLA and occupancy already pass one agent lower`,
+  };
+}
+
+/**
  * Single shared decision point for whether a placement distribution replaces the uniform
  * result for a candidate N — used identically by searchOptimalHC and searchOptimalHCAsync.
  *
@@ -1994,6 +2017,11 @@ export function searchOptimalHC(params: {
       occupancyFeasibleFloor > nMinAnalytical
         ? `Occupancy-Feasible Capacity Floor (N_occ = ${occupancyFeasibleFloor} at ≤ ${resolveOccupancyCapPct(sla)}% occupancy)`
         : 'Steady-State Workload Capacity Baseline (N_min)';
+  } else if (recommendedHC !== null && resolveCoverageBinding(evalCache.get(recommendedHC - 1), sla, recommendedHC)) {
+    // Coverage-only failure one below the recommendation — see resolveCoverageBinding.
+    const cb = resolveCoverageBinding(evalCache.get(recommendedHC - 1), sla, recommendedHC)!;
+    bindingConstraintType = cb.type;
+    bindingConstraintDescription = cb.description;
   } else if (sla.boAsaEnabled && primaryPassedResult && !primaryPassedResult.representativeResult.passesBOASA) {
     bindingConstraintType = 'bo_asa_cap';
     bindingConstraintDescription = `Backoffice ASA Target (≤ ${sla.boAsaTarget} ${sla.boAsaUnit})`;
@@ -2732,6 +2760,11 @@ export async function searchOptimalHCAsync(params: {
       occupancyFeasibleFloor > nMinAnalytical
         ? `Occupancy-Feasible Capacity Floor (N_occ = ${occupancyFeasibleFloor} at ≤ ${resolveOccupancyCapPct(sla)}% occupancy)`
         : 'Steady-State Workload Capacity Baseline (N_min)';
+  } else if (recommendedHC !== null && resolveCoverageBinding(evalCache.get(recommendedHC - 1), sla, recommendedHC)) {
+    // Coverage-only failure one below the recommendation — see resolveCoverageBinding.
+    const cb = resolveCoverageBinding(evalCache.get(recommendedHC - 1), sla, recommendedHC)!;
+    bindingConstraintType = cb.type;
+    bindingConstraintDescription = cb.description;
   } else if (sla.boAsaEnabled && primaryPassedResult && !primaryPassedResult.representativeResult.passesBOASA) {
     bindingConstraintType = 'bo_asa_cap';
     bindingConstraintDescription = `Backoffice ASA Target (≤ ${sla.boAsaTarget} ${sla.boAsaUnit})`;
