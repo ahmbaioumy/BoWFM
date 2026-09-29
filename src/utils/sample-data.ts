@@ -117,3 +117,58 @@ export const SAMPLE_TEMPLATES: SampleDatasetTemplate[] = [
       }),
   },
 ];
+
+export type BuiltInSampleType = 'claims' | 'support' | 'healthcare';
+
+/** The next Monday strictly after `from`, at 08:00 local — the anchor the built-in samples start on. */
+export function nextMondayAt8(from: Date): Date {
+  const d = new Date(from);
+  d.setDate(d.getDate() + ((1 + 7 - d.getDay()) % 7 || 7));
+  d.setHours(8, 0, 0, 0);
+  return d;
+}
+
+/**
+ * The three built-in sample datasets (Load Sample), as raw rows. Pure: the same (type, baseDate)
+ * always yields the same rows, so the app calls it with the current date and tests with a fixed
+ * Monday. `baseDate` must be a Monday 08:00 (see nextMondayAt8).
+ */
+export function buildSampleDataset(
+  sampleType: BuiltInSampleType,
+  baseDate: Date
+): { headers: string[]; rows: Record<string, string>[]; categories: string[] } {
+  const rows: Record<string, string>[] = [];
+  const headers = ['IntervalStart', 'Volume', 'Category'];
+  const daysCount = sampleType === 'claims' ? 5 : sampleType === 'support' ? 7 : 10;
+  const cats =
+    sampleType === 'claims'
+      ? ['Claims_Auto', 'Claims_Home', 'Claims_Life']
+      : sampleType === 'support'
+      ? ['Billing_Support', 'Technical_Escalations']
+      : ['Prior_Authorization', 'Pharmacy_Appeals', 'Provider_Inquiries'];
+
+  let rowIndex = 0;
+  for (let d = 0; d < daysCount; d++) {
+    const dayDate = new Date(baseDate);
+    dayDate.setDate(baseDate.getDate() + d);
+
+    for (let hour = 8; hour < 18; hour++) {
+      for (const min of [0, 30]) {
+        const slotDate = new Date(dayDate);
+        slotDate.setHours(hour, min, 0, 0);
+        const pad = (n: number) => String(n).padStart(2, '0');
+        const startIso = `${slotDate.getFullYear()}-${pad(slotDate.getMonth() + 1)}-${pad(slotDate.getDate())}T${pad(slotDate.getHours())}:${pad(slotDate.getMinutes())}:00`;
+
+        cats.forEach((cat, cIdx) => {
+          // Realistic diurnal bell curve volume
+          const peakFactor = Math.sin(((hour - 8 + min / 60) / 10) * Math.PI);
+          const baseVol = sampleType === 'claims' ? 4 : sampleType === 'support' ? 6 : 3;
+          const vol = Math.max(1, Math.round(baseVol * peakFactor * (1 + cIdx * 0.4) + (rowIndex % 3)));
+          rows.push({ IntervalStart: startIso, Volume: String(vol), Category: cat });
+          rowIndex++;
+        });
+      }
+    }
+  }
+  return { headers, rows, categories: cats };
+}

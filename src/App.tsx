@@ -35,96 +35,15 @@ import { ResultsFlow } from './components/ResultsFlow';
 import { SensitivityFlow } from './components/SensitivityFlow';
 import { SimulationProgressModal } from './components/SimulationProgressModal';
 import { ResetConfirmModal } from './components/ResetConfirmModal';
+import { buildSampleDataset, nextMondayAt8 } from './utils/sample-data';
 
-// Initial Defaults
-const DEFAULT_CALENDAR: CalendarConfig = {
-  workingDays: [1, 2, 3, 4, 5], // Mon-Fri
-  dailyOpenHour: 8,
-  dailyOpenMinute: 0,
-  dailyCloseHour: 18,
-  dailyCloseMinute: 0,
-  holidays: [],
-};
-
-const DEFAULT_LABOR: LaborConfig = {
-  dailyProductiveHours: 7.5,
-  adherencePct: 1.0,
-  workingDaysPerWeek: 5,
-  offDaysPerWeek: 2,
-  contractualHoursSource: 'derived',
-  contractualProductiveHoursOverride: 0,
-  shifts: [],
-};
-
-const DEFAULT_SLA: SLAPolicyConfig = {
-  primaryPct: 80,
-  primaryWindow: 6,
-  primaryUnit: 'hours',
-  boAsaEnabled: false,
-  boAsaTarget: 60,
-  boAsaUnit: 'minutes',
-  asaClockBasis: 'business_window',
-  clockBasis: 'business_time',
-  clockStartPolicy: 'arrival',
-  occupancyCapEnabled: false,
-  occupancyCapPct: 85,
-  confidenceLevelPct: 95,
-  slaAcceptanceSlackEnabled: false,
-  slaAcceptanceSlackPct: 5,
-  workloadReductionEnabled: false,
-  workloadReductionPct: 5,
-  minCoverageEnabled: true,
-  minAgentsPerInterval: 1,
-};
-
-const DEFAULT_CATEGORIES: CategoryConfig[] = [
-  {
-    id: 'cat_claims_auto',
-    name: 'Claims_Auto',
-    ahtMinutes: 35,
-    shrinkagePct: 0.20,
-    priority: 1,
-    primaryPct: 80,
-    primaryWindow: 6,
-    primaryUnit: 'hours',
-    primaryWindowMinutes: 360,
-    boAsaTarget: 60,
-    boAsaUnit: 'minutes',
-  },
-  {
-    id: 'cat_claims_home',
-    name: 'Claims_Home',
-    ahtMinutes: 45,
-    shrinkagePct: 0.20,
-    priority: 2,
-    primaryPct: 80,
-    primaryWindow: 6,
-    primaryUnit: 'hours',
-    primaryWindowMinutes: 360,
-    boAsaTarget: 60,
-    boAsaUnit: 'minutes',
-  },
-  {
-    id: 'cat_claims_life',
-    name: 'Claims_Life',
-    ahtMinutes: 60,
-    shrinkagePct: 0.25,
-    priority: 3,
-    primaryPct: 80,
-    primaryWindow: 8,
-    primaryUnit: 'hours',
-    primaryWindowMinutes: 480,
-    boAsaTarget: 90,
-    boAsaUnit: 'minutes',
-  },
-];
-
-const DEFAULT_SIM_PARAMS: SimulationParams = {
-  seed: 12345,
-  maxHCSearch: 500,
-  replications: 30,
-  queueArchitecture: 'pooled',
-};
+import {
+  DEFAULT_CALENDAR,
+  DEFAULT_CATEGORIES,
+  DEFAULT_LABOR,
+  DEFAULT_SIM_PARAMS,
+  DEFAULT_SLA,
+} from './utils/default-config';
 
 export function App() {
   // Navigation State
@@ -183,7 +102,16 @@ export function App() {
   const [searchOutput, setSearchOutput] = useState<HCSearchOutput | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [showProgressModal, setShowProgressModal] = useState(false);
-  const [showResetConfirmModal, setShowResetConfirmModal] = useState(false);
+  // Reset confirmation gate. 'reset' = plain Sidebar Reset click. { type: 'upload' | 'sample' }
+  // carries the pending action to run AFTER the shared reset body, so uploading new data (or
+  // loading a sample) into a tab that already has data/settings loaded is forced through the
+  // same "you are about to lose your current work" confirmation as Reset itself — a stale
+  // prior session can no longer silently blend into a fresh upload. null = modal closed.
+  type PendingResetAction =
+    | 'reset'
+    | { type: 'upload'; text: string; filename: string }
+    | { type: 'sample'; sampleType: 'claims' | 'support' | 'healthcare' };
+  const [pendingResetAction, setPendingResetAction] = useState<PendingResetAction | null>(null);
   const [searchProgress, setSearchProgress] = useState<SearchProgressState | null>(null);
   const [simulationError, setSimulationError] = useState<string | null>(null);
   const [importNotification, setImportNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -224,8 +152,19 @@ export function App() {
     });
   }, [intervals, columnMapping, categories, calendar, labor, sla, openingWIP]);
 
-  // Handle File Upload
+  // Handle File Upload. If a prior session already has data loaded, route through the reset
+  // confirmation first (see pendingResetAction) rather than blending the new file into
+  // whatever calendar/labor/SLA/categories/opening-WIP a previous upload left behind. A
+  // brand-new tab with nothing loaded yet applies the file immediately — nothing to lose.
   function handleFileUpload(text: string, filename: string) {
+    if (rawRows.length > 0) {
+      setPendingResetAction({ type: 'upload', text, filename });
+      return;
+    }
+    applyFileUpload(text, filename);
+  }
+
+  function applyFileUpload(text: string, filename: string) {
     setSimulationError(null);
     setSearchOutput(null);
 
@@ -246,55 +185,21 @@ export function App() {
     setCurrentTab('mapping');
   }
 
-  // Load Validated Sample Datasets
+  // Load Validated Sample Datasets. Same stale-session guard as handleFileUpload above.
   function handleLoadSample(sampleType: 'claims' | 'support' | 'healthcare') {
+    if (rawRows.length > 0) {
+      setPendingResetAction({ type: 'sample', sampleType });
+      return;
+    }
+    applyLoadSample(sampleType);
+  }
+
+  function applyLoadSample(sampleType: 'claims' | 'support' | 'healthcare') {
     setSimulationError(null);
     setSearchOutput(null);
 
-    let rows: Record<string, string>[] = [];
-    const headers = ['IntervalStart', 'Volume', 'Category'];
-
-    const baseDate = new Date();
-    // Round to next Monday 08:00
-    baseDate.setDate(baseDate.getDate() + ((1 + 7 - baseDate.getDay()) % 7 || 7));
-    baseDate.setHours(8, 0, 0, 0);
-
-    const daysCount = sampleType === 'claims' ? 5 : sampleType === 'support' ? 7 : 10;
-    const cats =
-      sampleType === 'claims'
-        ? ['Claims_Auto', 'Claims_Home', 'Claims_Life']
-        : sampleType === 'support'
-        ? ['Billing_Support', 'Technical_Escalations']
-        : ['Prior_Authorization', 'Pharmacy_Appeals', 'Provider_Inquiries'];
-
-    let rowIndex = 0;
-    for (let d = 0; d < daysCount; d++) {
-      const dayDate = new Date(baseDate);
-      dayDate.setDate(baseDate.getDate() + d);
-
-      for (let hour = 8; hour < 18; hour++) {
-        for (let min of [0, 30]) {
-          const slotDate = new Date(dayDate);
-          slotDate.setHours(hour, min, 0, 0);
-          const pad = (n: number) => String(n).padStart(2, '0');
-          const startIso = `${slotDate.getFullYear()}-${pad(slotDate.getMonth() + 1)}-${pad(slotDate.getDate())}T${pad(slotDate.getHours())}:${pad(slotDate.getMinutes())}:00`;
-
-          cats.forEach((cat, cIdx) => {
-            // Realistic diurnal bell curve volume
-            const peakFactor = Math.sin(((hour - 8 + (min / 60)) / 10) * Math.PI);
-            const baseVol = sampleType === 'claims' ? 4 : sampleType === 'support' ? 6 : 3;
-            const vol = Math.max(1, Math.round(baseVol * peakFactor * (1 + cIdx * 0.4) + (rowIndex % 3)));
-
-            rows.push({
-              IntervalStart: startIso,
-              Volume: String(vol),
-              Category: cat,
-            });
-            rowIndex++;
-          });
-        }
-      }
-    }
+    // Pure generator in utils/sample-data.ts — same code the regression tests run with a fixed Monday.
+    const { headers, rows } = buildSampleDataset(sampleType, nextMondayAt8(new Date()));
 
     setRawHeaders(headers);
     setRawRows(rows);
@@ -352,6 +257,7 @@ export function App() {
         userMaxHC: simParams.maxHCSearch,
         replications: simParams.replications || 30,
         queueArchitecture: simParams.queueArchitecture || 'pooled',
+        dispatchFairness: simParams.dispatchFairness,
         onProgress: (progress) => {
           setSearchProgress(progress);
         },
@@ -396,10 +302,16 @@ export function App() {
 
   // Reset All State
   function handleResetAll() {
-    setShowResetConfirmModal(true);
+    setPendingResetAction('reset');
   }
 
+  // Single confirm handler for the Sidebar's plain Reset AND for a new upload/sample-load
+  // requested while a prior session already had data loaded (pendingResetAction carries
+  // which). The full-reset body always runs first, then the pending action (if any) applies
+  // against the freshly-defaulted state — a new upload can never blend with stale state.
   function handleConfirmResetAll() {
+    const action = pendingResetAction;
+
     setCalendar(DEFAULT_CALENDAR);
     setLabor(DEFAULT_LABOR);
     setSla(DEFAULT_SLA);
@@ -415,13 +327,28 @@ export function App() {
     setShowProgressModal(false);
     setSearchProgress(null);
     setParamsPanelOpen(false);
-    setShowResetConfirmModal(false);
+    setPendingResetAction(null);
     setCurrentFlow('demand');
     setCurrentTab('upload');
-    setImportNotification({
-      type: 'success',
-      message: 'All configuration parameters, demand data, and simulation results have been reset to defaults.',
-    });
+
+    if (action && action !== 'reset' && action.type === 'upload') {
+      applyFileUpload(action.text, action.filename);
+      setImportNotification({
+        type: 'success',
+        message: 'Previous configuration and data were reset before loading the new file.',
+      });
+    } else if (action && action !== 'reset' && action.type === 'sample') {
+      applyLoadSample(action.sampleType);
+      setImportNotification({
+        type: 'success',
+        message: 'Previous configuration and data were reset before loading the sample dataset.',
+      });
+    } else {
+      setImportNotification({
+        type: 'success',
+        message: 'All configuration parameters, demand data, and simulation results have been reset to defaults.',
+      });
+    }
     setTimeout(() => {
       setImportNotification(null);
     }, 4500);
@@ -652,6 +579,8 @@ export function App() {
                 onUpdateLabor={setLabor}
                 onUpdateSLA={setSla}
                 onUpdateCategories={setCategories}
+                dispatchFairness={simParams.dispatchFairness}
+                onUpdateDispatchFairness={(dispatchFairness) => setSimParams((p) => ({ ...p, dispatchFairness }))}
               />
             )}
 
@@ -738,9 +667,9 @@ export function App() {
 
       {/* Confirmation Modal for Resetting All Data & Parameters */}
       <ResetConfirmModal
-        isOpen={showResetConfirmModal}
+        isOpen={pendingResetAction !== null}
         onConfirm={handleConfirmResetAll}
-        onCancel={() => setShowResetConfirmModal(false)}
+        onCancel={() => setPendingResetAction(null)}
       />
     </div>
   );

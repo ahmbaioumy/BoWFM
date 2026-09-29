@@ -7,6 +7,7 @@ import React from 'react';
 import {
   CalendarConfig,
   CategoryConfig,
+  DispatchFairnessConfig,
   LaborConfig,
   OpeningWIPCase,
   SLAPolicyConfig,
@@ -40,6 +41,8 @@ interface ConfigFlowProps {
   onUpdateLabor: (lab: LaborConfig) => void;
   onUpdateSLA: (sla: SLAPolicyConfig) => void;
   onUpdateCategories: (cats: CategoryConfig[]) => void;
+  dispatchFairness?: DispatchFairnessConfig;
+  onUpdateDispatchFairness?: (cfg: DispatchFairnessConfig | undefined) => void;
 }
 
 export function ConfigFlow({
@@ -53,6 +56,8 @@ export function ConfigFlow({
   onUpdateLabor,
   onUpdateSLA,
   onUpdateCategories,
+  dispatchFairness,
+  onUpdateDispatchFairness,
 }: ConfigFlowProps) {
   // Daily window in hours
   const dailyWindow = getDailyWindowLengthHours(calendar);
@@ -398,6 +403,45 @@ export function ConfigFlow({
                 Every agent starts one uniform shift at business open, exactly as today.
               </div>
             )}
+          </div>
+
+          {/* Fair agent assignment — agent SELECTION only; case order stays EDF */}
+          <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-3">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+              <div>
+                <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  Fair agent assignment
+                </h4>
+                <p className="text-xs text-slate-500">
+                  On (default): the next case goes to the least-loaded idle agent, so work is spread evenly
+                  across the team. Off: the agent who just finished takes the next case (legacy behaviour,
+                  which piles work on a few agents). Which case goes next is unchanged either way. In rare
+                  near-capacity runs, On can recommend one more agent than Off.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => onUpdateDispatchFairness?.({ ...(dispatchFairness || {}), enabled: false })}
+                  className={`px-2.5 py-1 rounded text-xs font-semibold transition ${
+                    dispatchFairness?.enabled === false
+                      ? 'bg-slate-900 text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  Off (legacy)
+                </button>
+                <button
+                  onClick={() => onUpdateDispatchFairness?.({ ...(dispatchFairness || {}), enabled: true })}
+                  className={`px-2.5 py-1 rounded text-xs font-semibold transition ${
+                    dispatchFairness?.enabled !== false
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  On (default)
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -929,7 +973,7 @@ export function ConfigFlow({
               <div>
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                    Workload HC Reduction
+                    Workload Reduction
                   </span>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input
@@ -951,7 +995,7 @@ export function ConfigFlow({
                   </label>
                 </div>
                 <span className="text-[11px] text-slate-500">
-                  N_min = floor(Workload × (1 − reduction%) / (Occupancy × agentHours × Adherence)). OFF = no reduction. DES may still size above if SLA binds. Rounding can mask small %.
+                  Discounts handling time by the given %, so the whole chain sizes against the reduced workload — N_min, the occupancy floor, the DES simulation, and Gross HC. Use it for an assumed efficiency or deflection gain. OFF = no reduction. Integer rounding can absorb a small %.
                 </span>
               </div>
 
