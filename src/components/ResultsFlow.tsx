@@ -65,7 +65,29 @@ interface ResultsFlowProps {
 // The on-screen tables AND every CSV export go through it, so they always show identical values.
 const formatSafeDateTime = (date: Date | null | undefined): string => formatDateTime24(date);
 
-export function ResultsFlow({
+/**
+ * Guard wrapper: the hook-heavy body lives in ResultsFlowBody, which only mounts once sizing results
+ * exist. (Previously an early return sat between useState and the useMemo/useEffect hooks, so going
+ * from 'no results' to 'results' changed the hook count and crashed with "Rendered more hooks than
+ * during the previous render" — e.g. Reset All -> reload sample -> Run -> View Results.)
+ */
+export function ResultsFlow(props: ResultsFlowProps) {
+  const so = props.searchOutput;
+  if (!so || !so.finalDESResult || !so.staffing) {
+    return (
+      <div className="bg-white rounded-xl border border-slate-200 p-12 text-center shadow-xs">
+        <Cpu className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+        <h3 className="text-sm font-bold text-slate-800">No Sizing Results Available</h3>
+        <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
+          Complete the Demand and Config setup, then go to Run Sizing to execute the Analytical &amp; Statistical Sizing Engine.
+        </p>
+      </div>
+    );
+  }
+  return <ResultsFlowBody {...props} />;
+}
+
+function ResultsFlowBody({
   currentTab,
   searchOutput,
   calendar,

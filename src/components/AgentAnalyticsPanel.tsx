@@ -50,9 +50,9 @@ function CasesBarChart({ a }: { a: AgentAnalytics }) {
   const rows = sortRowsByCases(a.rows);
   const rowH = 20;
   const labelW = 72;
-  const W = 560;
+  const W = 440;
   const padTop = 22;
-  const plotW = W - labelW - 40;
+  const plotW = W - labelW - 60;
   const H = padTop + rows.length * rowH + 8;
   const maxV = Math.max(1, a.team.casesMean, ...rows.map((r) => r.casesCompleted));
   const x = (v: number) => labelW + (v / maxV) * plotW;
@@ -85,7 +85,7 @@ function OccUtilChart({ a }: { a: AgentAnalytics }) {
   const rows = a.rows;
   const rowH = 26;
   const labelW = 72;
-  const W = 560;
+  const W = 440;
   const padTop = 26;
   const plotW = W - labelW - 96;
   const H = padTop + rows.length * rowH + 20;
@@ -178,7 +178,7 @@ function TrendChart({ a }: { a: AgentAnalytics }) {
   const id = useId();
   const pts = a.trend;
   if (pts.length === 0) return <p className="text-xs text-slate-400 italic">No data in range.</p>;
-  const W = 560;
+  const W = 440;
   const H = 280;
   const pl = 44;
   const pr = 44;

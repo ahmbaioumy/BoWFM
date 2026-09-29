@@ -899,6 +899,7 @@ Work down the chain in order — the fault is almost always upstream of where it
 |---|---|
 | **Unconfigured categories** dropped from the staffing gross-up | Hiring requirement understated **46%** (`grossHCTotal` 7 vs 13; `fteNet` 5 vs 10) |
 | **Case/slice CSV exports in UTC** (`toISOString`) vs local time on screen | Excel showed times shifted by the planner's UTC offset (08:18 on screen, 04:18Z in file at UTC+4); fixed 2026-09-29, pinned by `EX.*` |
+| **ResultsFlow hook-order crash** (early return before hooks) | Reset All -> reload sample -> Run -> View Results gave a blank page ("Rendered more hooks than during the previous render"); fixed 2026-09-29 by a guard wrapper (`ResultsFlow`) that mounts the hook-heavy `ResultsFlowBody` only when results exist |
 | **Hamilton apportionment** in siloed mode | **14 monotonicity violations, 21 starved silos**; a category fell from 1 agent to 0 |
 | **Working-day off-by-one** (inclusive horizon bound) | 24/7 weekly runs counted **8 days instead of 7**; `N_min` understated ~11% |
 | **Debug `console.log`** in the search path | Shipped inside the artifact |
