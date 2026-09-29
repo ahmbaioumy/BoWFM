@@ -399,7 +399,7 @@ function ResultsFlowBody({
         'Idle Minutes': Math.round(a.idleMinutes * 10) / 10,
         'Off Minutes': Math.round(a.offMinutes * 10) / 10,
         'Occupancy %': a.occupancyPct,
-        'Cases Handled': a.casesHandled,
+        'Cases Finished': a.casesHandled,
         'Resumes': a.resumeCount,
         'Max Daily Busy (min)': Math.round(a.maxBusyAnyDay * 10) / 10,
         'Daily Budget (min)': Math.round(a.dailyBudgetMinutes * 10) / 10,
@@ -1617,7 +1617,7 @@ function ResultsFlowBody({
                     <th className="py-2.5 px-3 text-right">Idle (min)</th>
                     <th className="py-2.5 px-3 text-right">Off (min)</th>
                     <th className="py-2.5 px-3 text-right">Occupancy %</th>
-                    <th className="py-2.5 px-3 text-right">Cases</th>
+                    <th className="py-2.5 px-3 text-right" title="Cases this agent finished (finisher credit)">Cases finished</th>
                     <th className="py-2.5 px-3 text-right">Resumes</th>
                     <th className="py-2.5 px-3 text-right">Max Daily Busy</th>
                   </tr>
@@ -1726,7 +1726,7 @@ function ResultsFlowBody({
                   </div>
                   <p className="text-xs text-slate-500">
                     How evenly work was spread across agents. Occupancy = busy minutes / minutes the agent was on shift (available).
-                    Cases are credited to the agent who finished them. This is a per-agent view, not the planned-capacity occupancy used for sizing.
+                    Cases are credited to the agent who finished them (whole case, not split by effort; see Agent Analytics for work share). This is a per-agent view, not the planned-capacity occupancy used for sizing.
                     Agents on a later coverage shift have less available time and pick up end-of-day work alone.
                   </p>
                 </div>
@@ -1740,7 +1740,7 @@ function ResultsFlowBody({
                       <tr>
                         <th className="py-1.5 px-3">Agent</th>
                         <th className="py-1.5 px-3">Category</th>
-                        <th className="py-1.5 px-3 text-right">Cases completed</th>
+                        <th className="py-1.5 px-3 text-right" title="Whole cases this agent finished (finisher credit). See Agent Analytics for work share.">Cases finished</th>
                         <th className="py-1.5 px-3 text-right">Busy (min)</th>
                         <th className="py-1.5 px-3 text-right">Available (min)</th>
                         <th className="py-1.5 px-3 text-right">Occupancy %</th>
