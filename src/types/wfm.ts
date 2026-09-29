@@ -186,6 +186,8 @@ export interface SimulationParams {
   maxHCSearch: number; // Default 500
   replications: number; // Default 30 (stochastic replications for statistical Primary SLA)
   queueArchitecture?: 'pooled' | 'siloed'; // Default 'pooled'
+  /** Fair agent-assignment tolerances (advanced). Omitted = defaults; never changes case order. */
+  dispatchFairness?: DispatchFairnessConfig;
 }
 
 export interface PrimarySLAStatisticalResult {

@@ -278,7 +278,9 @@ export function ResultsFlow({
         idleMinutes,
         offMinutes,
         occupancyPct,
-        casesHandled: caseIds.size,
+        // Counted at COMPLETION (credited to the agent who finishes the case). Counting every case an
+        // agent touched double-counted split cases (parked and resumed by another agent).
+        casesHandled: des.agentFairness?.perAgent[i]?.casesCompleted ?? caseIds.size,
         resumeCount,
         inBindingWindow: false,
         dailyBudgetMinutes,

@@ -7,6 +7,7 @@ import React from 'react';
 import {
   CalendarConfig,
   CategoryConfig,
+  DispatchFairnessConfig,
   LaborConfig,
   OpeningWIPCase,
   SLAPolicyConfig,
@@ -40,6 +41,8 @@ interface ConfigFlowProps {
   onUpdateLabor: (lab: LaborConfig) => void;
   onUpdateSLA: (sla: SLAPolicyConfig) => void;
   onUpdateCategories: (cats: CategoryConfig[]) => void;
+  dispatchFairness?: DispatchFairnessConfig;
+  onUpdateDispatchFairness?: (cfg: DispatchFairnessConfig | undefined) => void;
 }
 
 export function ConfigFlow({
@@ -53,6 +56,8 @@ export function ConfigFlow({
   onUpdateLabor,
   onUpdateSLA,
   onUpdateCategories,
+  dispatchFairness,
+  onUpdateDispatchFairness,
 }: ConfigFlowProps) {
   // Daily window in hours
   const dailyWindow = getDailyWindowLengthHours(calendar);
@@ -398,6 +403,73 @@ export function ConfigFlow({
                 Every agent starts one uniform shift at business open, exactly as today.
               </div>
             )}
+          </div>
+
+          {/* Agent assignment fairness (advanced) — agent SELECTION only; case order stays EDF */}
+          <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-3">
+            <div className="border-b border-slate-100 pb-2.5">
+              <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                Agent assignment fairness (advanced)
+              </h4>
+              <p className="text-xs text-slate-500">
+                Decides WHICH idle agent takes the next case, never which case goes next (that stays
+                Earliest-Deadline-First). Order of checks: utilisation, then cases completed, then busy
+                minutes, then longest idle, then a seeded random pick. Each check keeps every agent
+                within the tolerance of the least-loaded one. Defaults are fine for almost every plan.
+              </p>
+            </div>
+            {(() => {
+              const cfg = dispatchFairness || {};
+              const fields: Array<{ key: 'utilTolerancePp' | 'countTolerance' | 'workloadToleranceMin'; label: string; def: number; unit: string }> = [
+                { key: 'utilTolerancePp', label: 'Utilisation tolerance', def: 2, unit: 'pp' },
+                { key: 'countTolerance', label: 'Case-count tolerance', def: 1, unit: 'cases' },
+                { key: 'workloadToleranceMin', label: 'Workload (busy-minutes) tolerance', def: 5, unit: 'min' },
+              ];
+              const set = (patch: Partial<DispatchFairnessConfig>) => onUpdateDispatchFairness?.({ ...cfg, ...patch });
+              return (
+                <div className="space-y-2">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    {fields.map((f) => {
+                      const raw = cfg[f.key];
+                      const invalid = raw !== undefined && (!Number.isFinite(raw) || raw < 0);
+                      return (
+                        <div key={f.key} className="space-y-1">
+                          <label className="text-xs font-semibold text-slate-700 block">{f.label} ({f.unit})</label>
+                          <input
+                            type="number"
+                            min={0}
+                            step="any"
+                            value={raw === undefined ? '' : raw}
+                            placeholder={String(f.def)}
+                            onChange={(e) => {
+                              const v = e.target.value;
+                              set({ [f.key]: v === '' ? undefined : parseFloat(v) } as Partial<DispatchFairnessConfig>);
+                            }}
+                            className={`w-full px-3 py-1.5 text-xs bg-white border rounded font-mono font-bold focus:outline-none ${invalid ? 'border-red-400 text-red-700' : 'border-slate-300 text-slate-900'}`}
+                          />
+                          {invalid && <p className="text-xs text-red-600">Must be 0 or more. The default ({f.def}) is used until fixed.</p>}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={cfg.resetDaily === true}
+                      onChange={(e) => set({ resetDaily: e.target.checked })}
+                    />
+                    Reset the fairness counters every working day (default: count over the whole horizon)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => onUpdateDispatchFairness?.(undefined)}
+                    className="px-2.5 py-1 rounded text-xs font-semibold bg-slate-100 text-slate-600 hover:bg-slate-200"
+                  >
+                    Restore defaults
+                  </button>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

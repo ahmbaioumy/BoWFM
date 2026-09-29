@@ -380,6 +380,7 @@ export function App() {
         userMaxHC: simParams.maxHCSearch,
         replications: simParams.replications || 30,
         queueArchitecture: simParams.queueArchitecture || 'pooled',
+        dispatchFairness: simParams.dispatchFairness,
         onProgress: (progress) => {
           setSearchProgress(progress);
         },
@@ -701,6 +702,8 @@ export function App() {
                 onUpdateLabor={setLabor}
                 onUpdateSLA={setSla}
                 onUpdateCategories={setCategories}
+                dispatchFairness={simParams.dispatchFairness}
+                onUpdateDispatchFairness={(dispatchFairness) => setSimParams((p) => ({ ...p, dispatchFairness }))}
               />
             )}
 

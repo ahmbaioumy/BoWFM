@@ -95,6 +95,7 @@ export function SensitivityFlow({
             userMaxHC: simParams.maxHCSearch || 500,
             replications: simParams.replications || 30,
             queueArchitecture: simParams.queueArchitecture || 'pooled',
+            dispatchFairness: simParams.dispatchFairness,
             shouldCancel: () => cancelSensitivityRef.current,
           });
 
