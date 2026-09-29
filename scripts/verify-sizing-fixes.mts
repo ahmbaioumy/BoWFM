@@ -3230,6 +3230,93 @@ console.log('\n--- Suite D44: no double-booking in gated 24x7 runs ---');
   assert(worst === '', 'D44.2 gated and audit runs agree on SLA, completions, handling minutes and ASA for unstaggered 24x7 (pooled + siloed, fair ON + OFF)', worst);
 }
 
+// =================================================================
+// Suite D45 — Per-agent availableMinutes accrual (single path)
+//
+// Defect (AVAIL-DOUBLE-COUNT): for agents already on shift at horizonStart the first day's
+// availability window was pre-seeded AND folded again by the AgentAvailable handler firing at
+// the same instant (horizon starting exactly at business open / a cohort's slap start), so
+// availableMinutes (Results panel + the fair cascade's utilisation) over-counted day 1
+// (e.g. 3300 instead of 2850). Expected value is derived here independently, from the
+// calendar, the cohort's own shift window and the simulated span taken from the timeline.
+// Pre-fix D45.1 fails on the horizon-at-open fixtures; the mid-day-start fixtures are controls.
+// =================================================================
+console.log('\n--- Suite D45: availableMinutes accrual ---');
+{
+  const BIZ45: CalendarConfig = { workingDays: [1, 2, 3, 4, 5], dailyOpenHour: 9, dailyOpenMinute: 0, dailyCloseHour: 17, dailyCloseMinute: 0, holidays: [] };
+  const LAB45: LaborConfig = { dailyProductiveHours: 8, adherencePct: 1.0, workingDaysPerWeek: 5, offDaysPerWeek: 2, contractualHoursSource: 'derived', shifts: [] };
+  const SLA45: SLAPolicyConfig = {
+    primaryPct: 80, primaryWindow: 3, primaryUnit: 'days', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes',
+    asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'arrival',
+    occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 95,
+  };
+  const cat45: CategoryConfig[] = [{ id: 'g', name: 'General', ahtMinutes: 20, shrinkagePct: 0.2, priority: 1 }];
+  const iv45 = (days: number, fromH: number, toH: number, vol: number, cal: CalendarConfig): StandardInterval[] => {
+    const out: StandardInterval[] = [];
+    let idx = 0;
+    for (let d = 0; d < days; d++) {
+      if (!cal.workingDays.includes(new Date(2026, 9, 5 + d).getDay())) continue;
+      for (let h = fromH; h < toH; h++) for (const m of [0, 30]) {
+        out.push({ intervalIndex: idx++, start: new Date(2026, 9, 5 + d, h, m), end: new Date(2026, 9, 5 + d, h, m + 30), volume: vol, category: 'General' });
+      }
+    }
+    return out;
+  };
+  const cohorts = (counts: Array<[number, number]>): ShiftDistributionByCategory => ({ __POOLED__: { slapMinutes: 30, slaps: counts.map(([o, n]) => ({ startMinutesFromOpen: o, agentCount: n })) } });
+
+  // expected on-shift minutes per agent, independent of the engine's accrual
+  function expectedAvail(des: any, cal: CalendarConfig, is24: boolean, shiftLenMin: number | null, offsets: number[] | null): number[] {
+    const hs = des.horizonStart.getTime();
+    const simEnd = Math.max(...(des.agentTimeline as any[]).map((s) => s.to.getTime()));
+    const out: number[] = [];
+    for (let a = 0; a < des.operationalHC; a++) {
+      let total = 0;
+      const d0 = new Date(hs); d0.setHours(0, 0, 0, 0);
+      for (let day = new Date(d0); day.getTime() <= simEnd; day.setDate(day.getDate() + 1)) {
+        if (!cal.workingDays.includes(day.getDay())) continue;
+        const open = new Date(day); open.setHours(is24 ? 0 : cal.dailyOpenHour, 0, 0, 0);
+        const close = new Date(day); if (is24) close.setDate(close.getDate() + 1); close.setHours(is24 ? 0 : cal.dailyCloseHour, 0, 0, 0);
+        const off = offsets ? offsets[a] : 0;
+        const start = open.getTime() + off * 60000;
+        const end = shiftLenMin === null ? close.getTime() : Math.min(close.getTime(), start + shiftLenMin * 60000);
+        const lo = Math.max(start, hs), hi = Math.min(end, simEnd);
+        if (hi > lo) total += (hi - lo) / 60000;
+      }
+      out.push(total);
+    }
+    return out;
+  }
+  const check45 = (label: string, des: any, exp: number[]) => {
+    const rows = des.agentFairness.perAgent as any[];
+    let bad = '';
+    for (let a = 0; a < rows.length; a++) if (Math.abs(rows[a].availableMinutes - exp[a]) > 0.01) { bad = `agent ${a}: reported ${rows[a].availableMinutes} expected ${exp[a]}`; break; }
+    assert(bad === '', label, bad);
+  };
+
+  // uniform, horizon starts exactly at business open (the reported over-count case)
+  const uni45 = runBackofficeDES({ operationalHC: 6, intervals: iv45(14, 9, 15, 6, BIZ45), openingWIP: [], categories: cat45, calendar: BIZ45, labor: LAB45, sla: SLA45, seed: 42 });
+  check45('D45.1a uniform, horizon at business open: availableMinutes == own on-shift minutes', uni45, expectedAvail(uni45, BIZ45, false, null, null));
+  // staggered incl. a late coverage-repair-style cohort, horizon at open
+  const stagOpen = runBackofficeDES({ operationalHC: 7, intervals: iv45(14, 9, 17, 6, BIZ45), openingWIP: [], categories: cat45, calendar: BIZ45, labor: { ...LAB45, dailyProductiveHours: 6 }, sla: SLA45, seed: 42, shiftDistribution: cohorts([[0, 6], [120, 1]]) });
+  check45('D45.1b staggered (6 agents at open + 1 late cohort), horizon at open', stagOpen, expectedAvail(stagOpen, BIZ45, false, 360, [0, 0, 0, 0, 0, 0, 120]));
+  // staggered, horizon starts MID-day (control — pre-seed path only)
+  const stagMid = runBackofficeDES({ operationalHC: 4, intervals: iv45(3, 13, 17, 4, BIZ45), openingWIP: [], categories: cat45, calendar: BIZ45, labor: { ...LAB45, dailyProductiveHours: 6 }, sla: SLA45, seed: 42, shiftDistribution: cohorts([[0, 2], [120, 2]]) });
+  check45('D45.1c control: staggered, horizon starts mid-day (13:00)', stagMid, expectedAvail(stagMid, BIZ45, false, 360, [0, 0, 120, 120]));
+  // uniform, horizon starts mid-day (control)
+  const uniMid = runBackofficeDES({ operationalHC: 4, intervals: iv45(3, 13, 17, 4, BIZ45), openingWIP: [], categories: cat45, calendar: BIZ45, labor: LAB45, sla: SLA45, seed: 42 });
+  check45('D45.1d control: uniform, horizon starts mid-day', uniMid, expectedAvail(uniMid, BIZ45, false, null, null));
+  // 24x7 (horizon at midnight = open), uniform and staggered
+  const CAL247_45: CalendarConfig = { is24x7: true, workingDays: [0, 1, 2, 3, 4, 5, 6], dailyOpenHour: 0, dailyOpenMinute: 0, dailyCloseHour: 24, dailyCloseMinute: 0, holidays: [] };
+  const LAB247_45: LaborConfig = { ...LAB45, workingDaysPerWeek: 7, offDaysPerWeek: 0 };
+  const u247 = runBackofficeDES({ operationalHC: 5, intervals: iv45(5, 0, 24, 2, CAL247_45), openingWIP: [], categories: cat45, calendar: CAL247_45, labor: LAB247_45, sla: SLA45, seed: 42 });
+  check45('D45.1e 24x7 uniform, horizon at midnight', u247, expectedAvail(u247, CAL247_45, true, null, null));
+  const s247 = runBackofficeDES({ operationalHC: 6, intervals: iv45(5, 0, 24, 2, CAL247_45), openingWIP: [], categories: cat45, calendar: CAL247_45, labor: LAB247_45, sla: SLA45, seed: 42, shiftDistribution: cohorts([[0, 2], [480, 2], [960, 2]]) });
+  check45('D45.1f 24x7 staggered (3 cohorts of 8h), horizon at midnight', s247, expectedAvail(s247, CAL247_45, true, 480, [0, 0, 480, 480, 960, 960]));
+  // OFF mode does not use the accrual for selection but still reports it
+  const offRun = runBackofficeDES({ operationalHC: 6, intervals: iv45(14, 9, 15, 6, BIZ45), openingWIP: [], categories: cat45, calendar: BIZ45, labor: LAB45, sla: SLA45, seed: 42, dispatchFairness: { enabled: false } });
+  check45('D45.1g fair OFF reports the same correct availability', offRun, expectedAvail(offRun, BIZ45, false, null, null));
+}
+
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');

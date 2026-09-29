@@ -1035,6 +1035,10 @@ export function runBackofficeDES(params: {
     const toClose = Math.max(0, (closeMs - nowMs) / 60000);
     for (let k = 0; k < agentIds.length; k++) {
       const a = agentIds[k];
+      // Horizon opening exactly at this agent's day start: the horizon-start pre-seed below already
+      // opened this window at this very instant — folding it again would double-count day 1
+      // (fixed 2026-09-29, AVAIL-DOUBLE-COUNT).
+      if (availDayStartMs[a] === nowMs) continue;
       availPriorMin[a] += availDayWindowMin[a];
       availDayStartMs[a] = nowMs;
       availDayWindowMin[a] = staggeredMode ? Math.min(toClose, labor.dailyProductiveHours * 60) : toClose;

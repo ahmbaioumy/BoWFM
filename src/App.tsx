@@ -35,96 +35,15 @@ import { ResultsFlow } from './components/ResultsFlow';
 import { SensitivityFlow } from './components/SensitivityFlow';
 import { SimulationProgressModal } from './components/SimulationProgressModal';
 import { ResetConfirmModal } from './components/ResetConfirmModal';
+import { buildSampleDataset, nextMondayAt8 } from './utils/sample-data';
 
-// Initial Defaults
-const DEFAULT_CALENDAR: CalendarConfig = {
-  workingDays: [1, 2, 3, 4, 5], // Mon-Fri
-  dailyOpenHour: 8,
-  dailyOpenMinute: 0,
-  dailyCloseHour: 18,
-  dailyCloseMinute: 0,
-  holidays: [],
-};
-
-const DEFAULT_LABOR: LaborConfig = {
-  dailyProductiveHours: 7.5,
-  adherencePct: 1.0,
-  workingDaysPerWeek: 5,
-  offDaysPerWeek: 2,
-  contractualHoursSource: 'derived',
-  contractualProductiveHoursOverride: 0,
-  shifts: [],
-};
-
-const DEFAULT_SLA: SLAPolicyConfig = {
-  primaryPct: 80,
-  primaryWindow: 6,
-  primaryUnit: 'hours',
-  boAsaEnabled: false,
-  boAsaTarget: 60,
-  boAsaUnit: 'minutes',
-  asaClockBasis: 'business_window',
-  clockBasis: 'business_time',
-  clockStartPolicy: 'arrival',
-  occupancyCapEnabled: false,
-  occupancyCapPct: 85,
-  confidenceLevelPct: 95,
-  slaAcceptanceSlackEnabled: false,
-  slaAcceptanceSlackPct: 5,
-  workloadReductionEnabled: false,
-  workloadReductionPct: 5,
-  minCoverageEnabled: true,
-  minAgentsPerInterval: 1,
-};
-
-const DEFAULT_CATEGORIES: CategoryConfig[] = [
-  {
-    id: 'cat_claims_auto',
-    name: 'Claims_Auto',
-    ahtMinutes: 35,
-    shrinkagePct: 0.20,
-    priority: 1,
-    primaryPct: 80,
-    primaryWindow: 6,
-    primaryUnit: 'hours',
-    primaryWindowMinutes: 360,
-    boAsaTarget: 60,
-    boAsaUnit: 'minutes',
-  },
-  {
-    id: 'cat_claims_home',
-    name: 'Claims_Home',
-    ahtMinutes: 45,
-    shrinkagePct: 0.20,
-    priority: 2,
-    primaryPct: 80,
-    primaryWindow: 6,
-    primaryUnit: 'hours',
-    primaryWindowMinutes: 360,
-    boAsaTarget: 60,
-    boAsaUnit: 'minutes',
-  },
-  {
-    id: 'cat_claims_life',
-    name: 'Claims_Life',
-    ahtMinutes: 60,
-    shrinkagePct: 0.25,
-    priority: 3,
-    primaryPct: 80,
-    primaryWindow: 8,
-    primaryUnit: 'hours',
-    primaryWindowMinutes: 480,
-    boAsaTarget: 90,
-    boAsaUnit: 'minutes',
-  },
-];
-
-const DEFAULT_SIM_PARAMS: SimulationParams = {
-  seed: 12345,
-  maxHCSearch: 500,
-  replications: 30,
-  queueArchitecture: 'pooled',
-};
+import {
+  DEFAULT_CALENDAR,
+  DEFAULT_CATEGORIES,
+  DEFAULT_LABOR,
+  DEFAULT_SIM_PARAMS,
+  DEFAULT_SLA,
+} from './utils/default-config';
 
 export function App() {
   // Navigation State
@@ -279,50 +198,8 @@ export function App() {
     setSimulationError(null);
     setSearchOutput(null);
 
-    let rows: Record<string, string>[] = [];
-    const headers = ['IntervalStart', 'Volume', 'Category'];
-
-    const baseDate = new Date();
-    // Round to next Monday 08:00
-    baseDate.setDate(baseDate.getDate() + ((1 + 7 - baseDate.getDay()) % 7 || 7));
-    baseDate.setHours(8, 0, 0, 0);
-
-    const daysCount = sampleType === 'claims' ? 5 : sampleType === 'support' ? 7 : 10;
-    const cats =
-      sampleType === 'claims'
-        ? ['Claims_Auto', 'Claims_Home', 'Claims_Life']
-        : sampleType === 'support'
-        ? ['Billing_Support', 'Technical_Escalations']
-        : ['Prior_Authorization', 'Pharmacy_Appeals', 'Provider_Inquiries'];
-
-    let rowIndex = 0;
-    for (let d = 0; d < daysCount; d++) {
-      const dayDate = new Date(baseDate);
-      dayDate.setDate(baseDate.getDate() + d);
-
-      for (let hour = 8; hour < 18; hour++) {
-        for (let min of [0, 30]) {
-          const slotDate = new Date(dayDate);
-          slotDate.setHours(hour, min, 0, 0);
-          const pad = (n: number) => String(n).padStart(2, '0');
-          const startIso = `${slotDate.getFullYear()}-${pad(slotDate.getMonth() + 1)}-${pad(slotDate.getDate())}T${pad(slotDate.getHours())}:${pad(slotDate.getMinutes())}:00`;
-
-          cats.forEach((cat, cIdx) => {
-            // Realistic diurnal bell curve volume
-            const peakFactor = Math.sin(((hour - 8 + (min / 60)) / 10) * Math.PI);
-            const baseVol = sampleType === 'claims' ? 4 : sampleType === 'support' ? 6 : 3;
-            const vol = Math.max(1, Math.round(baseVol * peakFactor * (1 + cIdx * 0.4) + (rowIndex % 3)));
-
-            rows.push({
-              IntervalStart: startIso,
-              Volume: String(vol),
-              Category: cat,
-            });
-            rowIndex++;
-          });
-        }
-      }
-    }
+    // Pure generator in utils/sample-data.ts — same code the regression tests run with a fixed Monday.
+    const { headers, rows } = buildSampleDataset(sampleType, nextMondayAt8(new Date()));
 
     setRawHeaders(headers);
     setRawRows(rows);
