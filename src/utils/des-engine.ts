@@ -315,6 +315,22 @@ export function resolveDispatchFairness(cfg?: DispatchFairnessConfig): Required<
 
 const FAIR_EPS = 1e-9;
 
+/** Keeps the survivors within `band` of the minimum of `metric`; compacts `surv` in place, returns the new count. */
+function narrowSurvivors(metric: ArrayLike<number>, surv: Int32Array, m: number, band: number): number {
+  let min = Infinity;
+  for (let k = 0; k < m; k++) {
+    const v = metric[surv[k]];
+    if (v < min) min = v;
+  }
+  const limit = min + band + FAIR_EPS;
+  let w = 0;
+  for (let k = 0; k < m; k++) {
+    const s = surv[k];
+    if (metric[s] <= limit) surv[w++] = s;
+  }
+  return w;
+}
+
 /**
  * Picks WHICH eligible idle agent takes the next case. One shared function for the pooled and
  * siloed dispatch paths. Operates on candidate SLOTS 0..n-1 (the caller has already dropped
@@ -344,29 +360,15 @@ export function selectFairAgent(
   surv: Int32Array
 ): { slot: number; decidedBy: DispatchDecidedBy } {
   if (n <= 1) return { slot: 0, decidedBy: 'single' };
-  let m = n;
   for (let k = 0; k < n; k++) surv[k] = k;
-
-  const narrow = (metric: ArrayLike<number>, band: number): boolean => {
-    let min = Infinity;
-    for (let k = 0; k < m; k++) {
-      const v = metric[surv[k]];
-      if (v < min) min = v;
-    }
-    const limit = min + band + FAIR_EPS;
-    let w = 0;
-    for (let k = 0; k < m; k++) {
-      const s = surv[k];
-      if (metric[s] <= limit) surv[w++] = s;
-    }
-    m = w;
-    return m === 1;
-  };
-
-  if (narrow(util, tol.utilFrac)) return { slot: surv[0], decidedBy: 'util' };
-  if (narrow(cases, tol.count)) return { slot: surv[0], decidedBy: 'count' };
-  if (narrow(busy, tol.workload)) return { slot: surv[0], decidedBy: 'workload' };
-  if (narrow(idleSince, 0)) return { slot: surv[0], decidedBy: 'idle' };
+  let m = narrowSurvivors(util, surv, n, tol.utilFrac);
+  if (m === 1) return { slot: surv[0], decidedBy: 'util' };
+  m = narrowSurvivors(cases, surv, m, tol.count);
+  if (m === 1) return { slot: surv[0], decidedBy: 'count' };
+  m = narrowSurvivors(busy, surv, m, tol.workload);
+  if (m === 1) return { slot: surv[0], decidedBy: 'workload' };
+  m = narrowSurvivors(idleSince, surv, m, 0);
+  if (m === 1) return { slot: surv[0], decidedBy: 'idle' };
 
   // Order survivors by agent id (insertion sort — m is small) before the seeded pick.
   for (let a = 1; a < m; a++) {
@@ -1160,6 +1162,8 @@ export function runBackofficeDES(params: {
   // continuous handoffs reported minCoverageObserved=0 despite genuinely unbroken coverage —
   // caught while validating the 24x7 multi-start fix, suite D36).
   let minOnShiftDuringOpenHours = Infinity;
+  const covBusyStamp = new Int32Array(operationalHC);
+  let covStamp = 0;
   function countAgentsOnShiftNow(): number {
     // agentDailyMinutesRemaining is decremented at ASSIGNMENT time, not completion time — an
     // agent dispatched their final chunk of budget shows remaining ~0 while STILL actively
@@ -1170,11 +1174,12 @@ export function runBackofficeDES(params: {
     // positive zero-coverage moment mid-shift, at an ordinary case-completion boundary with
     // no cohort transition anywhere near it — traced to exactly this). An agent currently in
     // activeProcessing is on shift by definition, regardless of remaining budget.
-    const busyAgentIds = new Set(Array.from(activeProcessing.values(), (p) => p.agentIndex));
+    covStamp++;
+    for (const p of activeProcessing.values()) covBusyStamp[p.agentIndex] = covStamp;
     let count = 0;
     for (let i = 0; i < operationalHC; i++) {
       const started = !staggeredMode || agentOnShiftToday![i] === 1;
-      if (started && (agentDailyMinutesRemaining[i] > 0.01 || busyAgentIds.has(i))) count++;
+      if (started && (agentDailyMinutesRemaining[i] > 0.01 || covBusyStamp[i] === covStamp)) count++;
     }
     return count;
   }
