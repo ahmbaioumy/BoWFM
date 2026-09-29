@@ -50,6 +50,32 @@ completions under deadline scheduling. Ordering (`CaseMinHeap.compare`):
 Note LSS must be computed through the *business* calendar, not by wall-clock subtraction: a
 case needing 4 hours against a 09:00-tomorrow deadline cannot start at 23:00 tonight.
 
+## Agent selection: who takes the case
+
+Case selection (above) is separate from agent selection. Once the next case is chosen, the
+engine picks which idle, eligible agent (has daily budget, inside their own shift) takes it.
+The old rule was a stack — the agent who just finished took the next case — which piled work
+on a few agents whenever capacity was spare. The current rule (`selectFairAgent`, one shared
+function for pooled and siloed) is a cascade; each level keeps only agents within a tolerance
+of that level's minimum:
+
+1. Utilisation: busy minutes ÷ the agent's own on-shift minutes (default band 2 pp)
+2. Cases completed (credited to the agent who finishes the case; band 1)
+3. Busy minutes (band 5)
+4. Longest idle
+5. Seeded random pick among the rest (its own PRNG stream derived from the run seed; consumed
+   only when more than one agent is left, and never touching the case-generation stream, so
+   Common Random Numbers are preserved)
+
+Siloed agents choose only within their own category. Counters run in every replication; the
+per-case assignment ledger and per-agent summary exist only in the single-seed audit run.
+It changes *who* works a case, not *which* case goes next, and not the requirements — N_min is
+unchanged, and recommended HC moved by +1 in 2 of 125 measured scenarios (the coverage gate
+counts remaining budget as presence). A Labor-tab button turns it off (`dispatchFairness.enabled
+= false`), which restores the legacy pick and the original numbers exactly. Note: once a daily
+budget binds, a different agent choice can shift when cases are parked, so case *timing* may
+differ; case *order* is identical while budgets do not bind.
+
 ## Replications and Common Random Numbers
 
 Arrival timing within an interval is random, so one run is one sample. The engine runs

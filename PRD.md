@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | **Status** | Draft — as-built specification |
-| **Version** | 1.9.0 |
-| **Date** | 2026-08-31 |
+| **Version** | 1.10.0 |
+| **Date** | 2026-09-29 |
 | **Owner** | _(unassigned)_ |
 | **Product** | Backoffice WFM Sizing Engine |
 | **Artifact** | `BoWFM.html` — single self-contained offline HTML file (~534 KB) |
@@ -293,6 +293,20 @@ on the Run pre-flight screen.
 | **FR-4.4** | DES Present Hours / Day | read-only | `dailyProductiveHours × adherence` |
 | **FR-4.5** | Agent hours for Workload HC | `Derived (Horizon Default)` or `Manual Override` | **Derived**; override default **0** (ignored until user enters hours &gt; 0) |
 
+**FR-4.7 — Fair agent assignment (Labor tab, one button, default ON).** Decides *which idle
+agent* takes the next case; *which case* goes next is unchanged (Earliest-Deadline-First). On:
+the least-loaded eligible agent is chosen by a cascade — utilisation (busy ÷ own on-shift
+minutes), then cases completed, then busy minutes, then longest idle, then a seeded random
+pick — each level keeping agents within a tolerance of the minimum (engine defaults: 2 pp /
+1 case / 5 min, counters over the whole horizon; not shown in the UI). Off (legacy): the agent
+who just finished takes the next case, which reproduces the pre-fairness recommended and gross
+HC exactly. Siloed agents choose only within their own category. The case-generation random
+stream is never touched, so Common Random Numbers hold; the tie-break uses its own seeded
+stream. The toggle is threaded identically through `searchOptimalHC` and `searchOptimalHCAsync`.
+An agent works one case at a time in every run mode: `DESResult.doubleBookedAssignments` counts
+assignments to a still-busy agent and is always 0 (fixed 2026-09-29 — gated unstaggered 24x7
+runs used to re-admit agents still processing across midnight to the idle pool).
+
 **FR-4.6** — The Capacity Basis (M1) rule must be displayed live with a `COMPLIANT` /
 `VIOLATION` indicator: scheduled daily productive hours must not exceed the daily business
 window.
@@ -504,8 +518,14 @@ Remainder Only`); paginate at 50 rows.
   productive vs daily budget), SLA & Headcount, and Workload Roster Floor.
 - An **audit invariant banner** running `verifyAgentTimelineInvariants` and listing any
   reconciliation failures.
+- An **Agent Assignment Fairness** panel, labelled "audit run (single seed)" and showing which
+  mode ran (fair assignment ON/OFF): per agent cases completed, busy minutes, on-shift
+  available minutes, utilisation % and idle minutes; max/min cases ratio, coefficient of
+  variation of cases and of utilisation, and Jain's index on utilisation (per category when
+  siloed). This is a per-agent view, distinct from the planned-capacity occupancy used to size.
 - An **Agent Performance Summary**: per-agent busy/idle/off minutes, occupancy %, cases
-  handled, resumes, max daily busy vs daily budget (flagged on violation), and an
+  handled (counted at completion, credited to the agent who finishes the case — a case parked
+  and resumed by another agent is no longer counted twice), resumes, max daily busy vs daily budget (flagged on violation), and an
   Existing/New roster-source split at the analytical floor.
 - An **Agent Work Slice Drill**: every timeline slice with state, case, category, from/to and
   minutes; click-through filtering from the summary table. Slice **state** is stored as
@@ -799,6 +819,14 @@ under deadline scheduling — better than FIFO or static priority. LSS is derive
 *backwards* through the business calendar, not by wall-clock subtraction: a case needing four
 hours against a 09:00-tomorrow deadline cannot start at 23:00 tonight.
 
+### 7.2a Fair agent selection (agent choice, not case choice)
+Case order is EDF (§7.2) and is frozen. *Who* takes the case used to be the newest-returned
+idle agent (a LIFO stack), which concentrated work on a few agents whenever there was spare
+capacity (measured on real data: max/min cases 5.5x to 16x; after the change about 1.02x). The
+selection cascade is described in FR-4.7. It never alters requirements by design and was
+gated: across 125 measured scenarios N_min was identical everywhere and recommended HC
+identical except two (+1; see L17). The legacy pick remains available (toggle OFF).
+
 ### 7.3 Planned-horizon occupancy denominator
 See §6.1. Occupancy is a demand ÷ capacity ratio. This was challenged during audit and
 **confirmed correct** — the proposed "fix" would have inverted the overload signal. Retained
@@ -945,12 +973,12 @@ comment. Nothing else.
 
 ## 9. Validation and quality
 
-### 9.1 Automated test suites — 251 checks
+### 9.1 Automated test suites — 698 checks (174 + 360 + 164 trusted-source)
 
 | Suite | Tests | Covers |
 |---|---|---|
-| `scripts/verify-fixes.mts` | 156 | Legacy regression: CSV parsing, date handling, calendar arithmetic, CRN consistency, occupancy semantics, standalone artifact integrity, analytical infeasibility diagnosis, 24x7 midnight budget accounting |
-| `scripts/verify-sizing-fixes.mts` | 95 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement |
+| `scripts/verify-fixes.mts` | 174 | Legacy regression: CSV parsing, date handling, calendar arithmetic, CRN consistency, occupancy semantics, standalone artifact integrity, analytical infeasibility diagnosis, 24x7 midnight budget accounting |
+| `scripts/verify-sizing-fixes.mts` | 360 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement, fair agent assignment (D43: spread bounds, determinism, EDF order pinned to the pre-change engine, OFF = original HC, HC pins on pooled/siloed/staggered/24x7; D44: no double-booking in gated 24x7 runs) |
 | `scripts/check-artifact-freshness.mts` | gate | Fails if `BoWFM.html` is missing or older than shippable sources (`npm run check:artifact`) |
 
 Run with `npm test` (suites + freshness gate). No test framework is used — that would breach NFR-2.1; both suites use a
@@ -1015,6 +1043,7 @@ Behaviours a user must understand to interpret results correctly.
 | **L14** | **Extra OFF roster uplift (Stage 4) is a flat weekly ratio, not a per-agent rest-day rotation.** It answers "how many total heads are needed," not "which specific head works which specific day" — that is a rostering decision made downstream, outside this tool's scope (see `docs/wfm/05-scheduling.md`: "Sizing number ≠ roster"). The ratio assumes off days are staggered evenly across the team; a small headcount (e.g. 3 heads, 2 off days/week each) cannot actually stagger evenly, so the flat multiplier is an approximation at low N. Separately, a labor policy where off days meet or exceed open days makes coverage arithmetically infeasible (`coverageDays <= 0`) — the engine flags this rather than silently applying no uplift. | For small teams, sanity-check the rounded Net Operational HC against what a real weekly roster can actually stagger. Treat a flagged infeasible-roster result as a labor-policy configuration error, not a sizing answer. |
 | **L15** | **The binding-constraint label distinguishes a capacity floor from an SLA gate.** Fixed 2026-08-31 (`BIND-LABEL`): when the search passes at its first candidate (`startN = max(N_min, N_occ)`) the result is attributed to the capacity floor, naming `N_occ` when the occupancy floor is the higher of the two. Previously the label tested `recommendedHC === nMinAnalytical`, but `N_occ = N_min + 1` in 533 of 540 swept workloads, so that test almost never fired and the label defaulted to "Primary SLA … Target" — telling planners SLA was binding in exactly the runs where sweeping the SLA target across 50–99% provably moved nothing. | If the label reads as a capacity floor, SLA settings will not move the number; change occupancy cap, adherence, productive hours, or workload instead. Tests: `D42.10`–`D42.15` in `scripts/verify-sizing-fixes.mts`. |
 | **L16** | **SLA targets are inelastic across most of their range.** Not a defect — a property of deferrable work. Once headcount clears the workload, EDF dispatch finishes cases far inside any multi-hour window, so attainment snaps to 100% and the target % has nothing to bite on. Measured: with a 30-minute AHT, sweeping Primary % from 50→99 or the turnaround window from 2h→48h changed the recommendation by **zero** agents; the SLA gate only bound once the window approached the AHT itself (30–60 min). | Expect the recommendation to be driven by workload, occupancy cap, adherence and productive hours — not by the SLA block — unless your turnaround target is close to your handling time. Read the binding-constraint label (L15) to see which regime you are in. |
+| **L17** | **Fair agent assignment can raise the recommended HC by 1 in near-capacity runs, because the coverage gate counts "budget remaining" as presence.** Measured 2026-09-29 over 125 scenarios: 2 changed (a 20% workload-reduction fixture, 13→14, gross 16→18; `AJM_Simu.csv` pooled, 103→104, gross 147→149); N_min never changes. At ~98% occupancy fair dispatch drains every agent's daily budget together, so for a few seconds to minutes before close no agent has budget left, while the legacy pick leaves a few stragglers with minutes of budget. | Not a capacity error. If the extra agent is unwanted, switch Fair agent assignment OFF (Labor tab) to reproduce the legacy figure. See §11 P0-5. |
 
 ---
 
@@ -1114,6 +1143,15 @@ in `hc-search.ts` messaging was also corrected (2026-08-28) to say "lowest verif
 — monotonicity of DES pass/fail vs N remains an undischarged, honestly-labeled assumption (see
 D39 empirical sweep in `project_context.md` §9), though the walk-down's safety property (only
 ever returns a verified-passing N) does not depend on it.
+
+**P0-5 — Review the minimum-coverage gate: it drives 30–40% of the recommended HC on real data.**
+Measured 2026-09-29: in unstaggered runs "on shift" means "still has daily budget", so a
+few seconds of simultaneous budget exhaustion on a backlog-heavy first day forces many more
+agents. Replacing it with a gap rule (a zero-coverage gap only counts if it lasts at least the
+shortest case's handling time) drops the recommended HC on the real files from 103 to 64
+(`AJM_Simu.csv` pooled), 96 to 66 (siloed), 81 to 49 (`EGS_Only.csv`), with identical results
+under fair and legacy assignment and no change on the in-repo fixtures. Decide what "someone
+available" should mean before changing it; the frozen floor/ceiling decisions are untouched.
 
 ### P1 — Data loss and usability
 

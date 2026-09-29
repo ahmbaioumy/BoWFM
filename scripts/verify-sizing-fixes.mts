@@ -3115,6 +3115,119 @@ console.log('\n--- Suite D43: fair case-to-agent distribution ---');
   const fAsync = await searchOptimalHCAsync(searchParams43);
   assert(fSync.recommendedHC === fAsync.recommendedHC && fSync.staffing?.grossHCTotal === fAsync.staffing?.grossHCTotal, 'D43.12b sync/async parity with a custom dispatchFairness', `sync=${fSync.recommendedHC} async=${fAsync.recommendedHC}`);
   assert(cnt(hcSrc, /dispatchFairness/g) >= 8, 'D43.12c hc-search.ts passes dispatchFairness to every runBackofficeDES call site (sync + async, gated + audit + failedN)', `references=${cnt(hcSrc, /dispatchFairness/g)}`);
+
+  // --- D43.13: HC-pinning regression + the OFF toggle reproduces the ORIGINAL (pre-fairness) numbers --
+  // Fixtures: pooled (D42.1: 20% workload reduction), siloed, staggered (shift placement), 24x7.
+  // OFF = legacy LIFO pick = the pre-change values (captured before the engine edit; D42.1 13/16).
+  // ON (default) = the values gated on 2026-09-29: identical everywhere except D42.1 (+1 HC) because
+  // the coverage gate counts 'budget remaining' as presence and fair dispatch drains every agent's
+  // budget together at ~98% occupancy (PRD §10). N_min is identical in both modes.
+  {
+    const slaPin: SLAPolicyConfig = { ...SLA43, primaryPct: 80, primaryWindow: 8, primaryUnit: 'hours', occupancyCapPct: 85 };
+    const d42Iv: StandardInterval[] = [];
+    let ixp = 0;
+    for (let d = 0; d < 14; d++) {
+      const day = new Date(2026, 2, 2 + d);
+      if (!BIZ43.workingDays.includes(day.getDay())) continue;
+      for (let h = 9; h < 17; h++) d42Iv.push({ intervalIndex: ixp++, start: new Date(2026, 2, 2 + d, h, 0), end: new Date(2026, 2, 2 + d, h + 1, 0), category: 'General', volume: 30 });
+    }
+    const pinFx: Record<string, { p: any; nMin: number; off: [number, number]; on: [number, number] }> = {
+      pooled: { p: { intervals: d42Iv, openingWIP: [], categories: [{ ...cat43('General', 30), shrinkagePct: 0.2 }], calendar: BIZ43, labor: { ...LAB43, dailyProductiveHours: 7.5 }, sla: { ...slaPin, workloadReductionEnabled: true, workloadReductionPct: 20 }, seed: 12345, userMaxHC: 200, replications: 8 }, nMin: 12, off: [13, 16], on: [14, 18] },
+      siloed: { p: { intervals: ivs43(5, 10, 9, 17, { A: 10, B: 6 }), openingWIP: [], categories: [cat43('A', 20, 1), cat43('B', 30, 2)], calendar: BIZ43, labor: LAB43, sla: slaPin, seed: 42, userMaxHC: 60, replications: 5, queueArchitecture: 'siloed' }, nMin: 12, off: [13, 16], on: [13, 16] },
+      staggered: { p: { intervals: ivs43(5, 10, 9, 17, { General: 8 }), openingWIP: [], categories: [cat43('General', 20)], calendar: BIZ43, labor: { ...LAB43, dailyProductiveHours: 6, shiftPlacementEnabled: true, shiftSlapMinutes: 30 }, sla: { ...slaPin, primaryWindow: 4 }, seed: 42, userMaxHC: 60, replications: 5 }, nMin: 7, off: [8, 10], on: [8, 10] },
+      c247: { p: { intervals: ivs43(5, 10, 0, 24, { General: 2 }, CAL_24X7), openingWIP: [], categories: [cat43('General', 30)], calendar: CAL_24X7, labor: { ...LAB43, workingDaysPerWeek: 7, offDaysPerWeek: 0 }, sla: slaPin, seed: 42, userMaxHC: 60, replications: 5 }, nMin: 6, off: [6, 8], on: [6, 8] },
+    };
+    for (const [name, fx] of Object.entries(pinFx)) {
+      const rOff = searchOptimalHC({ ...fx.p, dispatchFairness: { enabled: false } });
+      const rOn = searchOptimalHC(fx.p);
+      assert(rOff.nMinAnalytical === fx.nMin && rOn.nMinAnalytical === fx.nMin, `D43.13 ${name}: N_min identical in both modes (${fx.nMin})`, `off=${rOff.nMinAnalytical} on=${rOn.nMinAnalytical}`);
+      assert(rOff.recommendedHC === fx.off[0] && rOff.staffing.grossHCTotal === fx.off[1], `D43.13 ${name}: fairness OFF reproduces the original recommended/gross HC (${fx.off[0]}/${fx.off[1]})`, `got ${rOff.recommendedHC}/${rOff.staffing.grossHCTotal}`);
+      assert(rOn.recommendedHC === fx.on[0] && rOn.staffing.grossHCTotal === fx.on[1], `D43.13 ${name}: fairness ON (default) pins recommended/gross HC (${fx.on[0]}/${fx.on[1]})`, `got ${rOn.recommendedHC}/${rOn.staffing.grossHCTotal}`);
+    }
+    const asyncOff = await searchOptimalHCAsync({ ...pinFx.pooled.p, dispatchFairness: { enabled: false } });
+    assert(asyncOff.recommendedHC === 13 && asyncOff.staffing.grossHCTotal === 16, 'D43.13 async path honours the OFF toggle identically (D42.1 13/16)', `got ${asyncOff.recommendedHC}/${asyncOff.staffing.grossHCTotal}`);
+  }
+
+  // --- D43.14: OFF is the exact legacy dispatch — timing digests equal the pre-change engine, including the
+  // 24x7 scenario where daily budgets bind (30 parked cases) and ON legitimately differs -------------------
+  {
+    const GOLDEN_OFF: Record<string, number> = { ...GOLDEN_TIMES, c247: 3849299782 };
+    for (const [name, golden] of Object.entries(GOLDEN_OFF)) {
+      const d = run43((scn43 as any)[name](), { dispatchFairness: { enabled: false } });
+      assert(timesDigest43(d) === golden, `D43.14 ${name}: fairness OFF timing identical to the pre-change engine`, `digest=${timesDigest43(d)} golden=${golden}`);
+    }
+    const on247 = run43(scn43.c247());
+    assert(timesDigest43(on247) !== 3849299782 && (on247.caseResults as any[]).filter((c) => c.parkCount > 0).length === 0, 'D43.14 control: ON differs from legacy where budgets bind (fair use of budget parks 0 of the 30 cases legacy parked)', '');
+    const offRun = run43(scn43.uniform(), { dispatchFairness: { enabled: false } });
+    assert((offRun as any).agentFairness?.config?.enabled === false && (run43(scn43.uniform()) as any).agentFairness?.config?.enabled === true, 'D43.14 agentFairness reports which mode ran (OFF explicit, ON default)', '');
+  }
+}
+
+// =================================================================
+// Suite D44 — No double-booking in gated 24x7 runs (PRD P0-6)
+//
+// Defect (GATED-DOUBLE-BOOK): the daily idle rebuild in AgentAvailable used
+// `agentState[i] === 'idle' || skipCaseResultsAndTimeline`. agentState is only tracked in audit
+// runs, so in gated runs (skipCaseResultsAndTimeline = true — every CI-gate replication) an
+// unstaggered 24x7 agent still processing a case at midnight re-entered the idle pool and was
+// assigned a second case. Fix: eligibility comes from the mode-independent agentActive flag
+// (the same source the coverage sampler uses), shared by both branches.
+// Pre-fix, D44.1 fails (measured 41 / 12 / 10 / 28 double bookings on earlier fixtures) and
+// D44.2 fails in legacy (OFF) mode, where gated and audit results diverged.
+// =================================================================
+console.log('\n--- Suite D44: no double-booking in gated 24x7 runs ---');
+{
+  const LAB247: LaborConfig = { dailyProductiveHours: 8, adherencePct: 1.0, workingDaysPerWeek: 7, offDaysPerWeek: 0, contractualHoursSource: 'derived', shifts: [] };
+  const sla247 = (hours: number): SLAPolicyConfig => ({
+    primaryPct: 80, primaryWindow: hours, primaryUnit: 'hours', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes',
+    asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'arrival',
+    occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 95,
+  });
+  const iv247 = (vols: Record<string, number>): StandardInterval[] => {
+    const out: StandardInterval[] = [];
+    let idx = 0;
+    for (let d = 0; d < 10; d++) {
+      for (let h = 0; h < 24; h++) {
+        for (const m of [0, 30]) {
+          for (const [category, volume] of Object.entries(vols)) {
+            out.push({ intervalIndex: idx++, start: new Date(2026, 9, 5 + d, h, m), end: new Date(2026, 9, 5 + d, h, m + 30), volume, category });
+          }
+        }
+      }
+    }
+    return out;
+  };
+  const mk247 = (arch: 'pooled' | 'siloed', aht: number, hours: number) => ({
+    operationalHC: 8, intervals: arch === 'pooled' ? iv247({ General: aht === 30 ? 2 : 1 }) : iv247({ A: 1, B: 1 }),
+    openingWIP: [], categories: arch === 'pooled' ? [{ id: 'g', name: 'General', ahtMinutes: aht, shrinkagePct: 0.2, priority: 1 }] : [{ id: 'a', name: 'A', ahtMinutes: aht, shrinkagePct: 0.2, priority: 1 }, { id: 'b', name: 'B', ahtMinutes: aht, shrinkagePct: 0.2, priority: 2 }],
+    calendar: CAL_24X7, labor: LAB247, sla: sla247(hours), seed: 42, queueArchitecture: arch,
+  });
+
+  // D44.1: no assignment to an agent that is already processing a case (gated runs)
+  for (const arch of ['pooled', 'siloed'] as const) {
+    for (const enabled of [true, false]) {
+      const total = [30, 45, 60].reduce((acc, aht) => acc + runBackofficeDES({ ...mk247(arch, aht, 4), dispatchFairness: { enabled }, skipCaseResultsAndTimeline: true }).doubleBookedAssignments, 0);
+      assert(total === 0, `D44.1 ${arch}, fair assignment ${enabled ? 'ON' : 'OFF'}: gated 24x7 run never assigns a case to an agent that is already processing one`, `doubleBookedAssignments=${total}`);
+    }
+  }
+  // D44.1b control: audit runs were never affected (agentState tracked there)
+  const auditDbl = runBackofficeDES({ ...mk247('pooled', 30, 4), dispatchFairness: { enabled: false } });
+  assert(auditDbl.doubleBookedAssignments === 0, 'D44.1b control: audit (full) run has zero double bookings', `got ${auditDbl.doubleBookedAssignments}`);
+
+  // D44.2: gated and audit runs now agree (they diverged when gated runs double-booked)
+  let worst = '';
+  for (const arch of ['pooled', 'siloed'] as const) {
+    for (const enabled of [true, false]) {
+      for (const [aht, hours] of [[30, 2], [60, 2], [60, 4]] as const) {
+        const p = { ...mk247(arch, aht, hours), dispatchFairness: { enabled } };
+        const a = runBackofficeDES(p), g = runBackofficeDES({ ...p, skipCaseResultsAndTimeline: true });
+        if (a.primaryAchievedPct !== g.primaryAchievedPct || a.completedCases !== g.completedCases || Math.abs(a.totalHandlingMinutes - g.totalHandlingMinutes) > 1e-6 || a.boAsaMeanMinutes !== g.boAsaMeanMinutes) {
+          worst = `${arch} fair=${enabled} aht=${aht} win=${hours}h audit ${a.primaryAchievedPct}%/asa ${a.boAsaMeanMinutes} vs gated ${g.primaryAchievedPct}%/asa ${g.boAsaMeanMinutes}`;
+        }
+      }
+    }
+  }
+  assert(worst === '', 'D44.2 gated and audit runs agree on SLA, completions, handling minutes and ASA for unstaggered 24x7 (pooled + siloed, fair ON + OFF)', worst);
 }
 
 console.log('\n==================================================');

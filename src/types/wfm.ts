@@ -449,6 +449,12 @@ export interface DESResult {
   /** Echoes the shiftDistribution passed to runBackofficeDES, when one was supplied. */
   shiftDistributionUsed?: ShiftDistributionByCategory;
 
+  /**
+   * Assignments made to an agent that was still processing another case. Must always be 0 — an
+   * agent works one case at a time. Tracked in every mode, gated replications included.
+   */
+  doubleBookedAssignments: number;
+
   /** Per-agent fairness summary. Audit run only (absent when skipCaseResultsAndTimeline). */
   agentFairness?: AgentFairnessSummary;
 }

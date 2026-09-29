@@ -1164,8 +1164,6 @@ export function runBackofficeDES(params: {
   // continuous handoffs reported minCoverageObserved=0 despite genuinely unbroken coverage —
   // caught while validating the 24x7 multi-start fix, suite D36).
   let minOnShiftDuringOpenHours = Infinity;
-  const covBusyStamp = new Int32Array(operationalHC);
-  let covStamp = 0;
   function countAgentsOnShiftNow(): number {
     // agentDailyMinutesRemaining is decremented at ASSIGNMENT time, not completion time — an
     // agent dispatched their final chunk of budget shows remaining ~0 while STILL actively
@@ -1176,12 +1174,10 @@ export function runBackofficeDES(params: {
     // positive zero-coverage moment mid-shift, at an ordinary case-completion boundary with
     // no cohort transition anywhere near it — traced to exactly this). An agent currently in
     // activeProcessing is on shift by definition, regardless of remaining budget.
-    covStamp++;
-    for (const p of activeProcessing.values()) covBusyStamp[p.agentIndex] = covStamp;
     let count = 0;
     for (let i = 0; i < operationalHC; i++) {
       const started = !staggeredMode || agentOnShiftToday![i] === 1;
-      if (started && (agentDailyMinutesRemaining[i] > 0.01 || covBusyStamp[i] === covStamp)) count++;
+      if (started && (agentDailyMinutesRemaining[i] > 0.01 || agentActive[i] === 1)) count++;
     }
     return count;
   }
@@ -1194,6 +1190,11 @@ export function runBackofficeDES(params: {
 
   const parkedWIP = new Map<string, CaseEntity>();
   const activeProcessing = new Map<string, ActiveProcessingState>();
+  // 1 while the agent is processing a case — the single source of truth for "is this agent busy",
+  // mode-independent (agentState is only tracked in audit runs). Set at assignment, cleared
+  // wherever activeProcessing entries are removed.
+  const agentActive = new Uint8Array(operationalHC);
+  let doubleBookedAssignments = 0;
   let completedCount = 0;
   let totalHandlingMinutes = 0;
   // Called here (not right after sampleCoverage's own definition above) because
@@ -1302,6 +1303,8 @@ export function runBackofficeDES(params: {
         ? selectFairAgent(nCand, fairIds, fairUtil, fairCases, fairBusy, fairIdle, fairTol, fairRng, fairSurv)
         : { slot: nCand - 1, decidedBy: 'single' as DispatchDecidedBy };
       const agentId = fairIds[fair.slot];
+      if (agentActive[agentId] === 1) doubleBookedAssignments++;
+      agentActive[agentId] = 1;
       if (!skipCaseResultsAndTimeline) {
         let runnerUp: AgentFairnessSnapshot | null = null;
         if (nCand > 1) {
@@ -1528,6 +1531,7 @@ export function runBackofficeDES(params: {
         const proc = activeProcessing.get(ev.entityId);
         if (proc) {
           activeProcessing.delete(ev.entityId);
+          agentActive[proc.agentIndex] = 0;
 
           const c = caseMap.get(ev.entityId)!;
           c.remainingWorkMinutes = 0;
@@ -1559,6 +1563,7 @@ export function runBackofficeDES(params: {
         const proc = activeProcessing.get(ev.entityId);
         if (proc) {
           activeProcessing.delete(ev.entityId);
+          agentActive[proc.agentIndex] = 0;
 
           const c = caseMap.get(ev.entityId)!;
           c.remainingWorkMinutes -= ev.data?.workDoneMinutes || 0;
@@ -1703,26 +1708,20 @@ export function runBackofficeDES(params: {
           }
         }
 
-        // Repopulate idle agent lists. In staggered mode, eligibility comes from
-        // agentOnShiftToday (mode-independently correct — see its declaration above), MINUS
-        // any agent currently mid-task: unlike the legacy unscoped event (which fires exactly
-        // once per day, so "everyone comes back fresh" is correct), a staggered AgentAvailable
-        // fires once PER COHORT per day — a later cohort's event must not disturb an earlier
-        // cohort's agent that is still processing a case, or it would be double-booked (added
-        // back to the idle pool while activeProcessing still holds it). activeProcessing is
-        // tracked mode-independently already, so this exclusion works in skip mode too. The
-        // `agentState[i] === 'idle' || skipCaseResultsAndTimeline` shortcut is preserved
-        // byte-for-byte for the non-staggered path.
-        const busyAgentIdsForRepop = staggeredMode
-          ? new Set(Array.from(activeProcessing.values(), (p) => p.agentIndex))
-          : null;
+        // Repopulate idle agent lists from ONE shared eligibility rule: an agent may re-enter the
+        // idle pool only if it is not mid-task (agentActive — tracked in every mode, so this holds
+        // for gated runs too) and, when staggered, its own shift has started today. The legacy
+        // unscoped event fires once per day, but an unstaggered 24x7 agent can still be processing
+        // across midnight, and a staggered cohort's event must not disturb another cohort's busy
+        // agent. Fixed 2026-09-29 (GATED-DOUBLE-BOOK): this used to be
+        // `agentState[i] === 'idle' || skipCaseResultsAndTimeline` for the non-staggered path, which
+        // treated EVERY agent as idle in gated runs and double-booked 24x7 agents at midnight.
+        const eligibleAtRebuild = (i: number): boolean =>
+          agentActive[i] === 0 && (!staggeredMode || agentOnShiftToday![i] === 1);
         pooledIdleAgents.length = 0;
         if (!isSiloed) {
           for (let i = 0; i < operationalHC; i++) {
-            const eligible = staggeredMode
-              ? agentOnShiftToday![i] === 1 && !busyAgentIdsForRepop!.has(i)
-              : (agentState[i] === 'idle' || skipCaseResultsAndTimeline);
-            if (eligible) {
+            if (eligibleAtRebuild(i)) {
               idleSinceMs[i] = simTimeMs;
               pooledIdleAgents.push(i);
             }
@@ -1730,10 +1729,7 @@ export function runBackofficeDES(params: {
         } else {
           siloedIdleAgents.forEach((list) => { list.length = 0; });
           for (let i = 0; i < operationalHC; i++) {
-            const eligible = staggeredMode
-              ? agentOnShiftToday![i] === 1 && !busyAgentIdsForRepop!.has(i)
-              : (agentState[i] === 'idle' || skipCaseResultsAndTimeline);
-            if (eligible) {
+            if (eligibleAtRebuild(i)) {
               idleSinceMs[i] = simTimeMs;
               const cat = agentCategoryMap.get(i) || (categories[0] ? categories[0].name : 'General');
               let list = siloedIdleAgents.get(cat);
@@ -1804,6 +1800,7 @@ export function runBackofficeDES(params: {
         // Handle any busy agents still active at closeTime (park them)
         for (const [caseId, proc] of Array.from(activeProcessing.entries())) {
           activeProcessing.delete(caseId);
+          agentActive[proc.agentIndex] = 0;
           const c = caseMap.get(caseId);
           if (c) {
             const workDone = Math.max(0, (simTimeMs - proc.startTime.getTime()) / 60000);
@@ -2140,6 +2137,7 @@ export function runBackofficeDES(params: {
     caseResults,
     agentTimeline,
     ...(shiftDistribution ? { shiftDistributionUsed: shiftDistribution } : {}),
+    doubleBookedAssignments,
     ...(agentFairness ? { agentFairness } : {}),
   };
 }

@@ -1759,6 +1759,70 @@ export function ResultsFlow({
             </div>
           </div>
 
+          {/* 1b. Agent assignment fairness (audit run) */}
+          {des.agentFairness && (() => {
+            const af = des.agentFairness!;
+            const fmt1 = (n: number) => (Math.round(n * 10) / 10).toLocaleString();
+            const metricCards = (label: string, m: NonNullable<typeof af.perCategory>[string]) => (
+              <div key={label} className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+                <div className="col-span-2 md:col-span-5 font-semibold text-slate-700">{label} ({m.agents} agents)</div>
+                <div className="bg-slate-50 border border-slate-200 rounded p-2"><div className="text-slate-500">Cases max / min</div><div className="font-bold text-slate-900">{m.casesMaxMinRatio === null ? 'n/a (an agent has 0)' : m.casesMaxMinRatio.toFixed(2)}</div></div>
+                <div className="bg-slate-50 border border-slate-200 rounded p-2"><div className="text-slate-500">Cases CV</div><div className="font-bold text-slate-900">{m.casesCv.toFixed(3)}</div></div>
+                <div className="bg-slate-50 border border-slate-200 rounded p-2"><div className="text-slate-500">Utilisation CV</div><div className="font-bold text-slate-900">{m.utilCv.toFixed(3)}</div></div>
+                <div className="bg-slate-50 border border-slate-200 rounded p-2"><div className="text-slate-500">Jain's index (utilisation)</div><div className="font-bold text-slate-900">{m.utilJain.toFixed(3)}</div></div>
+              </div>
+            );
+            return (
+              <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4">
+                <div className="border-b border-slate-100 pb-3">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-sm font-bold text-slate-900">Agent Assignment Fairness</h3>
+                    <span className="text-xs bg-amber-50 border border-amber-200 text-amber-800 font-semibold px-2 py-0.5 rounded-full">audit run (single seed)</span>
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${af.config.enabled ? 'bg-blue-50 border-blue-200 text-blue-800' : 'bg-slate-100 border-slate-300 text-slate-700'}`}>
+                      {af.config.enabled ? 'Fair assignment: ON' : 'Fair assignment: OFF (legacy — newest-returned agent)'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    How evenly work was spread across agents. Utilisation = busy minutes / minutes the agent was on shift.
+                    Cases are credited to the agent who finished them. This is a per-agent view, not the planned-capacity occupancy used for sizing.
+                  </p>
+                </div>
+                <div className="space-y-3">
+                  {metricCards('All agents', af.overall)}
+                  {af.perCategory && Object.entries(af.perCategory).map(([name, m]) => metricCards(name, m))}
+                </div>
+                <div className="overflow-x-auto max-h-72 overflow-y-auto">
+                  <table className="w-full text-xs text-left">
+                    <thead className="sticky top-0 bg-slate-50 text-slate-500">
+                      <tr>
+                        <th className="py-1.5 px-3">Agent</th>
+                        <th className="py-1.5 px-3">Category</th>
+                        <th className="py-1.5 px-3 text-right">Cases completed</th>
+                        <th className="py-1.5 px-3 text-right">Busy (min)</th>
+                        <th className="py-1.5 px-3 text-right">Available (min)</th>
+                        <th className="py-1.5 px-3 text-right">Utilisation %</th>
+                        <th className="py-1.5 px-3 text-right">Idle (min)</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {af.perAgent.map((r) => (
+                        <tr key={r.agentId}>
+                          <td className="py-1.5 px-3 font-semibold text-slate-900">{r.agentLabel}</td>
+                          <td className="py-1.5 px-3 text-slate-600">{r.category ?? 'Pooled'}</td>
+                          <td className="py-1.5 px-3 text-right">{r.casesCompleted}</td>
+                          <td className="py-1.5 px-3 text-right">{fmt1(r.busyMinutes)}</td>
+                          <td className="py-1.5 px-3 text-right">{fmt1(r.availableMinutes)}</td>
+                          <td className="py-1.5 px-3 text-right">{fmt1(r.utilPct)}%</td>
+                          <td className="py-1.5 px-3 text-right">{fmt1(r.idleMinutes)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* 2. Secondary View: Slice Drill Down */}
           <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
