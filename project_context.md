@@ -290,6 +290,20 @@ that equals the official Primary %; when ON, it is `Primary% × (1 − slaAccept
 slack. t-critical values come from continuous `getTCrit(df, level)` (Acklam + Cornish–Fisher).
 If HC equals `N_min`, CI is not binding.
 
+**Agent selection vs case selection (2026-09-29).** `dispatchSingleQueue` first picks the case
+(EDF, `pickNextCase` — frozen, untouched) and then picks *which idle agent* takes it via the
+shared `selectFairAgent` (`des-engine.ts`): utilisation → cases completed → busy minutes →
+longest idle → seeded RNG (separate stream, salted from the run seed; consumed only when >1
+agent survives), each level keeping agents within a tolerance of that level's minimum
+(`DispatchFairnessConfig`: 2 pp / 1 case / 5 min, whole-horizon counters, `resetDaily`
+optional). `dispatchFairness.enabled` (default true; the Labor-tab button) false restores the
+exact legacy LIFO pick through one branch in that step. `dispatchFairness` is threaded through
+both `searchOptimalHC` and `searchOptimalHCAsync` (D43.12 pins the reference counts). Counters
+run in gated replications too; the assignment ledger and `DESResult.agentFairness` exist only
+in the audit run. Requirements: N_min unchanged; recommended HC +1 on 2 of 125 measured
+scenarios (coverage gate, PRD L17); OFF reproduces the original numbers (D43.13/14). Agent busy-ness is the
+mode-independent `agentActive` flag (D44: no double-booking in gated runs).
+
 > **This walk-down is only valid if pass/fail is monotone in N.** See §6.10 — that assumption
 > was violated by a real defect, and the guard against it must not be removed. DES pass/fail
 > monotonicity itself (as opposed to the apportionment/placement *output* monotonicity §6.10
@@ -543,15 +557,59 @@ effect while being unsustainable in a repeating period.
 > what it accepts. Tests `BUG-J` (`scripts/verify-fixes.mts`) and `D11.4`–`D11.8`
 > (`scripts/verify-sizing-fixes.mts`) pin the new floor values.
 
-> **Second Update (explicit human approval):** A **Workload HC Reduction** toggle now allows
-> planners to discount `N_min` by a user-specified %. This is an opt-in lever that re-exposes
-> the finite-horizon edge-effect risk: a discounted `N_min` can now pass by exploiting the
-> drain window when the true steady-state is higher. Mitigation: the toggle is OFF by default
-> (preserving the guardrail for all existing runs), DES/CI gates still bind above a discounted
-> floor (the search is DES-authoritative, not overridden), and results visibly label where the
-> reduction was applied and show both the reduced and unreduced `N_min`. Use only with explicit
-> planner intent and awareness of the trade-off. Tests pinning the reduced-floor math are `D12.*`
-> in `scripts/verify-sizing-fixes.mts`.
+> **Second Update (explicit human approval):** A **Workload Reduction** toggle now allows
+> planners to discount modelled workload by a user-specified %. This is an opt-in lever that
+> re-exposes the finite-horizon edge-effect risk: a discounted workload can now pass by
+> exploiting the drain window when the true steady-state is higher. Mitigation: the toggle is
+> OFF by default (preserving the guardrail for all existing runs), DES/CI gates still bind
+> above the discounted floor (the search is DES-authoritative, not overridden), and results
+> visibly label where the reduction was applied and show both the reduced and unreduced
+> `N_min`. Use only with explicit planner intent and awareness of the trade-off. Tests pinning
+> the reduced-floor math are `D12.*` in `scripts/verify-sizing-fixes.mts`.
+
+> **Third Update — `WLR-DEAD`, fixed 2026-08-31.** The reduction above was applied **only**
+> inside `computeAnalyticalNMin`, which made it a guaranteed **no-op on the recommendation**.
+> The search starts at `startN = max(N_min, N_occ)` and never explores below it, and
+> `computeOccupancyFloor` did not take the reduction — under the default derived-hours basis
+> both floors share a denominator, so `N_occ = ceil(X)` while `N_min = floor(X·(1−r))`, i.e.
+> `N_occ >= N_min` for every `r`. `startN` was pinned to the un-reduced `N_occ`. Measured on
+> the real engine: a **50% reduction moved neither `recommendedHC` (16 → 16) nor `grossHC`
+> (20 → 20)**. Discounting only the analytic floor could never have worked anyway, because
+> `generateCaseEntities` still simulated full demand and the DES occupancy gate would have
+> pushed any lower candidate straight back up.
+>
+> The reduction is now applied **once, to category AHT** (`applyWorkloadReductionToCategories`
+> in `hc-search.ts`), so all four stages size against the same reduced workload. AHT is the
+> right single point of application: `workload = volume × AHT`, so a `(1 − r)` factor reduces
+> workload by exactly `r%` with no integer-rounding loss, leaves case counts (and therefore
+> every SLA attainment denominator) untouched, and is seen identically by Stage 2 floors,
+> Stage 3 DES and Stage 4 gross-up because all three derive workload from `cat.ahtMinutes`.
+> `computeAnalyticalNMin` is deliberately **no longer** passed `workloadReduction*` — the
+> workload it receives is already reduced, and passing both would double-apply. Post-fix
+> measurement: 50% reduction → `recommendedHC` 16 → 8, `grossHC` 20 → 10. Tests: `D42.1`–`D42.9`.
+> Opening WIP with an explicit `remainingWorkMinutes` is **not** discounted (measured work in
+> flight, not a forecast assumption); unconfigured categories keep the un-reduced 30-min default.
+
+> **`BIND-LABEL`, fixed 2026-08-31.** `bindingConstraintType` was decided by
+> `recommendedHC === nMinAnalytical`, but the search starts at `max(N_min, N_occ)` and
+> `N_occ = N_min + 1` in **533 of 540** swept workloads, so that test almost never fired even
+> when the floor was exactly what bound. Control fell through to the default
+> `statistical_primary_sla` / "Primary SLA … Target" description — surfaced to planners at
+> `ResultsFlow.tsx:516`, `:1533`, `:2258`. The result: the UI named SLA as the binding
+> constraint in precisely the runs where sweeping the SLA target across 50–99% provably moved
+> nothing. Both search paths now capture `searchStartN` and attribute the result to the
+> capacity floor whenever `recommendedHC === searchStartN`, naming `N_occ` when the occupancy
+> floor is the higher of the two. A genuinely SLA-bound run (turnaround window near AHT) is
+> still labelled `statistical_primary_sla` — pinned by `D42.14`/`D42.15` against
+> over-correction. Tests: `D42.10`–`D42.15`.
+>
+> **Known modelling property (not a defect), measured 2026-08-31:** SLA targets are inelastic
+> across most of their range. Once headcount clears the workload, EDF dispatch on deferrable
+> work finishes cases far inside any multi-hour window, so attainment snaps to 100% and the
+> target has nothing to bite on. Sweeping Primary % 50→99 or the window 2h→48h changed the
+> recommendation by zero agents; the gate only bound once the window approached AHT (30–60 min
+> against a 30-min AHT). Expect workload, occupancy cap, adherence and productive hours to be
+> the real levers. See PRD §10 `L16`.
 
 ### 6.4a Extra OFF is a coverage ratio, not a calendar-week fraction
 *Looks like:* `(1 + extraOffDays/7)` — off days as a share of the 7-day week, symmetric with
@@ -868,9 +926,20 @@ Work down the chain in order — the fault is almost always upstream of where it
 | **"Exact minimum" search messaging was an unwarranted claim** (`hc-search.ts` `searchOptimalHCAsync`; D38 suite; 2026-08-28) | DES pass/fail monotonicity in N is an open, undischarged assumption (§9) — the walk-down search only ever verifies N passed and N-1 failed, never that N is the exact minimum. Reworded `Exact minimum N=...` to `Lowest verified-passing N=... found (N-1=... failed the gate)`. Presentation-only, no logic change. Side-finding: the message is unreachable dead code in practice — the post-loop re-evaluate call it's built from always hits `evalCache` (the N was already evaluated earlier in the same walk-down loop), and a cache hit returns before `onProgress` fires — so D38 pins the literal source string rather than a runtime/`onProgress` observation. |
 | **Empirical monotonicity sweep added** (D39 suite; 2026-08-28) | No prior test checked that DES pass/fail is actually monotone in N — only that specific *outputs* (placement distribution, apportionment shares) grow monotonically. D39 sweeps the uniform-only predicate (`evaluateCandidateStatistical`, no `shiftDistribution`) across N=1..25 on a plain business-hours config, same pattern as D3.1's apportionment sweep. No violation found in the range tested — consistent with, not proof of, the walk-down's resting assumption, which remains open and honestly labeled. The full 3-way-disjunction sweep (which would need `evaluateN`/`evaluateAsync`'s logic extracted into a shared function) was deliberately not attempted — the remediation plan reserved that extraction for if Gap G's re-measurement above concluded a multi-attempt search was worth building, which it did not. |
 | **Sync-only off-hours mitigation removed** (PRD P0-2; `hc-search.ts:1443-1455`; D8, 2026-08-28) | A benchmark run against `trusted-source-validation.json` (135/135 passing) validated `searchOptimalHC`, not `searchOptimalHCAsync` — the path `App.tsx`/`SensitivityFlow.tsx` actually call. The gap was a real mitigation, sync-only: rewriting `sla.clockStartPolicy` from `'arrival'` to `'next_open'` when >15% of volume arrives off-hours. Measured impact on a reproduction dataset (5 days, 89% off-hours, `clockBasis: 'wall_clock'`): sync recommended HC=24, async reported fully infeasible on identical input. Fixed by deleting the block from sync, not porting it into async — `clockStartPolicy` is a deliberate planner toggle, `HCSearchOutput` has no field to report a silent override, and `csv-parser.ts:838`'s DQ warning already covers the same >15% threshold with the same recommended remedy. Verified zero effect on shipped behavior: async's output on the reproduction case is byte-identical before/after; only `scenario_T3_R2_invalid_date_interval_asymmetry` in the trusted-source file had inputs that triggered the deleted block, and its one assertion (`nMinAnalytical`) doesn't read `clockStartPolicy`, so it was unaffected. Full suite 215/215, trusted-source 135/135, both unchanged. |
+| **A new upload/sample-load could silently blend with a stale prior session** (`UPLOAD-STALE-STATE`; `App.tsx` `handleFileUpload`/`handleLoadSample`/`handleConfirmResetAll`; 2026-08-31) | Uploading a new demand file already wholesale-replaced `rawRows`/`columnMapping` and cleared `searchOutput`, but left `calendar`/`labor`/`sla`/`categories`/`simParams`/`openingWIP` from any prior session in that browser tab untouched. Root-caused a user-reported sizing discrepancy: a stale tab held leftover config from an earlier run, the new upload only swapped the demand rows, and the search silently produced a materially different (lower) headcount with no indication anything was stale. Both `searchOptimalHC` and `searchOptimalHCAsync` were traced line-by-line and structurally diffed on the exact reported input and found byte-identical to the last commit — this was never an engine bug. Fixed by routing a new upload or sample-load, whenever the session already has data loaded (`rawRows.length > 0`), through the same `ResetConfirmModal` the Sidebar's Reset button already uses (`pendingResetAction` now carries `'reset' \| {type:'upload',...} \| {type:'sample',...}`; `handleConfirmResetAll` runs the shared reset body, then applies the pending upload/sample against the freshly-defaulted state). Cancelling leaves the existing session completely untouched. A brand-new session (no data loaded yet) is unaffected — the confirmation only fires when there is something to lose. |
 | **Extra-OFF roster multiplier divided by the calendar week instead of the open week** (`computeExtraOffPct`, `calculateStaffingRequirement`; `hc-search.ts`; D40/D41 suites, `T1_A2c` trusted-source scenario; 2026-08-28) | `operationalHCWithOff` used `floor(N*(1+extraOffDays/7))`. Agents only supply capacity on open days, so the correct multiplier is the coverage ratio `openDaysPerWeek/coverageDays` — the two formulas agree only at `extraOffDays=0` (the default 5-day-calendar/5-day-Labor config), which is why this shipped unnoticed for over a year; `trusted-source-validation.json` had zero scenarios with `extraOffDays>0`. Measured under-statement: 6-open/2-off gave 114 instead of 120 (−5%); 5-open/5-off gave 142 instead of 250 (−43%); worst at 24×7, exactly where the UI's 24/7 toggle force-sets `offDaysPerWeek:0` and masked it further. Fixed by computing `floor((N*openDaysPerWeek)/coverageDays)` integer-exact — a naive `floor(N*(1+rosterUpliftPct))` reintroduces a *separate* binary-float bug (`45*(1+0.4)=62.999999999999999→62`, true value 63). Also added a `rosterInfeasible` guard for `coverageDays<=0` (surfaced in `bindingConstraint`, not silently 1×) and fixed the 24/7 toggle's missing untick-restore path (`App.tsx` now owns a pre-toggle snapshot — `CalendarConfigPanel` is conditionally mounted by `DemandFlow` and was discarding component-local state on every tab switch). Three new non-blocking DQ warnings added (`csv-parser.ts`): zero off-days on a non-24/7 calendar, Manual Hours Override far out of scale with the uploaded horizon, and calendar-open days inside the horizon with zero uploaded rows. See §6.4a and `docs/wfm/07-known-defects-and-decisions.md` D41. Full suite 454/454, trusted-source 164/164, both green. |
+| **Fair agent assignment** (`selectFairAgent`; D43 suite; 2026-09-29) — added, not a defect fix | Idle agents were a LIFO stack, so the agent who had just finished took the next case: on real data max/min cases per agent 5.5x–16x (pooled), utilisation CV 0.50–0.79. Now about 1.02x and CV 0.02. Cost: recommended HC +1 on 2 of 125 scenarios (coverage gate); toggle OFF restores the original numbers exactly. Search runtime -31% on the real files after removing a per-event Set allocation in the coverage sampler. |
+| **Gated-run 24x7 midnight double-booking** (`GATED-DOUBLE-BOOK`; `des-engine.ts` daily idle rebuild; D44 suite; 2026-09-29) | The rebuild used `agentState[i] === 'idle' || skipCaseResultsAndTimeline`; agentState is audit-only, so in gated replications every unstaggered 24x7 agent re-entered the idle pool at midnight, even mid-case, and could be assigned a second case (measured 44–224 double bookings per fixture; gated and audit results diverged, e.g. SLA 97.2% vs 96.7%). Now eligibility = `agentActive` flag (mode-independent, shared by both branches and the coverage sampler). Measured over all 125 scenarios: N_min / recommended HC / gross HC unchanged, non-24x7 results byte-identical; only a 24x7 infeasible trusted-source case shows different gated ASA numbers. New invariant: `DESResult.doubleBookedAssignments === 0`. |
+| **Per-agent available-minutes double-count on day 1** (`AVAIL-DOUBLE-COUNT`; `startAvailabilityDay` in `des-engine.ts`; D45 suite; 2026-09-29) | When the horizon opened exactly at an agent's shift start, the horizon-start pre-seed and the same-instant AgentAvailable event both counted day 1 (e.g. 5280 vs 4800 min), inflating Results availability/utilisation and skewing the fair cascade. One accrual path now (fold skipped if the window already opened at that instant). Gated over all measured scenarios: no HC change on suites or `test_files`; `support` sample pooled 28/35 (never released) → 27/34 = the original. Also extracted, no behaviour change: `buildSampleDataset`/`nextMondayAt8` (`src/utils/sample-data.ts`) and the `DEFAULT_*` config (`src/utils/default-config.ts`); the D45.2 test pins all three samples' HC with a fixed Monday. |
 
 ### Known drift risks — the things most likely to bite you
+
+**The minimum-coverage gate drives the recommended HC on real data (PRD P0-5).** Unstaggered
+"on shift" = budget remaining > 0.01 or busy. Measured 2026-09-29: swapping it for a gap rule
+(a zero-coverage gap must last at least the shortest AHT to count) cuts recommended HC 30–40%
+on `test_files/` (103→64, 96→66, 81→49), with fair and legacy assignment agreeing exactly.
+Fair assignment exposes the sensitivity (+1 HC on 2 of 125 scenarios). Do not change the gate
+without an explicit decision.
 
 **The two search implementations can still diverge (D11), even though the one measured
 instance of it is fixed.** `searchOptimalHC` (sync) previously contained an off-hours
