@@ -671,8 +671,8 @@ export function buildCoverageRepairDistribution(params: {
  * `repairFirst`: the uniform layout is STRUCTURALLY unable to pass coverage — non-24x7, floor on,
  * and the shift is shorter than the open day, so nobody is present in the tail of the window
  * (presence = inside the agent's own shift, C6 2026-09-29) — so evaluating uniform first is pure
- * wasted work; repair is evaluated first and uniform only if repair fails. Result-neutral: repair
- * wins iff it passes the full gate, otherwise the uniform result is reported, exactly as before.
+ * wasted work; repair is evaluated first, and when it fails its failing result is the N's reported
+ * result (uniform is not evaluated at all). Pass/fail is unchanged: uniform could not have passed.
  */
 export function planCoverageRepair(params: {
   n: number;
@@ -1769,8 +1769,8 @@ export function searchOptimalHC(params: {
     // may never be left unattended while the business is running, so this is not an
     // optimization the planner opts into. planCoverageRepair (shared with the async search)
     // decides whether repair runs FIRST (uniform is structurally unable to pass coverage, so
-    // evaluating it first is wasted work) or only after a failing uniform evaluation. Either
-    // way the outcome is identical: repair's distribution wins iff it passes the full gate,
+    // evaluating it first is wasted work; a failing repair is then the reported result) or only after a failing uniform evaluation. Either
+    // way pass/fail is identical: repair's distribution wins iff it passes the full gate,
     // otherwise the uniform result is reported. 24x7 RE-ENABLED (2026-08-28, 24x7 multi-start).
     const covPlan = planCoverageRepair({ n, sla, calendar, labor, queueArchitecture, representativeCases });
     let finalRes: ReturnType<typeof evaluateCandidateStatistical> | undefined;
@@ -1787,7 +1787,11 @@ export function searchOptimalHC(params: {
         winningDist = covPlan.dist!;
       }
     };
-    if (covPlan.repairFirst) runRepair();
+    if (covPlan.repairFirst) {
+      runRepair();
+      // Structurally-unmet uniform cannot pass, so a failing repair IS this N's best-effort result.
+      if (!finalRes) finalRes = coverageRes;
+    }
     if (!finalRes) {
       const uniformRes = evaluateCandidateStatistical({
         operationalHC: n,
@@ -2449,7 +2453,11 @@ export async function searchOptimalHCAsync(params: {
         winningDist = covPlan.dist!;
       }
     };
-    if (covPlan.repairFirst) await runRepair();
+    if (covPlan.repairFirst) {
+      await runRepair();
+      // Structurally-unmet uniform cannot pass, so a failing repair IS this N's best-effort result.
+      if (!finalRes) finalRes = coverageRes;
+    }
     if (!finalRes) {
       const uniformRes = await evaluateCandidateStatisticalAsync({
         operationalHC: n,
