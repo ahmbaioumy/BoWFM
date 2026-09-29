@@ -665,20 +665,69 @@ export function buildCoverageRepairDistribution(params: {
 }
 
 /**
+ * Shared coverage-repair planning for searchOptimalHC and searchOptimalHCAsync (they must never
+ * drift). `attempt`: repair is applicable at all (coverage floor on, a representative case set
+ * exists). `dist`: the minimal-cover distribution, or null when N has too few seats.
+ * `repairFirst`: the uniform layout is STRUCTURALLY unable to pass coverage — non-24x7, floor on,
+ * and the shift is shorter than the open day, so nobody is present in the tail of the window
+ * (presence = inside the agent's own shift, C6 2026-09-29) — so evaluating uniform first is pure
+ * wasted work; repair is evaluated first and uniform only if repair fails. Result-neutral: repair
+ * wins iff it passes the full gate, otherwise the uniform result is reported, exactly as before.
+ */
+export function planCoverageRepair(params: {
+  n: number;
+  sla: SLAPolicyConfig;
+  calendar: CalendarConfig;
+  labor: LaborConfig;
+  queueArchitecture: 'pooled' | 'siloed';
+  representativeCases: CaseEntity[] | undefined;
+}): { attempt: boolean; repairFirst: boolean; dist: ShiftDistributionByCategory | null } {
+  const { n, sla, calendar, labor, queueArchitecture, representativeCases } = params;
+  const minAgentsRequired = resolveMinAgentsPerInterval(sla, n);
+  if (!representativeCases || minAgentsRequired <= 0) return { attempt: false, repairFirst: false, dist: null };
+  let catWorkloadMinutes: Map<string, number> | undefined;
+  if (queueArchitecture === 'siloed') {
+    catWorkloadMinutes = new Map<string, number>();
+    for (const c of representativeCases) {
+      catWorkloadMinutes.set(c.category, (catWorkloadMinutes.get(c.category) || 0) + c.totalAhtMinutes);
+    }
+  }
+  const dist = buildCoverageRepairDistribution({
+    n, calendar, labor, minAgentsPerInterval: minAgentsRequired, queueArchitecture, categoryWorkloadMinutes: catWorkloadMinutes,
+  });
+  const structurallyUnmet = !calendar.is24x7 && labor.dailyProductiveHours * 60 < getDailyWindowLengthHours(calendar) * 60 - 1e-9;
+  return { attempt: true, repairFirst: structurallyUnmet && dist !== null, dist };
+}
+
+/** Repair-failure record for one evaluated N: string[] = repair was evaluated and failed with
+ * these reasons; null = repair unavailable (too few seats) while the candidate failed;
+ * undefined = repair not needed (candidate passed) or not attempted. */
+export function coverageRepairReasons(
+  plan: { attempt: boolean; dist: ShiftDistributionByCategory | null },
+  finalRes: { passesAllConstraints: boolean },
+  coverageRes: { passesAllConstraints: boolean; failingReasons: string[] } | undefined
+): string[] | null | undefined {
+  if (!plan.attempt || finalRes.passesAllConstraints) return undefined;
+  if (coverageRes) return coverageRes.failingReasons;
+  return plan.dist ? undefined : null;
+}
+
+/**
  * Binding-constraint attribution for the minimum-coverage gate — ONE implementation shared by
- * searchOptimalHC and searchOptimalHCAsync (they must never drift). Coverage is the binding gate
- * when the candidate one below the recommendation failed for coverage ALONE: every other gate
- * (SLA, category SLA, ASA, occupancy) already passed there, so only the coverage floor kept the
- * search from stopping lower. (Added 2026-09-29 with C6: previously such runs were reported as
- * statistical_primary_sla — e.g. SLA alone needed 61 while coverage set the recommendation.)
+ * both searches. Coverage is the binding gate when the candidate one below the recommendation
+ * failed for coverage ALONE. "Failed" is judged on the path that actually decides that N: the
+ * coverage-repair evaluation when repair was available (its own failing reasons, `repairReasons`),
+ * else the uniform evaluation. Judging the uniform result alone mislabelled SLA-bound runs, because
+ * uniform can pass the SLA that the (necessarily staggered) repair layout fails (D42.15).
  */
 export function resolveCoverageBinding(
   belowRecommended: { passesAllConstraints: boolean; failingReasons: string[] } | undefined,
+  repairReasons: string[] | null | undefined,
   sla: SLAPolicyConfig,
   recommendedHC: number
 ): { type: 'min_coverage'; description: string } | null {
   if (!belowRecommended || belowRecommended.passesAllConstraints) return null;
-  const reasons = belowRecommended.failingReasons;
+  const reasons = repairReasons ?? belowRecommended.failingReasons;
   if (reasons.length === 0 || !reasons.every((r) => r.startsWith('Coverage:'))) return null;
   const minAgents = resolveMinAgentsPerInterval(sla, recommendedHC);
   return {
@@ -1648,6 +1697,9 @@ export function searchOptimalHC(params: {
   // 3. Search Bounds & User Max HC Enforcement
   const searchCap = Math.max(1, userMaxHC);
   const evalCache = new Map<number, ReturnType<typeof evaluateCandidateStatistical>>();
+  // Failing reasons of the coverage-repair candidate evaluated at each N (string[]), or null when repair
+  // was unavailable at that N (too few seats); absent when repair was not needed. Feeds resolveCoverageBinding.
+  const coverageRepairReasonsByN = new Map<number, string[] | null>();
   const R = Math.max(1, replications);
   const precomputedCaseSets = generatePrecomputedReplications({
     intervals,
@@ -1713,57 +1765,48 @@ export function searchOptimalHC(params: {
   function evaluateN(n: number, overrideR?: number) {
     const rToUse = overrideR ?? R;
     if (rToUse === R && evalCache.has(n)) return evalCache.get(n)!;
-    const uniformRes = evaluateCandidateStatistical({
-      operationalHC: n,
-      intervals,
-      openingWIP,
-      categories,
-      calendar,
-      labor,
-      sla,
-      baseSeed: seed,
-      replications: rToUse,
-      queueArchitecture,
-      precomputedCaseSets,
-      dispatchFairness,
-    });
-
-    let finalRes = uniformRes;
-    let winningDist: ShiftDistributionByCategory | undefined;
-
     // Coverage repair (G1): unconditional, independent of shiftPlacementEnabled — the queue
     // may never be left unattended while the business is running, so this is not an
-    // optimization the planner opts into. Tries the minimal redistribution needed to satisfy
-    // the floor BEFORE the SLA-driven greedy below, so a config that only needs coverage
-    // (SLA already fine) never pays for an unnecessary deficit-minimizing search, and a
-    // config needing both gets coverage settled first. 24x7 RE-ENABLED (2026-08-28, 24x7
-    // multi-start) — buildCoverageRepairDistribution now works for is24x7.
-    if (!uniformRes.passesAllConstraints && representativeCases) {
-      const minAgentsRequired = resolveMinAgentsPerInterval(sla, n);
-      if (minAgentsRequired > 0) {
-        let catWorkloadMinutes: Map<string, number> | undefined;
-        if (queueArchitecture === 'siloed') {
-          catWorkloadMinutes = new Map<string, number>();
-          for (const c of representativeCases) {
-            catWorkloadMinutes.set(c.category, (catWorkloadMinutes.get(c.category) || 0) + c.totalAhtMinutes);
-          }
-        }
-        const coverageDist = buildCoverageRepairDistribution({
-          n, calendar, labor, minAgentsPerInterval: minAgentsRequired, queueArchitecture, categoryWorkloadMinutes: catWorkloadMinutes,
-        });
-        if (coverageDist) {
-          const coverageRes = evaluateCandidateStatistical({
-            operationalHC: n, intervals, openingWIP, categories, calendar, labor, sla,
-            baseSeed: seed, replications: rToUse, queueArchitecture, precomputedCaseSets,
-            shiftDistribution: coverageDist, dispatchFairness,
-          });
-          if (coverageRes.passesAllConstraints) {
-            finalRes = coverageRes;
-            winningDist = coverageDist;
-          }
-        }
+    // optimization the planner opts into. planCoverageRepair (shared with the async search)
+    // decides whether repair runs FIRST (uniform is structurally unable to pass coverage, so
+    // evaluating it first is wasted work) or only after a failing uniform evaluation. Either
+    // way the outcome is identical: repair's distribution wins iff it passes the full gate,
+    // otherwise the uniform result is reported. 24x7 RE-ENABLED (2026-08-28, 24x7 multi-start).
+    const covPlan = planCoverageRepair({ n, sla, calendar, labor, queueArchitecture, representativeCases });
+    let finalRes: ReturnType<typeof evaluateCandidateStatistical> | undefined;
+    let winningDist: ShiftDistributionByCategory | undefined;
+    let coverageRes: ReturnType<typeof evaluateCandidateStatistical> | undefined;
+    const runRepair = () => {
+      coverageRes = evaluateCandidateStatistical({
+        operationalHC: n, intervals, openingWIP, categories, calendar, labor, sla,
+        baseSeed: seed, replications: rToUse, queueArchitecture, precomputedCaseSets,
+        shiftDistribution: covPlan.dist!, dispatchFairness,
+      });
+      if (coverageRes.passesAllConstraints) {
+        finalRes = coverageRes;
+        winningDist = covPlan.dist!;
       }
+    };
+    if (covPlan.repairFirst) runRepair();
+    if (!finalRes) {
+      const uniformRes = evaluateCandidateStatistical({
+        operationalHC: n,
+        intervals,
+        openingWIP,
+        categories,
+        calendar,
+        labor,
+        sla,
+        baseSeed: seed,
+        replications: rToUse,
+        queueArchitecture,
+        precomputedCaseSets,
+        dispatchFairness,
+      });
+      finalRes = uniformRes;
+      if (!uniformRes.passesAllConstraints && covPlan.attempt && covPlan.dist && !coverageRes) runRepair();
     }
+    const repairReasons = coverageRepairReasons(covPlan, finalRes, coverageRes);
 
     if (labor.shiftPlacementEnabled && !finalRes.passesAllConstraints && representativeCases) {
       const placementDist = computeCandidatePlacementDistribution({
@@ -1797,6 +1840,8 @@ export function searchOptimalHC(params: {
 
     if (rToUse === R) {
       evalCache.set(n, finalRes);
+      if (repairReasons === undefined) coverageRepairReasonsByN.delete(n);
+      else coverageRepairReasonsByN.set(n, repairReasons);
       if (winningDist) {
         winningDistributionByN.set(n, winningDist);
       } else {
@@ -2017,9 +2062,9 @@ export function searchOptimalHC(params: {
       occupancyFeasibleFloor > nMinAnalytical
         ? `Occupancy-Feasible Capacity Floor (N_occ = ${occupancyFeasibleFloor} at ≤ ${resolveOccupancyCapPct(sla)}% occupancy)`
         : 'Steady-State Workload Capacity Baseline (N_min)';
-  } else if (recommendedHC !== null && resolveCoverageBinding(evalCache.get(recommendedHC - 1), sla, recommendedHC)) {
+  } else if (recommendedHC !== null && resolveCoverageBinding(evalCache.get(recommendedHC - 1), coverageRepairReasonsByN.get(recommendedHC - 1), sla, recommendedHC)) {
     // Coverage-only failure one below the recommendation — see resolveCoverageBinding.
-    const cb = resolveCoverageBinding(evalCache.get(recommendedHC - 1), sla, recommendedHC)!;
+    const cb = resolveCoverageBinding(evalCache.get(recommendedHC - 1), coverageRepairReasonsByN.get(recommendedHC - 1), sla, recommendedHC)!;
     bindingConstraintType = cb.type;
     bindingConstraintDescription = cb.description;
   } else if (sla.boAsaEnabled && primaryPassedResult && !primaryPassedResult.representativeResult.passesBOASA) {
@@ -2280,6 +2325,9 @@ export async function searchOptimalHCAsync(params: {
   // 3. Statistical Multi-Replication Primary SLA Search with User Cap Enforcement
   const searchCap = Math.max(1, userMaxHC);
   const evalCache = new Map<number, ReturnType<typeof evaluateCandidateStatistical>>();
+  // Failing reasons of the coverage-repair candidate evaluated at each N (string[]), or null when repair
+  // was unavailable at that N (too few seats); absent when repair was not needed. Feeds resolveCoverageBinding.
+  const coverageRepairReasonsByN = new Map<number, string[] | null>();
 
   // Pre-generate distinct case entities per replication for Common Random Numbers (CRN)
   const R = Math.max(1, replications);
@@ -2382,68 +2430,58 @@ export async function searchOptimalHCAsync(params: {
       currentMessage: msg,
     });
 
-    const uniformRes = await evaluateCandidateStatisticalAsync({
-      operationalHC: n,
-      intervals,
-      openingWIP,
-      categories,
-      calendar,
-      labor,
-      sla,
-      baseSeed: seed,
-      replications: rToUse,
-      queueArchitecture,
-      precomputedCaseSets,
-      dispatchFairness,
-      shouldCancel,
-      onRepProgress: (completedReps, totalReps) => {
-        onProgress?.({
-          status: 'searching',
-          phase: `Phase 2: Statistical Primary SLA Search (Testing N = ${n})`,
-          currentN: n,
-          nMin: nMinAnalytical,
-          maxN: searchCap,
-          percent: progressPct,
-          evaluatedHistory: buildHistorySnapshot(),
-          currentMessage: `${msg} (${completedReps}/${totalReps} replications)`,
-        });
-      },
-    });
-
-    let finalRes = uniformRes;
+    // Coverage repair (G1) — same shared planCoverageRepair / buildCoverageRepairDistribution as
+    // searchOptimalHC's evaluateN (see that function's comment); unconditional, independent of
+    // shiftPlacementEnabled. 24x7 RE-ENABLED (2026-08-28, 24x7 multi-start).
+    const covPlan = planCoverageRepair({ n, sla, calendar, labor, queueArchitecture, representativeCases });
+    let finalRes: Awaited<ReturnType<typeof evaluateCandidateStatisticalAsync>> | undefined;
     let winningDist: ShiftDistributionByCategory | undefined;
-
-    // Coverage repair (G1) — same shared buildCoverageRepairDistribution as searchOptimalHC's
-    // evaluateN; unconditional, independent of shiftPlacementEnabled. See that function's
-    // comment for why this runs before the SLA-driven greedy below. 24x7 RE-ENABLED
-    // (2026-08-28, 24x7 multi-start).
-    if (!uniformRes.passesAllConstraints && representativeCases) {
+    let coverageRes: Awaited<ReturnType<typeof evaluateCandidateStatisticalAsync>> | undefined;
+    const runRepair = async () => {
       if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
-      const minAgentsRequired = resolveMinAgentsPerInterval(sla, n);
-      if (minAgentsRequired > 0) {
-        let catWorkloadMinutes: Map<string, number> | undefined;
-        if (queueArchitecture === 'siloed') {
-          catWorkloadMinutes = new Map<string, number>();
-          for (const c of representativeCases) {
-            catWorkloadMinutes.set(c.category, (catWorkloadMinutes.get(c.category) || 0) + c.totalAhtMinutes);
-          }
-        }
-        const coverageDist = buildCoverageRepairDistribution({
-          n, calendar, labor, minAgentsPerInterval: minAgentsRequired, queueArchitecture, categoryWorkloadMinutes: catWorkloadMinutes,
-        });
-        if (coverageDist) {
-          const coverageRes = await evaluateCandidateStatisticalAsync({
-            operationalHC: n, intervals, openingWIP, categories, calendar, labor, sla,
-            baseSeed: seed, replications: rToUse, queueArchitecture, precomputedCaseSets,
-            shouldCancel, shiftDistribution: coverageDist, dispatchFairness,
-          });
-          if (coverageRes.passesAllConstraints) {
-            finalRes = coverageRes;
-            winningDist = coverageDist;
-          }
-        }
+      coverageRes = await evaluateCandidateStatisticalAsync({
+        operationalHC: n, intervals, openingWIP, categories, calendar, labor, sla,
+        baseSeed: seed, replications: rToUse, queueArchitecture, precomputedCaseSets,
+        shouldCancel, shiftDistribution: covPlan.dist!, dispatchFairness,
+      });
+      if (coverageRes.passesAllConstraints) {
+        finalRes = coverageRes;
+        winningDist = covPlan.dist!;
       }
+    };
+    if (covPlan.repairFirst) await runRepair();
+    if (!finalRes) {
+      const uniformRes = await evaluateCandidateStatisticalAsync({
+        operationalHC: n,
+        intervals,
+        openingWIP,
+        categories,
+        calendar,
+        labor,
+        sla,
+        baseSeed: seed,
+        replications: rToUse,
+        queueArchitecture,
+        precomputedCaseSets,
+        dispatchFairness,
+        shouldCancel,
+        onRepProgress: (completedReps, totalReps) => {
+          onProgress?.({
+            status: 'searching',
+            phase: `Phase 2: Statistical Primary SLA Search (Testing N = ${n})`,
+            currentN: n,
+            nMin: nMinAnalytical,
+            maxN: searchCap,
+            percent: progressPct,
+            evaluatedHistory: buildHistorySnapshot(),
+            currentMessage: `${msg} (${completedReps}/${totalReps} replications)`,
+          });
+        },
+      });
+      finalRes = uniformRes;
+      if (!uniformRes.passesAllConstraints && covPlan.attempt && covPlan.dist && !coverageRes) await runRepair();
     }
+    const repairReasons = coverageRepairReasons(covPlan, finalRes, coverageRes);
 
     // Same shared computeCandidatePlacementDistribution / pickPlacementOrUniform as
     // searchOptimalHC's evaluateN — see that function's comment for the guarantees this
@@ -2492,6 +2530,8 @@ export async function searchOptimalHCAsync(params: {
 
     if (rToUse === R) {
       evalCache.set(n, finalRes);
+      if (repairReasons === undefined) coverageRepairReasonsByN.delete(n);
+      else coverageRepairReasonsByN.set(n, repairReasons);
       if (winningDist) {
         winningDistributionByN.set(n, winningDist);
       } else {
@@ -2760,9 +2800,9 @@ export async function searchOptimalHCAsync(params: {
       occupancyFeasibleFloor > nMinAnalytical
         ? `Occupancy-Feasible Capacity Floor (N_occ = ${occupancyFeasibleFloor} at ≤ ${resolveOccupancyCapPct(sla)}% occupancy)`
         : 'Steady-State Workload Capacity Baseline (N_min)';
-  } else if (recommendedHC !== null && resolveCoverageBinding(evalCache.get(recommendedHC - 1), sla, recommendedHC)) {
+  } else if (recommendedHC !== null && resolveCoverageBinding(evalCache.get(recommendedHC - 1), coverageRepairReasonsByN.get(recommendedHC - 1), sla, recommendedHC)) {
     // Coverage-only failure one below the recommendation — see resolveCoverageBinding.
-    const cb = resolveCoverageBinding(evalCache.get(recommendedHC - 1), sla, recommendedHC)!;
+    const cb = resolveCoverageBinding(evalCache.get(recommendedHC - 1), coverageRepairReasonsByN.get(recommendedHC - 1), sla, recommendedHC)!;
     bindingConstraintType = cb.type;
     bindingConstraintDescription = cb.description;
   } else if (sla.boAsaEnabled && primaryPassedResult && !primaryPassedResult.representativeResult.passesBOASA) {
