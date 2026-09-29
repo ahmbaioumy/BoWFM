@@ -523,8 +523,9 @@ Remainder Only`); paginate at 50 rows.
   reconciliation failures.
 - An **Agent Assignment Fairness** panel, labelled "audit run (single seed)" and showing which
   mode ran (fair assignment ON/OFF): per agent cases completed, busy minutes, on-shift
-  available minutes, utilisation % and idle minutes; max/min cases ratio, coefficient of
-  variation of cases and of utilisation, and Jain's index on utilisation (per category when
+  available minutes, occupancy % (busy / on-shift available; shown as "Occupancy" so it is not
+  confused with the Agent Analytics "Utilisation") and idle minutes; max/min cases ratio,
+  coefficient of variation of cases and of occupancy, and Jain's index on occupancy (per category when
   siloed). This is a per-agent view, distinct from the planned-capacity occupancy used to size.
 - An **Agent Analytics** panel (below the fairness panel), labelled "audit run (single seed)",
   derived purely in the UI layer (`src/utils/agent-analytics.ts`) from the audit run's
@@ -535,7 +536,8 @@ Remainder Only`); paginate at 50 rows.
   **Occupancy = busy / available; utilisation = busy / scheduled** (available + the shift tail
   after the daily productive-hour budget is exhausted): the engine models no other
   non-productive time in a shift, so the two are identical except on budget-exhausted days —
-  stated in the panel help text. Whole-run utilisation equals the fairness panel's. Four inline-SVG
+  stated in the panel help text. The fairness panel's occupancy % is busy / on-shift available (same idea as this occupancy);
+  this panel's utilisation is a different, lower number. Four inline-SVG
   charts (cases per agent with team average; occupancy and utilisation; agent x date heatmap;
   daily team average with min-max band); a computed insights block (most/least loaded vs mean,
   agents outside +/-15%, late-coverage agents' share of last-2h work, fairness CV/Jain);

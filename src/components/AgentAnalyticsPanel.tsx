@@ -48,34 +48,34 @@ function ChartFrame({ title, desc, children }: { title: string; desc: string; ch
 function CasesBarChart({ a }: { a: AgentAnalytics }) {
   const id = useId();
   const rows = sortRowsByCases(a.rows);
-  const rowH = 18;
-  const labelW = 62;
-  const W = 640;
-  const padTop = 20;
-  const plotW = W - labelW - 56;
+  const rowH = 20;
+  const labelW = 72;
+  const W = 560;
+  const padTop = 22;
+  const plotW = W - labelW - 40;
   const H = padTop + rows.length * rowH + 8;
   const maxV = Math.max(1, a.team.casesMean, ...rows.map((r) => r.casesCompleted));
   const x = (v: number) => labelW + (v / maxV) * plotW;
   const summary = `Cases handled per agent, sorted high to low. Team average ${r1(a.team.casesMean)}. ` +
     (rows.length ? `Highest ${rows[0].agentLabel} ${rows[0].casesCompleted}, lowest ${rows[rows.length - 1].agentLabel} ${rows[rows.length - 1].casesCompleted}.` : '');
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-labelledby={`${id}t ${id}d`}>
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ minWidth: W, maxWidth: 'none' }} role="img" aria-labelledby={`${id}t ${id}d`}>
       <title id={`${id}t`}>Cases handled per agent</title>
       <desc id={`${id}d`}>{summary}</desc>
       {rows.map((r, i) => {
         const y = padTop + i * rowH;
         return (
           <g key={r.agentId}>
-            <text x={labelW - 6} y={y + 12} textAnchor="end" className="fill-slate-600 text-[10px]">{r.agentLabel}</text>
+            <text x={labelW - 6} y={y + 14} textAnchor="end" className="fill-slate-600 text-[11px]">{r.agentLabel}</text>
             <rect x={labelW} y={y + 2} width={Math.max(0, x(r.casesCompleted) - labelW)} height={rowH - 5} rx={2} className="fill-blue-500">
               <title>{`${r.agentLabel}: ${r.casesCompleted} cases (${r.category})`}</title>
             </rect>
-            <text x={x(r.casesCompleted) + 4} y={y + 12} className="fill-slate-700 text-[10px]">{r.casesCompleted}</text>
+            <text x={x(r.casesCompleted) + 4} y={y + 14} className="fill-slate-700 text-[11px]">{r.casesCompleted}</text>
           </g>
         );
       })}
       <line x1={x(a.team.casesMean)} x2={x(a.team.casesMean)} y1={padTop - 4} y2={H - 6} strokeDasharray="4 3" className="stroke-rose-500" strokeWidth={1.5} />
-      <text x={x(a.team.casesMean)} y={11} textAnchor="middle" className="fill-rose-600 text-[10px] font-semibold">{`Team avg ${r1(a.team.casesMean)}`}</text>
+      <text x={x(a.team.casesMean)} y={13} textAnchor="middle" className="fill-rose-600 text-[11px] font-semibold">{`Team avg ${r1(a.team.casesMean)}`}</text>
     </svg>
   );
 }
@@ -83,40 +83,40 @@ function CasesBarChart({ a }: { a: AgentAnalytics }) {
 function OccUtilChart({ a }: { a: AgentAnalytics }) {
   const id = useId();
   const rows = a.rows;
-  const rowH = 22;
-  const labelW = 62;
-  const W = 640;
-  const padTop = 22;
-  const plotW = W - labelW - 44;
-  const H = padTop + rows.length * rowH + 8;
+  const rowH = 26;
+  const labelW = 72;
+  const W = 560;
+  const padTop = 26;
+  const plotW = W - labelW - 96;
+  const H = padTop + rows.length * rowH + 20;
   const maxV = Math.max(100, ...rows.map((r) => Math.max(r.occupancyPct, r.utilisationPct)));
   const x = (v: number) => labelW + (v / maxV) * plotW;
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-labelledby={`${id}t ${id}d`}>
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ minWidth: W, maxWidth: 'none' }} role="img" aria-labelledby={`${id}t ${id}d`}>
       <title id={`${id}t`}>Occupancy and utilisation per agent</title>
       <desc id={`${id}d`}>{`Two bars per agent. Team occupancy ${r1(a.team.occupancyPct)}%, team utilisation ${r1(a.team.utilisationPct)}%.`}</desc>
       <rect x={labelW} y={4} width={9} height={9} className="fill-blue-500" />
-      <text x={labelW + 13} y={12} className="fill-slate-600 text-[10px]">Occupancy</text>
-      <rect x={labelW + 80} y={4} width={9} height={9} className="fill-amber-500" />
-      <text x={labelW + 93} y={12} className="fill-slate-600 text-[10px]">Utilisation</text>
+      <text x={labelW + 13} y={13} className="fill-slate-600 text-[11px]">Occupancy</text>
+      <rect x={labelW + 90} y={4} width={9} height={9} className="fill-amber-500" />
+      <text x={labelW + 103} y={13} className="fill-slate-600 text-[11px]">Utilisation</text>
       {[0, 25, 50, 75, 100].filter((t) => t <= maxV).map((t) => (
         <g key={t}>
           <line x1={x(t)} x2={x(t)} y1={padTop - 2} y2={H - 6} className="stroke-slate-200" strokeWidth={1} />
-          <text x={x(t)} y={H - 0} textAnchor="middle" className="fill-slate-400 text-[9px]">{t}%</text>
+          <text x={x(t)} y={H - 4} textAnchor="middle" className="fill-slate-400 text-[11px]">{t}%</text>
         </g>
       ))}
       {rows.map((r, i) => {
         const y = padTop + i * rowH;
         return (
           <g key={r.agentId}>
-            <text x={labelW - 6} y={y + 12} textAnchor="end" className="fill-slate-600 text-[10px]">{r.agentLabel}</text>
-            <rect x={labelW} y={y + 1} width={Math.max(0, x(r.occupancyPct) - labelW)} height={8} className="fill-blue-500">
+            <text x={labelW - 6} y={y + 14} textAnchor="end" className="fill-slate-600 text-[11px]">{r.agentLabel}</text>
+            <rect x={labelW} y={y + 2} width={Math.max(0, x(r.occupancyPct) - labelW)} height={10} className="fill-blue-500">
               <title>{`${r.agentLabel} occupancy ${r1(r.occupancyPct)}%`}</title>
             </rect>
-            <rect x={labelW} y={y + 10} width={Math.max(0, x(r.utilisationPct) - labelW)} height={8} className="fill-amber-500">
+            <rect x={labelW} y={y + 13} width={Math.max(0, x(r.utilisationPct) - labelW)} height={10} className="fill-amber-500">
               <title>{`${r.agentLabel} utilisation ${r1(r.utilisationPct)}%`}</title>
             </rect>
-            <text x={x(Math.max(r.occupancyPct, r.utilisationPct)) + 4} y={y + 13} className="fill-slate-700 text-[9px]">
+            <text x={x(Math.max(r.occupancyPct, r.utilisationPct)) + 4} y={y + 17} className="fill-slate-700 text-[11px]">
               {`${r1(r.occupancyPct)} / ${r1(r.utilisationPct)}`}
             </text>
           </g>
@@ -130,10 +130,10 @@ function Heatmap({ a }: { a: AgentAnalytics }) {
   const id = useId();
   const n = a.dates.length;
   if (n === 0 || a.rows.length === 0) return <p className="text-xs text-slate-400 italic">No data in range.</p>;
-  const cellH = 16;
-  const cellW = Math.max(18, Math.min(44, Math.floor(600 / n)));
-  const labelW = 62;
-  const padTop = 34;
+  const cellH = 18;
+  const cellW = Math.max(30, Math.min(48, Math.floor(600 / n)));
+  const labelW = 72;
+  const padTop = 48;
   const W = labelW + n * cellW + 8;
   const H = padTop + a.rows.length * cellH + 6;
   let max = 1;
@@ -144,11 +144,11 @@ function Heatmap({ a }: { a: AgentAnalytics }) {
         <title id={`${id}t`}>Cases completed per agent per date</title>
         <desc id={`${id}d`}>{`Heatmap, ${a.rows.length} agents by ${n} dates. Darker means more cases; light grey means not on shift. Maximum ${max} cases in one day.`}</desc>
         {a.dates.map((d, j) => (
-          <text key={d} transform={`translate(${labelW + j * cellW + cellW / 2 + 3},${padTop - 4}) rotate(-55)`} className="fill-slate-500 text-[9px]">{shortDate(d)}</text>
+          <text key={d} transform={`translate(${labelW + j * cellW + cellW / 2 + 3},${padTop - 4}) rotate(-55)`} className="fill-slate-500 text-[11px]">{shortDate(d)}</text>
         ))}
         {a.rows.map((r, i) => (
           <g key={r.agentId}>
-            <text x={labelW - 6} y={padTop + i * cellH + 12} textAnchor="end" className="fill-slate-600 text-[10px]">{r.agentLabel}</text>
+            <text x={labelW - 6} y={padTop + i * cellH + 13} textAnchor="end" className="fill-slate-600 text-[11px]">{r.agentLabel}</text>
             {a.dates.map((d, j) => {
               const on = a.onShiftMatrix[i][j];
               const v = a.matrix[i][j];
@@ -161,8 +161,8 @@ function Heatmap({ a }: { a: AgentAnalytics }) {
                     style={on ? { opacity: 0.08 + 0.92 * (v / max) } : undefined}>
                     <title>{`${r.agentLabel} ${d}: ${on ? `${v} cases` : 'not on shift'}`}</title>
                   </rect>
-                  {on && cellW >= 24 && (
-                    <text x={cx + cellW / 2} y={cy + 12} textAnchor="middle" className={`${v / max > 0.55 ? 'fill-white' : 'fill-slate-700'} text-[9px]`}>{v}</text>
+                  {on && cellW >= 26 && (
+                    <text x={cx + cellW / 2} y={cy + 14} textAnchor="middle" className={`${v / max > 0.55 ? 'fill-white' : 'fill-slate-700'} text-[9px]`}>{v}</text>
                   )}
                 </g>
               );
@@ -178,12 +178,12 @@ function TrendChart({ a }: { a: AgentAnalytics }) {
   const id = useId();
   const pts = a.trend;
   if (pts.length === 0) return <p className="text-xs text-slate-400 italic">No data in range.</p>;
-  const W = 640;
-  const H = 240;
-  const pl = 40;
-  const pr = 30;
+  const W = 560;
+  const H = 280;
+  const pl = 44;
+  const pr = 44;
   const pt = 16;
-  const pb = 44;
+  const pb = 64;
   const iw = W - pl - pr;
   const ih = H - pt - pb;
   const maxV = Math.max(1, ...pts.map((p) => p.max));
@@ -191,16 +191,16 @@ function TrendChart({ a }: { a: AgentAnalytics }) {
   const y = (v: number) => pt + ih - (v / maxV) * ih;
   const band = pts.map((p, i) => `${x(i)},${y(p.max)}`).concat([...pts].reverse().map((p, k) => `${x(pts.length - 1 - k)},${y(p.min)}`)).join(' ');
   const line = pts.map((p, i) => `${x(i)},${y(p.avg)}`).join(' ');
-  const labelEvery = Math.max(1, Math.ceil(pts.length / 10));
+  const labelEvery = Math.max(1, Math.ceil(pts.length / 8));
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(f * maxV * 10) / 10);
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-labelledby={`${id}t ${id}d`}>
+    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ minWidth: W, maxWidth: 'none' }} role="img" aria-labelledby={`${id}t ${id}d`}>
       <title id={`${id}t`}>Daily team trend: cases per agent</title>
       <desc id={`${id}d`}>{`Average cases completed per on-shift agent for each of ${pts.length} dates, with the min to max band across agents.`}</desc>
       {ticks.map((t) => (
         <g key={t}>
           <line x1={pl} x2={W - pr} y1={y(t)} y2={y(t)} className="stroke-slate-200" strokeWidth={1} />
-          <text x={pl - 4} y={y(t) + 3} textAnchor="end" className="fill-slate-400 text-[9px]">{t}</text>
+          <text x={pl - 4} y={y(t) + 3} textAnchor="end" className="fill-slate-400 text-[11px]">{t}</text>
         </g>
       ))}
       <polygon points={band} className="fill-blue-200" opacity={0.6}>
@@ -213,14 +213,14 @@ function TrendChart({ a }: { a: AgentAnalytics }) {
             <title>{`${p.date}: avg ${r1(p.avg)}, min ${p.min}, max ${p.max} (${p.agents} agents)`}</title>
           </circle>
           {i % labelEvery === 0 && (
-            <text transform={`translate(${x(i) + 3},${H - pb + 12}) rotate(45)`} className="fill-slate-500 text-[9px]">{shortDate(p.date)}</text>
+            <text transform={`translate(${x(i) - 4},${H - pb + 14}) rotate(45)`} className="fill-slate-500 text-[11px]">{shortDate(p.date)}</text>
           )}
         </g>
       ))}
-      <rect x={pl} y={H - 10} width={9} height={7} className="fill-blue-200" />
-      <text x={pl + 13} y={H - 3.5} className="fill-slate-600 text-[9px]">min-max band</text>
-      <line x1={pl + 84} x2={pl + 98} y1={H - 6} y2={H - 6} className="stroke-blue-700" strokeWidth={2} />
-      <text x={pl + 102} y={H - 3.5} className="fill-slate-600 text-[9px]">average</text>
+      <rect x={pl} y={H - 12} width={9} height={9} className="fill-blue-200" />
+      <text x={pl + 13} y={H - 3} className="fill-slate-600 text-[11px]">min-max band</text>
+      <line x1={pl + 96} x2={pl + 112} y1={H - 8} y2={H - 8} className="stroke-blue-700" strokeWidth={2} />
+      <text x={pl + 116} y={H - 3} className="fill-slate-600 text-[11px]">average</text>
     </svg>
   );
 }
@@ -422,16 +422,16 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
       {/* Charts */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
         <ChartFrame title="Cases handled per agent" desc="Sorted high to low; dashed line = team average.">
-          <div className="max-h-[28rem] overflow-y-auto"><CasesBarChart a={a} /></div>
+          <div className="max-h-[36rem] overflow-auto"><CasesBarChart a={a} /></div>
         </ChartFrame>
         <ChartFrame title="Occupancy and utilisation per agent" desc="Blue = occupancy, amber = utilisation. Labels show occupancy / utilisation.">
-          <div className="max-h-[28rem] overflow-y-auto"><OccUtilChart a={a} /></div>
+          <div className="max-h-[36rem] overflow-auto"><OccUtilChart a={a} /></div>
         </ChartFrame>
         <ChartFrame title="Cases per agent per date" desc="Cases completed. Darker = more; light grey = not on shift that day.">
-          <div className="max-h-[28rem] overflow-y-auto"><Heatmap a={a} /></div>
+          <div className="max-h-[36rem] overflow-auto"><Heatmap a={a} /></div>
         </ChartFrame>
         <ChartFrame title="Daily team trend" desc="Average cases per on-shift agent per date, with the min-max band across agents.">
-          <TrendChart a={a} />
+          <div className="overflow-x-auto"><TrendChart a={a} /></div>
         </ChartFrame>
       </div>
     </div>

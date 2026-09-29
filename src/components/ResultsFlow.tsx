@@ -1688,8 +1688,8 @@ export function ResultsFlow({
                 <div className="col-span-2 md:col-span-5 font-semibold text-slate-700">{label} ({m.agents} agents)</div>
                 <div className="bg-slate-50 border border-slate-200 rounded p-2"><div className="text-slate-500">Cases max / min</div><div className="font-bold text-slate-900">{m.casesMaxMinRatio === null ? 'n/a (an agent has 0)' : m.casesMaxMinRatio.toFixed(2)}</div></div>
                 <div className="bg-slate-50 border border-slate-200 rounded p-2"><div className="text-slate-500">Cases CV</div><div className="font-bold text-slate-900">{m.casesCv.toFixed(3)}</div></div>
-                <div className="bg-slate-50 border border-slate-200 rounded p-2"><div className="text-slate-500">Utilisation CV</div><div className="font-bold text-slate-900">{m.utilCv.toFixed(3)}</div></div>
-                <div className="bg-slate-50 border border-slate-200 rounded p-2"><div className="text-slate-500">Jain's index (utilisation)</div><div className="font-bold text-slate-900">{m.utilJain.toFixed(3)}</div></div>
+                <div className="bg-slate-50 border border-slate-200 rounded p-2"><div className="text-slate-500">Occupancy CV</div><div className="font-bold text-slate-900">{m.utilCv.toFixed(3)}</div></div>
+                <div className="bg-slate-50 border border-slate-200 rounded p-2"><div className="text-slate-500">Jain's index (occupancy)</div><div className="font-bold text-slate-900">{m.utilJain.toFixed(3)}</div></div>
               </div>
             );
             return (
@@ -1703,7 +1703,7 @@ export function ResultsFlow({
                     </span>
                   </div>
                   <p className="text-xs text-slate-500">
-                    How evenly work was spread across agents. Utilisation = busy minutes / minutes the agent was on shift.
+                    How evenly work was spread across agents. Occupancy = busy minutes / minutes the agent was on shift (available).
                     Cases are credited to the agent who finished them. This is a per-agent view, not the planned-capacity occupancy used for sizing.
                     Agents on a later coverage shift have less available time and pick up end-of-day work alone.
                   </p>
@@ -1721,7 +1721,7 @@ export function ResultsFlow({
                         <th className="py-1.5 px-3 text-right">Cases completed</th>
                         <th className="py-1.5 px-3 text-right">Busy (min)</th>
                         <th className="py-1.5 px-3 text-right">Available (min)</th>
-                        <th className="py-1.5 px-3 text-right">Utilisation %</th>
+                        <th className="py-1.5 px-3 text-right">Occupancy %</th>
                         <th className="py-1.5 px-3 text-right">Idle (min)</th>
                       </tr>
                     </thead>

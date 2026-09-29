@@ -117,7 +117,7 @@ console.log('\n--- Suite AA: agent analytics ---');
   assert(a.rows.reduce((s, r) => s + r.casesCompleted, 0) === des.completedCases, 'AA.2 handled cases sum to completedCases (no split double-count)', `${a.rows.reduce((s, r) => s + r.casesCompleted, 0)} vs ${des.completedCases}`);
   assert(approx(a.rows.reduce((s, r) => s + r.busyMin, 0), des.totalHandlingMinutes, 0.01), 'AA.3 busy minutes sum to totalHandlingMinutes');
   assert(a.rows.every((r, i) => r.casesCompleted === fair[i].casesCompleted), 'AA.4 per-agent handled == agentFairness.casesCompleted');
-  assert(a.rows.every((r, i) => approx(r.utilisationPct, fair[i].utilPct, 0.01)), 'AA.5 whole-run utilisation == fairness panel utilisation (uniform shifts)', a.rows.map((r, i) => `${r.utilisationPct.toFixed(2)}/${fair[i].utilPct.toFixed(2)}`).slice(0, 3).join(' '));
+  assert(a.rows.every((r, i) => approx(r.utilisationPct, fair[i].utilPct, 0.01)), 'AA.5 fixture check: on this uniform, budget-exhausting run scheduled-based utilisation equals the engine on-shift busy/available (not a general identity)', a.rows.map((r, i) => `${r.utilisationPct.toFixed(2)}/${fair[i].utilPct.toFixed(2)}`).slice(0, 3).join(' '));
   assert(a.rows.every((r) => approx(r.availableMin, r.busyMin + r.idleMin) && r.scheduledMin >= r.availableMin - 1e-9 && r.occupancyPct >= r.utilisationPct - 1e-9), 'AA.6 available = busy+idle; scheduled >= available; occupancy >= utilisation');
   assert(a.rows.every((r) => r.casesHandedOver <= r.casesTouched && r.casesTouched >= 0), 'AA.7 touched >= handed over');
   assert(a.rows.some((r) => r.occupancyPct - r.utilisationPct > 0.5), 'AA.8 occupancy and utilisation differ where the daily budget is exhausted before shift end');

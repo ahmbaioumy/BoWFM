@@ -14,11 +14,9 @@
  *   Occupancy %           = busy / available. How hard the agent worked while in the queue.
  *   Scheduled             = available + the tail of the business day after the agent's daily
  *                           productive budget ran out (agent goes out-of-queue but is still on shift).
- *   Utilisation %         = busy / scheduled. Equals the "Utilisation %" of the Agent Assignment
- *                           Fairness panel over the whole run. It differs from occupancy ONLY on
- *                           days the daily productive-hour budget is exhausted before shift end;
- *                           otherwise the two are the same number (this engine models no separate
- *                           non-productive time inside a shift).
+ *   Utilisation %         = busy / scheduled. Lower than occupancy whenever an agent has scheduled
+ *                           time outside the queue. NOT the Fairness panel figure: that panel's
+ *                           "Occupancy %" is busy / on-shift available.
  *   Cases handled         = cases the agent COMPLETED (credited to the finisher, never double-counted).
  *   Cases touched         = distinct cases the agent worked on (>= handled; includes split cases).
  *
