@@ -19,8 +19,10 @@ import {
   StandardInterval,
 } from '../types/wfm';
 import { exportToExcelCSV } from '../utils/csv-parser';
-import { getCalendarWorkingDaysInHorizon, getDailyWindowLengthHours } from '../utils/calendar';
+import { AgentAnalyticsPanel } from './AgentAnalyticsPanel';
+import { formatDateTime24, getCalendarWorkingDaysInHorizon, getDailyWindowLengthHours } from '../utils/calendar';
 import { verifyAgentTimelineInvariants } from '../utils/des-engine';
+import { buildBreachExportRows, buildCaseExportRows, buildSliceExportRows } from '../utils/export-rows';
 import { clampConfidenceLevelPct, effectivePrimaryTarget } from '../utils/hc-search';
 import {
   Users,
@@ -59,41 +61,33 @@ interface ResultsFlowProps {
   onExportAssumptionsJSON: () => void;
 }
 
-function formatSafeTime(date: Date | null | undefined): string {
-  if (!date || isNaN(date.getTime())) return '-';
-  try {
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    return `${hours}:${minutes}`;
-  } catch {
-    return '-';
+// Single shared timestamp formatter (calendar.ts): local business time, 'YYYY-MM-DD HH:mm', no 'Z'.
+// The on-screen tables AND every CSV export go through it, so they always show identical values.
+const formatSafeDateTime = (date: Date | null | undefined): string => formatDateTime24(date);
+
+/**
+ * Guard wrapper: the hook-heavy body lives in ResultsFlowBody, which only mounts once sizing results
+ * exist. (Previously an early return sat between useState and the useMemo/useEffect hooks, so going
+ * from 'no results' to 'results' changed the hook count and crashed with "Rendered more hooks than
+ * during the previous render" — e.g. Reset All -> reload sample -> Run -> View Results.)
+ */
+export function ResultsFlow(props: ResultsFlowProps) {
+  const so = props.searchOutput;
+  if (!so || !so.finalDESResult || !so.staffing) {
+    return (
+      <div className="bg-white rounded-xl border border-slate-200 p-12 text-center shadow-xs">
+        <Cpu className="w-10 h-10 text-slate-300 mx-auto mb-3" />
+        <h3 className="text-sm font-bold text-slate-800">No Sizing Results Available</h3>
+        <p className="text-xs text-slate-500 max-w-md mx-auto mt-1">
+          Complete the Demand and Config setup, then go to Run Sizing to execute the Analytical &amp; Statistical Sizing Engine.
+        </p>
+      </div>
+    );
   }
+  return <ResultsFlowBody {...props} />;
 }
 
-function formatSafeDateTime(date: Date | null | undefined): string {
-  if (!date || isNaN(date.getTime())) return '-';
-  try {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    return `${year}-${month}-${day} ${hours}:${minutes}`;
-  } catch {
-    return '-';
-  }
-}
-
-function formatSafeISO(date: Date | null | undefined, fallback: string = ''): string {
-  if (!date || isNaN(date.getTime())) return fallback;
-  try {
-    return date.toISOString();
-  } catch {
-    return fallback;
-  }
-}
-
-export function ResultsFlow({
+function ResultsFlowBody({
   currentTab,
   searchOutput,
   calendar,
@@ -370,44 +364,11 @@ export function ResultsFlow({
   }, [currentTab, des, labor, calendar]);
 
   function handleExportCasesCSV() {
-    exportToExcelCSV(
-      des.caseResults.map((c) => ({
-        'Case ID': c.caseId,
-        Category: c.category,
-        Priority: c.priority,
-        'Arrival Time': formatSafeISO(c.arrival),
-        'Clock Start': formatSafeISO(c.clockStart),
-        'AHT (min)': c.ahtMinutes,
-        'Primary Deadline': formatSafeISO(c.primaryDeadline),
-        'Latest Safe Start': formatSafeISO(c.latestSafeStart),
-        'First Start Time': formatSafeISO(c.firstStartTime, 'UNSTARTED'),
-        'Complete Time': formatSafeISO(c.completeTime, 'UNFINISHED'),
-        'Park Count': c.parkCount,
-        'Is Opening WIP': c.isOpeningWip ? 'YES' : 'NO',
-        'Completed?': c.isCompleted ? 'YES' : 'NO',
-        'Primary SLA Passed': c.primaryPassed ? 'PASS' : 'FAIL',
-        'ASA Duration (min)': c.asaDurationMinutes,
-        'ASA Censored': c.asaCensored ? 'YES' : 'NO',
-      })),
-      'wfm_simulated_cases.csv'
-    );
+    exportToExcelCSV(buildCaseExportRows(des.caseResults), 'wfm_simulated_cases.csv');
   }
 
   function handleExportBreachedCasesCSV() {
-    exportToExcelCSV(
-      breachedCases.map((c) => ({
-        'Case ID': c.caseId,
-        Category: c.category,
-        'Arrival Time': formatSafeISO(c.arrival),
-        'Primary Deadline': formatSafeISO(c.primaryDeadline),
-        'Latest Safe Start': formatSafeISO(c.latestSafeStart),
-        'First Start Time': formatSafeISO(c.firstStartTime, 'UNSTARTED'),
-        'Complete Time': formatSafeISO(c.completeTime, 'UNFINISHED'),
-        'Park Count': c.parkCount,
-        'Breach Reason': c.isCompleted ? 'Completed after primary deadline' : 'Unfinished by horizon end',
-      })),
-      'wfm_sla_breach_cases.csv'
-    );
+    exportToExcelCSV(buildBreachExportRows(breachedCases), 'wfm_sla_breach_cases.csv');
   }
 
   function handleExportQueueWipCSV() {
@@ -425,26 +386,7 @@ export function ResultsFlow({
   }
 
   function handleExportAgentSlicesCSV() {
-    exportToExcelCSV(
-      rawAgentSlices.map((s) => {
-        const rosterSource: AgentRosterSource = (s.agentId + 1) <= rosterFloor ? 'existing' : 'new';
-        return {
-          Agent: s.agentLabel,
-          Source: rosterSource.toUpperCase(),
-          Date: s.date,
-          State: s.state === 'off' ? 'OOQ' : s.state.toUpperCase(),
-          'Case ID': s.caseId || '—',
-          Category: s.category || '—',
-          From: formatSafeDateTime(s.from),
-          To: formatSafeDateTime(s.to),
-          'From ISO': formatSafeISO(s.from),
-          'To ISO': formatSafeISO(s.to),
-          Minutes: Math.round(s.minutes * 100) / 100,
-          'Is Resume': s.isResume ? 'YES' : 'NO',
-        };
-      }),
-      'wfm_simulated_agent_slices.csv'
-    );
+    exportToExcelCSV(buildSliceExportRows(rawAgentSlices, rosterFloor), 'wfm_simulated_agent_slices.csv');
   }
 
   function handleExportAgentSummaryCSV() {
@@ -1768,8 +1710,8 @@ export function ResultsFlow({
                 <div className="col-span-2 md:col-span-5 font-semibold text-slate-700">{label} ({m.agents} agents)</div>
                 <div className="bg-slate-50 border border-slate-200 rounded p-2"><div className="text-slate-500">Cases max / min</div><div className="font-bold text-slate-900">{m.casesMaxMinRatio === null ? 'n/a (an agent has 0)' : m.casesMaxMinRatio.toFixed(2)}</div></div>
                 <div className="bg-slate-50 border border-slate-200 rounded p-2"><div className="text-slate-500">Cases CV</div><div className="font-bold text-slate-900">{m.casesCv.toFixed(3)}</div></div>
-                <div className="bg-slate-50 border border-slate-200 rounded p-2"><div className="text-slate-500">Utilisation CV</div><div className="font-bold text-slate-900">{m.utilCv.toFixed(3)}</div></div>
-                <div className="bg-slate-50 border border-slate-200 rounded p-2"><div className="text-slate-500">Jain's index (utilisation)</div><div className="font-bold text-slate-900">{m.utilJain.toFixed(3)}</div></div>
+                <div className="bg-slate-50 border border-slate-200 rounded p-2"><div className="text-slate-500">Occupancy CV</div><div className="font-bold text-slate-900">{m.utilCv.toFixed(3)}</div></div>
+                <div className="bg-slate-50 border border-slate-200 rounded p-2"><div className="text-slate-500">Jain's index (occupancy)</div><div className="font-bold text-slate-900">{m.utilJain.toFixed(3)}</div></div>
               </div>
             );
             return (
@@ -1783,7 +1725,7 @@ export function ResultsFlow({
                     </span>
                   </div>
                   <p className="text-xs text-slate-500">
-                    How evenly work was spread across agents. Utilisation = busy minutes / minutes the agent was on shift.
+                    How evenly work was spread across agents. Occupancy = busy minutes / minutes the agent was on shift (available).
                     Cases are credited to the agent who finished them. This is a per-agent view, not the planned-capacity occupancy used for sizing.
                     Agents on a later coverage shift have less available time and pick up end-of-day work alone.
                   </p>
@@ -1801,7 +1743,7 @@ export function ResultsFlow({
                         <th className="py-1.5 px-3 text-right">Cases completed</th>
                         <th className="py-1.5 px-3 text-right">Busy (min)</th>
                         <th className="py-1.5 px-3 text-right">Available (min)</th>
-                        <th className="py-1.5 px-3 text-right">Utilisation %</th>
+                        <th className="py-1.5 px-3 text-right">Occupancy %</th>
                         <th className="py-1.5 px-3 text-right">Idle (min)</th>
                       </tr>
                     </thead>
@@ -1823,6 +1765,9 @@ export function ResultsFlow({
               </div>
             );
           })()}
+
+          {/* 1c. Agent analytics (audit run) */}
+          <AgentAnalyticsPanel des={des} calendar={calendar} labor={labor} />
 
           {/* 2. Secondary View: Slice Drill Down */}
           <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4">

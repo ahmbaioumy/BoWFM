@@ -18,6 +18,7 @@ import {
 import {
   computeIntervalHorizon,
   convertDurationToMinutes,
+  formatDateTime24,
   getCalendarWorkingDaysInHorizon,
   getDailyWindowLengthHours,
   isWorking,
@@ -1063,26 +1064,46 @@ export function validateDataQuality(params: {
   };
 }
 
-export function exportToExcelCSV(data: any[], filename: string = 'wfm_export.csv') {
-  if (data.length === 0) return;
+/** One Excel cell as CSV text. Dates use the SAME local-time formatter the screen uses (never UTC/ISO). */
+function csvCell(val: unknown): string {
+  if (val === null || val === undefined) val = '';
+  if (val instanceof Date) val = formatDateTime24(val, '');
+  return `"${String(val).replace(/"/g, '""')}"`;
+}
 
+/** Header + rows as CSV lines (no BOM). Pure. */
+function csvLines(data: Array<Record<string, unknown>>): string[] {
+  if (data.length === 0) return [];
   const headers = Object.keys(data[0]);
-  const rows = data.map((row) =>
-    headers
-      .map((h) => {
-        let val = row[h];
-        if (val === null || val === undefined) val = '';
-        if (val instanceof Date) {
-          val = !isNaN(val.getTime()) ? val.toISOString() : '';
-        }
-        const strVal = String(val).replace(/"/g, '""');
-        return `"${strVal}"`;
-      })
-      .join(',')
-  );
+  return [headers.map(csvCell).join(','), ...data.map((row) => headers.map((h) => csvCell(row[h])).join(','))];
+}
 
-  // UTF-8 BOM \uFEFF ensures Excel opens file with proper UTF-8 decoding
-  const csvContent = '\uFEFF' + [headers.map((h) => `"${h}"`).join(','), ...rows].join('\r\n');
+/**
+ * Pure builder for the Excel-friendly CSV text (UTF-8 BOM, CRLF, every cell quoted). Date cells are
+ * rendered with formatDateTime24 ("YYYY-MM-DD HH:mm", local business time, no "Z"), identical to the
+ * on-screen tables. Optional `sections` append further titled tables below, separated by a blank row.
+ */
+export function buildExcelCSV(
+  data: Array<Record<string, unknown>>,
+  sections: Array<{ title: string; rows: Array<Record<string, unknown>> }> = []
+): string {
+  const lines = csvLines(data);
+  for (const sec of sections) {
+    if (lines.length > 0) lines.push('');
+    lines.push(csvCell(sec.title), ...csvLines(sec.rows));
+  }
+  // UTF-8 BOM (U+FEFF) ensures Excel opens file with proper UTF-8 decoding
+  return '﻿' + lines.join('\r\n');
+}
+
+export function exportToExcelCSV(
+  data: Array<Record<string, unknown>>,
+  filename: string = 'wfm_export.csv',
+  sections: Array<{ title: string; rows: Array<Record<string, unknown>> }> = []
+) {
+  if (data.length === 0 && sections.length === 0) return;
+
+  const csvContent = buildExcelCSV(data, sections);
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
 

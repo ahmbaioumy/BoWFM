@@ -172,6 +172,7 @@ Bo_4Final-main/
 │   ├── build-standalone.mts      ← inlines everything into BoWFM.html
 │   ├── verify-fixes.mts          ← legacy regression suite (156 tests)
 │   ├── verify-sizing-fixes.mts   ← sizing-chain suite (95 tests)
+│   ├── verify-agent-analytics.mts ← export-timestamp + agent-analytics suite (46 tests)
 │   └── check-artifact-freshness.mts ← BoWFM.html mtime gate
 └── src/
     ├── App.tsx                   ← state machine, navigation, orchestration
@@ -180,7 +181,9 @@ Bo_4Final-main/
     │   ├── des-engine.ts         ← discrete-event simulation
     │   ├── hc-search.ts          ← baseline, CI search, shrinkage/FTE math
     │   ├── calendar.ts           ← business-time arithmetic
-    │   └── csv-parser.ts         ← ingestion + data-quality validation
+    │   ├── csv-parser.ts         ← ingestion + data-quality validation + Excel CSV exporter (buildExcelCSV)
+    │   ├── export-rows.ts        ← case/breach/slice export row builders (shared local-time formatter)
+    │   └── agent-analytics.ts    ← pure per-agent/per-date analytics over the audit run (UI layer only)
     └── components/               ← UI, one component per flow
 ```
 
@@ -786,7 +789,7 @@ Keep full precision through the chain. Compare floats with a tolerance, never `=
 ### 9.1 Two suites, both must be green
 
 ```bash
-npm test              # both suites — 454 checks + artifact freshness
+npm test              # all suites — 500 checks + artifact freshness
 npm run test:sizing   # sizing-chain suite only (faster)
 ```
 
@@ -794,6 +797,7 @@ npm run test:sizing   # sizing-chain suite only (faster)
 |---|---|---|
 | `scripts/verify-fixes.mts` | 174 | Legacy regression — CSV/date parsing, calendar arithmetic, CRN consistency, occupancy semantics, artifact integrity, analytical infeasibility diagnosis, 24x7 midnight budget accounting. **Treat as append-only.** |
 | `scripts/verify-sizing-fixes.mts` | 280 | Sizing chain — `D1` working-day counting, `D3` apportionment monotonicity, `D7` staffing-chain integrity, `D9` offline enforcement, `D20`-`D26` deadline-coverage shift placement (Stage 3a: valid-slap enumeration, no-regression, greedy monotonicity/optimality, I1/I2 invariants under staggering, seed determinism, positive control, I4 occupancy-ceiling regression guard), `D27` day-open telemetry off-by-one, `D28` fast-path/full-path attainment agreement, `D29` I5 per-agent stagger-offset compliance (check #8), `D30`/`D31` shift-end enforcement + in-flight case handover, `D32`/`D33` minimum-coverage floor + flag-independent redistribution repair, `D34` N_sla walk-down safety-net fix, `D35` adherence/capacity conflation closed-form pin, `D36` 24×7 coverage-gate regression fix, `D37` real 24×7 multi-start (staggering, shift-end, coverage repair), `D38` "exact minimum" wording pin (source-text based — the message is unreachable dead code), `D39` empirical monotonicity sweep for the uniform-only predicate (N=1..25, no violation found), `D40` extra-OFF coverage-ratio fix (ratio table sweep + integer-exactness cases — see §6.4a), `D41` non-blocking DQ warnings for zero off-days / override-vs-horizon scale / calendar-open days with no uploaded rows |
+| `scripts/verify-agent-analytics.mts` | 46 | `EX` export timestamps == on-screen formatter (fixed UTC+4 TZ, midnight-crossing, real engine rows, static no-`toISOString` guard); `AA` agent analytics (reconciles to `completedCases`/`totalHandlingMinutes`/`agentFairness`, date/category/agent filters, determinism, late cohorts) |
 | `scripts/check-artifact-freshness.mts` | gate | Fails if `BoWFM.html` is missing or older than `src/` / build inputs (`npm run check:artifact`) |
 
 If a legacy test fails after your change, the default assumption is that **your change is
@@ -859,6 +863,7 @@ optional `details`. **`error` blocks the simulation; `warning` does not** —
 `passed = !hasErrors`. Add a test asserting both the trigger and the non-trigger case.
 
 ### Add a results metric
+> Timestamps in any UI table or CSV export must go through `calendar.ts` `formatDateTime24` (local, no `Z`). Never `toISOString()` for user-facing/exported values — it is UTC and will not match the screen. Per-agent/per-date analytics live in `src/utils/agent-analytics.ts` (derive from `DESResult`; no engine change needed).
 1. Compute it in the engine and add it to `DESResult` (or `HCSearchOutput`) in `wfm.ts`.
 2. Render it in the appropriate `ResultsFlow.tsx` tab.
 3. If it is displayed alongside a CI-gated decision, make sure it comes from the same
@@ -893,6 +898,8 @@ Work down the chain in order — the fault is almost always upstream of where it
 | Defect | Impact when broken |
 |---|---|
 | **Unconfigured categories** dropped from the staffing gross-up | Hiring requirement understated **46%** (`grossHCTotal` 7 vs 13; `fteNet` 5 vs 10) |
+| **Case/slice CSV exports in UTC** (`toISOString`) vs local time on screen | Excel showed times shifted by the planner's UTC offset (08:18 on screen, 04:18Z in file at UTC+4); fixed 2026-09-29, pinned by `EX.*` |
+| **ResultsFlow hook-order crash** (early return before hooks) | Reset All -> reload sample -> Run -> View Results gave a blank page ("Rendered more hooks than during the previous render"); fixed 2026-09-29 by a guard wrapper (`ResultsFlow`) that mounts the hook-heavy `ResultsFlowBody` only when results exist |
 | **Hamilton apportionment** in siloed mode | **14 monotonicity violations, 21 starved silos**; a category fell from 1 agent to 0 |
 | **Working-day off-by-one** (inclusive horizon bound) | 24/7 weekly runs counted **8 days instead of 7**; `N_min` understated ~11% |
 | **Debug `console.log`** in the search path | Shipped inside the artifact |
