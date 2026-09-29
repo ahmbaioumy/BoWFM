@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft — as-built specification |
-| **Version** | 1.12.0 |
+| **Version** | 1.13.0 |
 | **Date** | 2026-09-29 |
 | **Owner** | _(unassigned)_ |
 | **Product** | Backoffice WFM Sizing Engine |
@@ -556,18 +556,30 @@ Remainder Only`); paginate at 50 rows.
 - An **Agent Analytics** panel (below the fairness panel), labelled "audit run (single seed)",
   derived purely in the UI layer (`src/utils/agent-analytics.ts`) from the audit run's
   timeline/cases. Filters: date range (bounded to active dates, incl. post-horizon drain days),
-  category, agent multi-select. Table per agent: cases handled (completed), touched, busy,
-  available (busy + idle, on shift), idle, occupancy %, utilisation %, avg handle (busy /
-  cases touched), cases/day, resumes, handed-over cases, shift-start cohort (+ "late" flag).
+  category, agent multi-select. Table per agent: **work share** (primary load metric: for each
+  finished case an agent earns its busy minutes on the case / all agents' busy minutes on it,
+  attributed to each slice's date; sums to the number of finished cases), **finished** (whole
+  cases the agent closed — finisher credit, which overstates late-shift agents who only resume
+  cases others parked), touched, busy,
+  available (busy + idle, on shift), idle, occupancy %, utilisation %, avg handle (busy minutes on
+  finished-case work / work share), cases/day (work share / on-shift days), resumes, handed-over
+  cases, shift-start cohort (+ "late" flag). Heatmap, daily trend, team average and the
+  fairness stats in this panel use work share. An insight flags single-agent cover (one agent
+  alone in the queue >= 30 business minutes while open, e.g. "Agent-51 is the only agent on shift
+  17:00-22:00 and finishes N cases started by others"). Display-only: engine and recommended HC
+  are unchanged (measured on EGS_Only.csv: rec HC 51; Agent-51 finished 733 vs 338 but work
+  share 334 vs 346, avg handle 35.0 min for all).
   **Occupancy = busy / available; utilisation = busy / scheduled** (available + the shift tail
   after the daily productive-hour budget is exhausted): the engine models no other
   non-productive time in a shift, so the two are identical except on budget-exhausted days —
   stated in the panel help text. The fairness panel's occupancy % is busy / on-shift available (same idea as this occupancy);
   this panel's utilisation is a different, lower number. Four inline-SVG
-  charts (cases per agent with team average; occupancy and utilisation; agent x date heatmap;
+  charts (cases per agent by work share with team average; occupancy and utilisation; agent x date heatmap;
   daily team average with min-max band); a computed insights block (most/least loaded vs mean,
   agents outside +/-15%, late-coverage agents' share of last-2h work, fairness CV/Jain);
-  "Export agent summary" (one Excel-friendly CSV: summary table + agent x date matrix).
+  "Export agent summary" (one Excel-friendly CSV: summary table with both Work Share and Cases
+  Finished columns + agent x date work-share matrix). The fairness panel's case column is labelled
+  "Cases finished" (engine counting unchanged).
 - An **Agent Performance Summary**: per-agent busy/idle/off minutes, occupancy %, cases
   handled (counted at completion, credited to the agent who finishes the case — a case parked
   and resumed by another agent is no longer counted twice), resumes, max daily busy vs daily budget (flagged on violation), and an

@@ -122,10 +122,12 @@ console.log('\n--- Suite AA: agent analytics ---');
   assert(a.rows.every((r) => r.casesHandedOver <= r.casesTouched && r.casesTouched >= 0), 'AA.7 touched >= handed over');
   assert(a.rows.some((r) => r.occupancyPct - r.utilisationPct > 0.5), 'AA.8 occupancy and utilisation differ where the daily budget is exhausted before shift end');
   assert(a.rows.every((r) => r.cohortStart === '08:00' && !r.isLateShift) && a.earliestCohortStart === '08:00', 'AA.9 uniform run: one 08:00 cohort, nobody flagged late');
-  assert(a.matrix.every((row, i) => row.reduce((x, y) => x + y, 0) === a.rows[i].casesCompleted), 'AA.10 matrix row sums == handled');
+  // Definition change (work share): matrix cells are fractional work share, not finisher counts.
+  assert(a.matrix.every((row, i) => approx(row.reduce((x, y) => x + y, 0), a.rows[i].workShare, 1e-6)) && approx(a.rows.reduce((s, r) => s + r.workShare, 0), des.completedCases, 1e-6), 'AA.10 matrix row sums == work share; total work share == completed cases');
   const byDate = new Map<string, number>();
   for (const c of des.caseResults) if (c.isCompleted && c.completeTime) byDate.set(formatDate24(c.completeTime), (byDate.get(formatDate24(c.completeTime)) || 0) + 1);
-  assert(a.dates.every((d, j) => a.matrix.reduce((s, row) => s + row[j], 0) === (byDate.get(d) || 0)), 'AA.11 matrix column sums == completions bucketed by calendar date');
+  // Definition change: work share is bucketed by the date of each busy slice, so column sums are no longer completions-by-date (whole run still equals completed cases).
+  assert(approx(a.matrix.reduce((s, row) => s + row.reduce((x, y) => x + y, 0), 0), des.completedCases, 1e-6) && a.matrix.every((row) => row.every((v) => v >= 0)), 'AA.11 matrix (work share by slice date) totals completed cases');
   assert(!a.dates.includes('2026-10-10') && !a.dates.includes('2026-10-11'), 'AA.12 weekend (no on-shift agents) dates are not active dates');
 
   // Date filter: whole == part1 + part2, and single day.
@@ -155,7 +157,7 @@ console.log('\n--- Suite AA: agent analytics ---');
   const af = computeAgentAnalytics({ des, calendar: cal, labor: lab, filter: { agentIds: [5, 2, 9] } });
   assert(af.rows.map((r) => r.agentId).join(',') === '2,5,9' && af.matrix.length === 3, 'AA.19 agent multi-select keeps chosen agents in id order');
   const af2 = computeAgentAnalytics({ des, calendar: cal, labor: lab, filter: { agentIds: [3], fromDate: mid, toDate: mid } });
-  assert(af2.rows.length === 1 && af2.rows[0].casesCompleted === af2.matrix[0][0], 'AA.20 filters combine (agent + date)');
+  assert(af2.rows.length === 1 && approx(af2.rows[0].workShare, af2.matrix[0][0]), 'AA.20 filters combine (agent + date)');
 
   // Determinism + deterministic sort.
   assert(JSON.stringify(computeAgentAnalytics({ des, calendar: cal, labor: lab })) === JSON.stringify(a), 'AA.21 identical inputs give byte-identical output');
@@ -174,7 +176,7 @@ console.log('\n--- Suite AA: agent analytics ---');
   // Export: two tables, dates formatted local, BOM.
   const ex = buildAgentAnalyticsExport(a);
   const text = buildExcelCSV([], ex.sections);
-  assert(text.startsWith('﻿"Agent summary') && text.includes('"Cases completed per agent per date') && text.split('\r\n').length > 2 * a.rows.length, 'AA.27 export has summary + matrix sections in one Excel-friendly file');
+  assert(text.startsWith('﻿"Agent summary') && text.includes('"Work share (cases) per agent per date') && text.split('\r\n').length > 2 * a.rows.length, 'AA.27 export has summary + matrix sections in one Excel-friendly file');
   assert(ex.sections[1].rows[0][a.dates[0]] !== undefined && ex.sections[1].rows.length === a.rows.length && a.dates.every((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)), 'AA.28 matrix headers are local YYYY-MM-DD dates');
 
   // Staggered cohorts: late-coverage agents are detected and the end-of-day share is computed.
@@ -202,6 +204,69 @@ console.log('\n--- Suite AA: agent analytics ---');
   assert(allLate > 0 && lateShare / allLate > 2 / 8, 'AA.30 late cohort does a larger-than-headcount share of last-2h work', `${lateShare}/${allLate}`);
   assert(sa.rows.every((r) => r.scheduledMin >= r.availableMin - 1e-9), 'AA.31 staggered: scheduled >= available');
   assert(buildAgentInsights(sa).some((t) => t.includes('late-coverage')), 'AA.32 insights call out late-coverage agents');
+}
+
+// ------------------------------------------------------------------------------------------
+console.log('\n--- Suite AW: work share + single-agent cover (hand-built timelines) ---');
+{
+  const BIZ: CalendarConfig = { workingDays: [1, 2, 3, 4, 5], dailyOpenHour: 9, dailyOpenMinute: 0, dailyCloseHour: 17, dailyCloseMinute: 0, holidays: [] };
+  const LAB: LaborConfig = { dailyProductiveHours: 8, adherencePct: 1.0, workingDaysPerWeek: 5, offDaysPerWeek: 2, contractualHoursSource: 'derived', shifts: [] };
+  const T = (day: number, h: number, m = 0) => new Date(2026, 9, day, h, m); // Oct 5 = Mon, Oct 6 = Tue
+  const sl = (agentId: number, state: 'busy' | 'idle', from: Date, to: Date, caseId: string | null = null): any => ({
+    agentId, agentLabel: `Agent-${agentId + 1}`, date: formatDate24(from), state, rosterSource: 'existing', caseId, category: caseId ? 'General' : null,
+    from, to, minutes: (to.getTime() - from.getTime()) / 60000, isResume: false, inBindingWindow: false,
+  });
+  const cr = (caseId: string, done: Date | null, agents: number[]): any => ({ caseId, category: 'General', isCompleted: done !== null, completeTime: done, assignedAgents: agents });
+  const mkDes = (hc: number, timeline: any[], cases: any[]): any => ({ operationalHC: hc, agentTimeline: timeline, caseResults: cases, completedCases: cases.filter((c) => c.isCompleted).length });
+  const cfg = { calendar: BIZ, labor: LAB };
+
+  // c1 split A(0) 30 min Mon + B(1) 10 min Tue, finished by B Tue. c2 A only, 20 min Mon. c3 unfinished (A 15 min).
+  const tl = [
+    sl(0, 'busy', T(5, 9), T(5, 9, 30), 'c1'), sl(0, 'busy', T(5, 9, 30), T(5, 9, 50), 'c2'), sl(0, 'busy', T(5, 9, 50), T(5, 10, 5), 'c3'),
+    sl(1, 'busy', T(6, 9), T(6, 9, 10), 'c1'), sl(1, 'idle', T(6, 9, 10), T(6, 10)),
+    sl(0, 'idle', T(6, 9), T(6, 10)),
+  ];
+  const des = mkDes(2, tl, [cr('c1', T(6, 9, 10), [0, 1]), cr('c2', T(5, 9, 50), [0]), cr('c3', null, [0])]);
+  const w = computeAgentAnalytics({ des, ...cfg });
+  const [A, B] = w.rows;
+  assert(approx(A.workShare, 0.75 + 1) && approx(B.workShare, 0.25), 'AW.1 split case c1: A 30 min / B 10 min -> 0.75 / 0.25 (plus A sole c2 = 1)', `${A.workShare} ${B.workShare}`);
+  assert(approx(A.workShare + B.workShare, des.completedCases) && approx(w.team.workShareTotal, 2), 'AW.2 total work share == finished cases; unfinished c3 earns none');
+  assert(A.casesCompleted === 1 && B.casesCompleted === 1 && A.casesTouched === 3, 'AW.3 finished (finisher credit) is kept alongside work share');
+  const mon = w.dates.indexOf('2026-10-05');
+  const tue = w.dates.indexOf('2026-10-06');
+  assert(approx(w.matrix[0][mon], 0.75 + 1) && approx(w.matrix[1][tue], 0.25) && approx(w.matrix[1][mon], 0) && approx(w.matrix[0][tue], 0), 'AW.4 shares are attributed to the date of each slice');
+  const tueOnly = computeAgentAnalytics({ des, ...cfg, filter: { fromDate: '2026-10-06' } });
+  assert(approx(tueOnly.rows[1].workShare, 0.25) && approx(tueOnly.rows[0].workShare, 0), 'AW.5 date filter keeps only that day\'s slices (denominator still whole case)', `${tueOnly.rows.map((r) => r.workShare)}`);
+  // avg handle = busy on finished-case work / work share: A = (30+20)/1.75, B = 10/0.25 = 40; unfinished c3 excluded.
+  assert(approx(A.avgHandleMin!, 50 / 1.75) && approx(B.avgHandleMin!, 40), 'AW.6 avg handle = busy on completed cases / work share', `${A.avgHandleMin} ${B.avgHandleMin}`);
+  // Ground-truth: the old "busy / touched" would have said B = 10 min.
+  assert(approx(B.busyMin / B.casesTouched, 10) && !approx(B.avgHandleMin!, 10), 'AW.7 (control) busy/touched differs from the new definition');
+  assert(approx(w.team.casesMean, 1), 'AW.8 team average is on work share');
+
+  // Single-agent cover: agent 0 in queue 09-13, agent 1 09-17 -> agent 1 alone 13-17 and finishes c1 that agent 0 started.
+  const soloTl = [
+    sl(0, 'busy', T(5, 9), T(5, 9, 30), 'c1'), sl(0, 'idle', T(5, 9, 30), T(5, 13)),
+    sl(1, 'idle', T(5, 9), T(5, 13)), sl(1, 'busy', T(5, 13), T(5, 13, 10), 'c1'), sl(1, 'idle', T(5, 13, 10), T(5, 17)),
+  ];
+  const soloCases = [cr('c1', T(5, 13, 10), [0, 1])];
+  const s2 = computeAgentAnalytics({ des: mkDes(2, soloTl, soloCases), ...cfg });
+  assert(s2.soloCover.length === 1 && s2.soloCover[0].agentId === 1 && s2.soloCover[0].windowStart === '13:00' && s2.soloCover[0].windowEnd === '17:00' && s2.soloCover[0].minutes === 240 && s2.soloCover[0].finishedFromOthers === 1, 'AW.9 one late agent -> single-agent cover 13:00-17:00 with 1 finished-from-others', JSON.stringify(s2.soloCover));
+  const i2 = buildAgentInsights(s2).find((t) => t.includes('only agent on shift'));
+  assert(!!i2 && i2.includes('Agent-2') && i2.includes('13:00-17:00') && i2.includes('finishes 1 cases started by others'), 'AW.10 insight names the agent, window and hand-over count', i2 ?? '');
+  const covTl = [...soloTl, sl(2, 'idle', T(5, 9), T(5, 17))];
+  const s3 = computeAgentAnalytics({ des: mkDes(3, covTl, soloCases), ...cfg });
+  assert(s3.soloCover.length === 0 && !buildAgentInsights(s3).some((t) => t.includes('only agent on shift')), 'AW.11 two agents covering the late window -> no single-agent insight');
+  assert(JSON.stringify(computeAgentAnalytics({ des: mkDes(2, soloTl, soloCases), ...cfg })) === JSON.stringify(s2), 'AW.12 deterministic');
+
+  // Real sample runs: totals hold for pooled and siloed, whole run.
+  const { rows: sampleRows } = buildSampleDataset('support', new Date(2026, 9, 5, 8, 0, 0, 0));
+  const ivs = mapRawRecordsToIntervals(sampleRows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+  const cats = discoverAndSyncCategories(ivs, DEFAULT_CATEGORIES, DEFAULT_SLA);
+  for (const [arch, hc] of [['pooled', 12], ['siloed', 21]] as const) {
+    const d = runBackofficeDES({ operationalHC: hc, intervals: ivs, openingWIP: [], categories: cats, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, seed: DEFAULT_SIM_PARAMS.seed, queueArchitecture: arch });
+    const r = computeAgentAnalytics({ des: d, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR });
+    assert(approx(r.rows.reduce((x, y) => x + y.workShare, 0), d.completedCases, 1e-6), `AW.13 ${arch}: sum of work share == completedCases`, `${r.team.workShareTotal} vs ${d.completedCases}`);
+  }
 }
 
 console.log('\n==================================================');

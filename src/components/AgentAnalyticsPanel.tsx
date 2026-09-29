@@ -29,8 +29,9 @@ const DEFINITIONS =
   'Available = busy + idle minutes while on shift. Occupancy = busy / available. ' +
   'Utilisation = busy / scheduled, where scheduled = available + the rest of the shift after the daily productive-hour budget is used up. ' +
   'The engine models no other non-productive time inside a shift, so occupancy and utilisation are the SAME number for any agent-day where the budget is not exhausted; they only differ on days it is. ' +
-  'Cases handled = cases the agent finished (credited once). Touched = cases the agent worked on, including split cases. ' +
-  'Avg handle = busy minutes / cases touched. Cases/day = handled / days on shift. ' +
+  'Work share = for each finished case, the agent\'s busy minutes on it / all agents\' busy minutes on it (a case split 30/10 min is 0.75/0.25); it sums to the number of finished cases. ' +
+  'Finished = whole cases the agent closed (finisher credit; overstates agents who only resume cases others parked). Touched = cases the agent worked on, including split cases. ' +
+  'Avg handle = busy minutes on finished-case work / work share. Cases/day = work share / days on shift. ' +
   'Neither is the planned-capacity occupancy used for sizing.';
 
 /* ------------------------------ Charts (inline SVG) ------------------------------ */
@@ -54,23 +55,23 @@ function CasesBarChart({ a }: { a: AgentAnalytics }) {
   const padTop = 22;
   const plotW = W - labelW - 60;
   const H = padTop + rows.length * rowH + 8;
-  const maxV = Math.max(1, a.team.casesMean, ...rows.map((r) => r.casesCompleted));
+  const maxV = Math.max(1, a.team.casesMean, ...rows.map((r) => r.workShare));
   const x = (v: number) => labelW + (v / maxV) * plotW;
-  const summary = `Cases handled per agent, sorted high to low. Team average ${r1(a.team.casesMean)}. ` +
-    (rows.length ? `Highest ${rows[0].agentLabel} ${rows[0].casesCompleted}, lowest ${rows[rows.length - 1].agentLabel} ${rows[rows.length - 1].casesCompleted}.` : '');
+  const summary = `Cases per agent (work share), sorted high to low. Team average ${r1(a.team.casesMean)}. ` +
+    (rows.length ? `Highest ${rows[0].agentLabel} ${r1(rows[0].workShare)}, lowest ${rows[rows.length - 1].agentLabel} ${r1(rows[rows.length - 1].workShare)}.` : '');
   return (
     <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ minWidth: W, maxWidth: 'none' }} role="img" aria-labelledby={`${id}t ${id}d`}>
-      <title id={`${id}t`}>Cases handled per agent</title>
+      <title id={`${id}t`}>Cases per agent (work share)</title>
       <desc id={`${id}d`}>{summary}</desc>
       {rows.map((r, i) => {
         const y = padTop + i * rowH;
         return (
           <g key={r.agentId}>
             <text x={labelW - 6} y={y + 14} textAnchor="end" className="fill-slate-600 text-[11px]">{r.agentLabel}</text>
-            <rect x={labelW} y={y + 2} width={Math.max(0, x(r.casesCompleted) - labelW)} height={rowH - 5} rx={2} className="fill-blue-500">
-              <title>{`${r.agentLabel}: ${r.casesCompleted} cases (${r.category})`}</title>
+            <rect x={labelW} y={y + 2} width={Math.max(0, x(r.workShare) - labelW)} height={rowH - 5} rx={2} className="fill-blue-500">
+              <title>{`${r.agentLabel}: work share ${r1(r.workShare)} cases, finished ${r.casesCompleted} (${r.category})`}</title>
             </rect>
-            <text x={x(r.casesCompleted) + 4} y={y + 14} className="fill-slate-700 text-[11px]">{r.casesCompleted}</text>
+            <text x={x(r.workShare) + 4} y={y + 14} className="fill-slate-700 text-[11px]">{r1(r.workShare)}</text>
           </g>
         );
       })}
@@ -141,8 +142,8 @@ function Heatmap({ a }: { a: AgentAnalytics }) {
   return (
     <div className="overflow-x-auto">
       <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} role="img" aria-labelledby={`${id}t ${id}d`} style={{ minWidth: W }}>
-        <title id={`${id}t`}>Cases completed per agent per date</title>
-        <desc id={`${id}d`}>{`Heatmap, ${a.rows.length} agents by ${n} dates. Darker means more cases; light grey means not on shift. Maximum ${max} cases in one day.`}</desc>
+        <title id={`${id}t`}>Work share (cases) per agent per date</title>
+        <desc id={`${id}d`}>{`Heatmap, ${a.rows.length} agents by ${n} dates. Darker means more work share; light grey means not on shift. Maximum ${r1(max)} cases of work share in one day.`}</desc>
         {a.dates.map((d, j) => (
           <text key={d} transform={`translate(${labelW + j * cellW + cellW / 2 + 3},${padTop - 4}) rotate(-55)`} className="fill-slate-500 text-[11px]">{shortDate(d)}</text>
         ))}
@@ -159,10 +160,10 @@ function Heatmap({ a }: { a: AgentAnalytics }) {
                   <rect x={cx + 1} y={cy + 1} width={cellW - 2} height={cellH - 2} rx={2}
                     className={on ? 'fill-indigo-600' : 'fill-slate-100 stroke-slate-200'}
                     style={on ? { opacity: 0.08 + 0.92 * (v / max) } : undefined}>
-                    <title>{`${r.agentLabel} ${d}: ${on ? `${v} cases` : 'not on shift'}`}</title>
+                    <title>{`${r.agentLabel} ${d}: ${on ? `${r1(v)} cases (work share)` : 'not on shift'}`}</title>
                   </rect>
                   {on && cellW >= 26 && (
-                    <text x={cx + cellW / 2} y={cy + 14} textAnchor="middle" className={`${v / max > 0.55 ? 'fill-white' : 'fill-slate-700'} text-[9px]`}>{v}</text>
+                    <text x={cx + cellW / 2} y={cy + 14} textAnchor="middle" className={`${v / max > 0.55 ? 'fill-white' : 'fill-slate-700'} text-[9px]`}>{Math.round(v)}</text>
                   )}
                 </g>
               );
@@ -195,8 +196,8 @@ function TrendChart({ a }: { a: AgentAnalytics }) {
   const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(f * maxV * 10) / 10);
   return (
     <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ minWidth: W, maxWidth: 'none' }} role="img" aria-labelledby={`${id}t ${id}d`}>
-      <title id={`${id}t`}>Daily team trend: cases per agent</title>
-      <desc id={`${id}d`}>{`Average cases completed per on-shift agent for each of ${pts.length} dates, with the min to max band across agents.`}</desc>
+      <title id={`${id}t`}>Daily team trend: work share per agent</title>
+      <desc id={`${id}d`}>{`Average work share (cases) per on-shift agent for each of ${pts.length} dates, with the min to max band across agents.`}</desc>
       {ticks.map((t) => (
         <g key={t}>
           <line x1={pl} x2={W - pr} y1={y(t)} y2={y(t)} className="stroke-slate-200" strokeWidth={1} />
@@ -204,13 +205,13 @@ function TrendChart({ a }: { a: AgentAnalytics }) {
         </g>
       ))}
       <polygon points={band} className="fill-blue-200" opacity={0.6}>
-        <title>Min to max cases across on-shift agents</title>
+        <title>Min to max work share across on-shift agents</title>
       </polygon>
       <polyline points={line} fill="none" className="stroke-blue-700" strokeWidth={2} />
       {pts.map((p, i) => (
         <g key={p.date}>
           <circle cx={x(i)} cy={y(p.avg)} r={3} className="fill-blue-700">
-            <title>{`${p.date}: avg ${r1(p.avg)}, min ${p.min}, max ${p.max} (${p.agents} agents)`}</title>
+            <title>{`${p.date}: avg ${r1(p.avg)}, min ${r1(p.min)}, max ${r1(p.max)} (${p.agents} agents)`}</title>
           </circle>
           {i % labelEvery === 0 && (
             <text transform={`translate(${x(i) - 4},${H - pb + 14}) rotate(45)`} className="fill-slate-500 text-[11px]">{shortDate(p.date)}</text>
@@ -286,7 +287,7 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
         <button
           onClick={handleExport}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-semibold hover:bg-slate-800 transition shadow-xs self-start shrink-0"
-          title="Excel-friendly CSV (UTF-8 BOM): agent summary table + cases per agent per date matrix, for the current filters"
+          title="Excel-friendly CSV (UTF-8 BOM): agent summary table (work share + finished) + work share per agent per date matrix, for the current filters"
         >
           <Download className="w-3.5 h-3.5" />
           <span>Export agent summary</span>
@@ -362,15 +363,16 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
               <th className="py-2 px-2.5 text-left">Agent</th>
               <th className="py-2 px-2.5 text-left">Category</th>
               <th className="py-2 px-2.5 text-left" title="Most common shift start time across the agent's active days">Shift start</th>
-              <th className={th} title="Cases the agent finished (credited once)">Handled</th>
+              <th className={th} title="Primary load metric. For each finished case: the agent's busy minutes on it / all agents' busy minutes on it. A case split 30/10 min counts 0.75 / 0.25. Sums to the number of finished cases.">Work share</th>
+              <th className={th} title="Whole cases the agent closed (finisher credit). Overstates agents who only resume cases other agents parked.">Finished</th>
               <th className={th} title="Distinct cases the agent worked on, incl. split cases">Touched</th>
               <th className={th}>Busy (min)</th>
               <th className={th} title="Busy + idle minutes while on shift, in queue">Available (min)</th>
               <th className={th}>Idle (min)</th>
               <th className={th} title="Busy / available">Occupancy %</th>
               <th className={th} title="Busy / scheduled shift time (differs from occupancy only after the daily productive budget is exhausted)">Utilisation %</th>
-              <th className={th} title="Busy minutes / cases touched">Avg handle (min)</th>
-              <th className={th} title="Handled / days on shift">Cases/day</th>
+              <th className={th} title="Busy minutes on finished-case work / work share">Avg handle (min)</th>
+              <th className={th} title="Work share / days on shift">Cases/day</th>
               <th className={th} title="Busy slices that resumed a parked case">Resumes</th>
               <th className={th} title="Touched cases another agent finished">Handed over</th>
             </tr>
@@ -384,7 +386,8 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
                   {r.cohortStart}
                   {r.isLateShift && <span className="ml-1.5 text-[10px] font-sans font-bold text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded">late</span>}
                 </td>
-                <td className={`${td} font-semibold text-slate-900`}>{r.casesCompleted}</td>
+                <td className={`${td} font-semibold text-slate-900`}>{r1(r.workShare)}</td>
+                <td className={td}>{r.casesCompleted}</td>
                 <td className={td}>{r.casesTouched}</td>
                 <td className={td}>{r1(r.busyMin)}</td>
                 <td className={td}>{r1(r.availableMin)}</td>
@@ -398,13 +401,14 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
               </tr>
             ))}
             {a.rows.length === 0 && (
-              <tr><td colSpan={14} className="py-6 text-center text-slate-400">No agents match the active filters.</td></tr>
+              <tr><td colSpan={15} className="py-6 text-center text-slate-400">No agents match the active filters.</td></tr>
             )}
           </tbody>
           {a.rows.length > 0 && (
             <tfoot className="bg-slate-50 font-semibold text-slate-800 border-t border-slate-200">
               <tr>
                 <td className="py-1.5 px-2.5" colSpan={3}>Team ({a.team.agents})</td>
+                <td className={td}>{r1(a.team.workShareTotal)}</td>
                 <td className={td}>{a.team.casesTotal}</td>
                 <td className={td}>-</td>
                 <td className={td}>{r1(a.team.busyMin)}</td>
@@ -412,7 +416,7 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
                 <td className={td}>{r1(a.team.availableMin - a.team.busyMin)}</td>
                 <td className={td}>{r1(a.team.occupancyPct)}%</td>
                 <td className={td}>{r1(a.team.utilisationPct)}%</td>
-                <td className={td} colSpan={4}>avg {r1(a.team.casesMean)} cases / agent</td>
+                <td className={td} colSpan={4}>avg {r1(a.team.casesMean)} cases (work share) / agent</td>
               </tr>
             </tfoot>
           )}
@@ -421,16 +425,16 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
 
       {/* Charts */}
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <ChartFrame title="Cases handled per agent" desc="Sorted high to low; dashed line = team average.">
+        <ChartFrame title="Cases per agent (work share)" desc="Work share = each finished case split between agents by minutes worked. Sorted high to low; dashed line = team average.">
           <div className="max-h-[36rem] overflow-auto"><CasesBarChart a={a} /></div>
         </ChartFrame>
         <ChartFrame title="Occupancy and utilisation per agent" desc="Blue = occupancy, amber = utilisation. Labels show occupancy / utilisation.">
           <div className="max-h-[36rem] overflow-auto"><OccUtilChart a={a} /></div>
         </ChartFrame>
-        <ChartFrame title="Cases per agent per date" desc="Cases completed. Darker = more; light grey = not on shift that day.">
+        <ChartFrame title="Cases per agent per date" desc="Work share (cases). Darker = more; light grey = not on shift that day.">
           <div className="max-h-[36rem] overflow-auto"><Heatmap a={a} /></div>
         </ChartFrame>
-        <ChartFrame title="Daily team trend" desc="Average cases per on-shift agent per date, with the min-max band across agents.">
+        <ChartFrame title="Daily team trend" desc="Average work share per on-shift agent per date, with the min-max band across agents.">
           <div className="overflow-x-auto"><TrendChart a={a} /></div>
         </ChartFrame>
       </div>
