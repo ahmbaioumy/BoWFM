@@ -44,7 +44,9 @@ import {
   runBackofficeDES,
   verifyAgentTimelineInvariants,
 } from '../src/utils/des-engine';
-import { validateDataQuality } from '../src/utils/csv-parser';
+import { discoverAndSyncCategories, mapRawRecordsToIntervals, validateDataQuality } from '../src/utils/csv-parser';
+import { buildSampleDataset } from '../src/utils/sample-data';
+import { DEFAULT_CALENDAR, DEFAULT_CATEGORIES, DEFAULT_LABOR, DEFAULT_SIM_PARAMS, DEFAULT_SLA } from '../src/utils/default-config';
 import {
   CalendarConfig,
   CategoryConfig,
@@ -3315,6 +3317,30 @@ console.log('\n--- Suite D45: availableMinutes accrual ---');
   // OFF mode does not use the accrual for selection but still reports it
   const offRun = runBackofficeDES({ operationalHC: 6, intervals: iv45(14, 9, 15, 6, BIZ45), openingWIP: [], categories: cat45, calendar: BIZ45, labor: LAB45, sla: SLA45, seed: 42, dispatchFairness: { enabled: false } });
   check45('D45.1g fair OFF reports the same correct availability', offRun, expectedAvail(offRun, BIZ45, false, null, null));
+
+  // D45.2: the three built-in samples (Load Sample), run with the app defaults on a fixed Monday.
+  // Pins N_min / recommended / gross HC. Fair OFF = the ORIGINAL pre-fairness numbers; fair ON is
+  // identical on all six (with the availability double-count fixed, the earlier support-pooled +1
+  // disappeared — it was never released).
+  const SAMPLE_PINS: Record<string, [number, number, number]> = {
+    'claims/pooled': [30, 31, 40], 'claims/siloed': [30, 31, 40],
+    'support/pooled': [20, 27, 34], 'support/siloed': [20, 21, 26],
+    'healthcare/pooled': [18, 31, 39], 'healthcare/siloed': [18, 27, 34],
+  };
+  for (const type of ['claims', 'support', 'healthcare'] as const) {
+    const { rows } = buildSampleDataset(type, new Date(2026, 9, 5, 8, 0, 0, 0));
+    const intervals = mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+    const categories = discoverAndSyncCategories(intervals, DEFAULT_CATEGORIES, DEFAULT_SLA);
+    for (const arch of ['pooled', 'siloed'] as const) {
+      const p = { intervals, openingWIP: [], categories, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, seed: DEFAULT_SIM_PARAMS.seed, userMaxHC: DEFAULT_SIM_PARAMS.maxHCSearch, replications: DEFAULT_SIM_PARAMS.replications, queueArchitecture: arch };
+      const pin = SAMPLE_PINS[`${type}/${arch}`];
+      for (const enabled of [true, false]) {
+        const r = searchOptimalHC({ ...p, dispatchFairness: { enabled } });
+        const got = [r.nMinAnalytical, r.recommendedHC, r.staffing.grossHCTotal];
+        assert(got.join('/') === pin.join('/'), `D45.2 sample ${type} ${arch}, fair ${enabled ? 'ON' : 'OFF'}: N_min/rec/gross = ${pin.join('/')}`, `got ${got.join('/')}`);
+      }
+    }
+  }
 }
 
 console.log('\n==================================================');

@@ -1785,6 +1785,7 @@ export function ResultsFlow({
                   <p className="text-xs text-slate-500">
                     How evenly work was spread across agents. Utilisation = busy minutes / minutes the agent was on shift.
                     Cases are credited to the agent who finished them. This is a per-agent view, not the planned-capacity occupancy used for sizing.
+                    Agents on a later coverage shift have less available time and pick up end-of-day work alone.
                   </p>
                 </div>
                 <div className="space-y-3">
