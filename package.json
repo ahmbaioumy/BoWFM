@@ -11,8 +11,9 @@
     "preview": "vite preview",
     "clean": "node -e \"for (const p of ['dist','dist-standalone','server.js']) require('node:fs').rmSync(p,{recursive:true,force:true})\"",
     "lint": "tsc --noEmit",
-    "test": "npx tsx scripts/verify-fixes.mts && npx tsx scripts/verify-sizing-fixes.mts && npx tsx scripts/check-artifact-freshness.mts",
+    "test": "npx tsx scripts/verify-fixes.mts && npx tsx scripts/verify-sizing-fixes.mts && npx tsx scripts/verify-agent-analytics.mts && npx tsx scripts/check-artifact-freshness.mts",
     "test:sizing": "npx tsx scripts/verify-sizing-fixes.mts",
+    "test:agents": "npx tsx scripts/verify-agent-analytics.mts",
     "test:trusted-source": "npx tsx scripts/verify-trusted-source.mts"
   },
   "dependencies": {

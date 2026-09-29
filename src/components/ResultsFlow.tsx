@@ -19,8 +19,10 @@ import {
   StandardInterval,
 } from '../types/wfm';
 import { exportToExcelCSV } from '../utils/csv-parser';
-import { getCalendarWorkingDaysInHorizon, getDailyWindowLengthHours } from '../utils/calendar';
+import { AgentAnalyticsPanel } from './AgentAnalyticsPanel';
+import { formatDateTime24, getCalendarWorkingDaysInHorizon, getDailyWindowLengthHours } from '../utils/calendar';
 import { verifyAgentTimelineInvariants } from '../utils/des-engine';
+import { buildBreachExportRows, buildCaseExportRows, buildSliceExportRows } from '../utils/export-rows';
 import { clampConfidenceLevelPct, effectivePrimaryTarget } from '../utils/hc-search';
 import {
   Users,
@@ -59,39 +61,9 @@ interface ResultsFlowProps {
   onExportAssumptionsJSON: () => void;
 }
 
-function formatSafeTime(date: Date | null | undefined): string {
-  if (!date || isNaN(date.getTime())) return '-';
-  try {
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    return `${hours}:${minutes}`;
-  } catch {
-    return '-';
-  }
-}
-
-function formatSafeDateTime(date: Date | null | undefined): string {
-  if (!date || isNaN(date.getTime())) return '-';
-  try {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    return `${year}-${month}-${day} ${hours}:${minutes}`;
-  } catch {
-    return '-';
-  }
-}
-
-function formatSafeISO(date: Date | null | undefined, fallback: string = ''): string {
-  if (!date || isNaN(date.getTime())) return fallback;
-  try {
-    return date.toISOString();
-  } catch {
-    return fallback;
-  }
-}
+// Single shared timestamp formatter (calendar.ts): local business time, 'YYYY-MM-DD HH:mm', no 'Z'.
+// The on-screen tables AND every CSV export go through it, so they always show identical values.
+const formatSafeDateTime = (date: Date | null | undefined): string => formatDateTime24(date);
 
 export function ResultsFlow({
   currentTab,
@@ -370,44 +342,11 @@ export function ResultsFlow({
   }, [currentTab, des, labor, calendar]);
 
   function handleExportCasesCSV() {
-    exportToExcelCSV(
-      des.caseResults.map((c) => ({
-        'Case ID': c.caseId,
-        Category: c.category,
-        Priority: c.priority,
-        'Arrival Time': formatSafeISO(c.arrival),
-        'Clock Start': formatSafeISO(c.clockStart),
-        'AHT (min)': c.ahtMinutes,
-        'Primary Deadline': formatSafeISO(c.primaryDeadline),
-        'Latest Safe Start': formatSafeISO(c.latestSafeStart),
-        'First Start Time': formatSafeISO(c.firstStartTime, 'UNSTARTED'),
-        'Complete Time': formatSafeISO(c.completeTime, 'UNFINISHED'),
-        'Park Count': c.parkCount,
-        'Is Opening WIP': c.isOpeningWip ? 'YES' : 'NO',
-        'Completed?': c.isCompleted ? 'YES' : 'NO',
-        'Primary SLA Passed': c.primaryPassed ? 'PASS' : 'FAIL',
-        'ASA Duration (min)': c.asaDurationMinutes,
-        'ASA Censored': c.asaCensored ? 'YES' : 'NO',
-      })),
-      'wfm_simulated_cases.csv'
-    );
+    exportToExcelCSV(buildCaseExportRows(des.caseResults), 'wfm_simulated_cases.csv');
   }
 
   function handleExportBreachedCasesCSV() {
-    exportToExcelCSV(
-      breachedCases.map((c) => ({
-        'Case ID': c.caseId,
-        Category: c.category,
-        'Arrival Time': formatSafeISO(c.arrival),
-        'Primary Deadline': formatSafeISO(c.primaryDeadline),
-        'Latest Safe Start': formatSafeISO(c.latestSafeStart),
-        'First Start Time': formatSafeISO(c.firstStartTime, 'UNSTARTED'),
-        'Complete Time': formatSafeISO(c.completeTime, 'UNFINISHED'),
-        'Park Count': c.parkCount,
-        'Breach Reason': c.isCompleted ? 'Completed after primary deadline' : 'Unfinished by horizon end',
-      })),
-      'wfm_sla_breach_cases.csv'
-    );
+    exportToExcelCSV(buildBreachExportRows(breachedCases), 'wfm_sla_breach_cases.csv');
   }
 
   function handleExportQueueWipCSV() {
@@ -425,26 +364,7 @@ export function ResultsFlow({
   }
 
   function handleExportAgentSlicesCSV() {
-    exportToExcelCSV(
-      rawAgentSlices.map((s) => {
-        const rosterSource: AgentRosterSource = (s.agentId + 1) <= rosterFloor ? 'existing' : 'new';
-        return {
-          Agent: s.agentLabel,
-          Source: rosterSource.toUpperCase(),
-          Date: s.date,
-          State: s.state === 'off' ? 'OOQ' : s.state.toUpperCase(),
-          'Case ID': s.caseId || '—',
-          Category: s.category || '—',
-          From: formatSafeDateTime(s.from),
-          To: formatSafeDateTime(s.to),
-          'From ISO': formatSafeISO(s.from),
-          'To ISO': formatSafeISO(s.to),
-          Minutes: Math.round(s.minutes * 100) / 100,
-          'Is Resume': s.isResume ? 'YES' : 'NO',
-        };
-      }),
-      'wfm_simulated_agent_slices.csv'
-    );
+    exportToExcelCSV(buildSliceExportRows(rawAgentSlices, rosterFloor), 'wfm_simulated_agent_slices.csv');
   }
 
   function handleExportAgentSummaryCSV() {
@@ -1823,6 +1743,9 @@ export function ResultsFlow({
               </div>
             );
           })()}
+
+          {/* 1c. Agent analytics (audit run) */}
+          <AgentAnalyticsPanel des={des} calendar={calendar} labor={labor} />
 
           {/* 2. Secondary View: Slice Drill Down */}
           <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4">

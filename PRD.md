@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Status** | Draft — as-built specification |
-| **Version** | 1.10.0 |
+| **Version** | 1.11.0 |
 | **Date** | 2026-09-29 |
 | **Owner** | _(unassigned)_ |
 | **Product** | Backoffice WFM Sizing Engine |
-| **Artifact** | `BoWFM.html` — single self-contained offline HTML file (~534 KB) |
+| **Artifact** | `BoWFM.html` — single self-contained offline HTML file (~585 KB) |
 
 > **Scope of this document.** This is an **as-built** PRD: §1–§10 specify the product as it
 > actually behaves today, verified against source. §11 carries known defects and unbuilt
@@ -514,6 +514,8 @@ Primary Deadline, First Start, Completed, Parks and SLA Outcome; support free-te
 category filter and status filter (`Completed Only` / `Breached SLA Only` / `Unfinished
 Remainder Only`); paginate at 50 rows.
 
+**FR-9.3a — Export timestamps.** Every Results CSV export (cases, breaches, slices, queue/WIP, agent analytics) writes Date cells with the same formatter as the screen (`formatDateTime24`: local business time, `YYYY-MM-DD HH:mm`, no `Z`), UTF-8 BOM, CRLF, quoted cells. (Fixed 1.11.0: exports used UTC ISO strings, e.g. 08:18 on screen vs 04:18Z in the file at UTC+4; the slice CSV's `From ISO`/`To ISO` UTC columns were removed.)
+
 **FR-9.4 — Agent Browser** must provide:
 - A **proof strip**: Occupancy Proof (timeline busy vs DES handling minutes vs available
   productive vs daily budget), SLA & Headcount, and Workload Roster Floor.
@@ -524,6 +526,20 @@ Remainder Only`); paginate at 50 rows.
   available minutes, utilisation % and idle minutes; max/min cases ratio, coefficient of
   variation of cases and of utilisation, and Jain's index on utilisation (per category when
   siloed). This is a per-agent view, distinct from the planned-capacity occupancy used to size.
+- An **Agent Analytics** panel (below the fairness panel), labelled "audit run (single seed)",
+  derived purely in the UI layer (`src/utils/agent-analytics.ts`) from the audit run's
+  timeline/cases. Filters: date range (bounded to active dates, incl. post-horizon drain days),
+  category, agent multi-select. Table per agent: cases handled (completed), touched, busy,
+  available (busy + idle, on shift), idle, occupancy %, utilisation %, avg handle (busy /
+  cases touched), cases/day, resumes, handed-over cases, shift-start cohort (+ "late" flag).
+  **Occupancy = busy / available; utilisation = busy / scheduled** (available + the shift tail
+  after the daily productive-hour budget is exhausted): the engine models no other
+  non-productive time in a shift, so the two are identical except on budget-exhausted days —
+  stated in the panel help text. Whole-run utilisation equals the fairness panel's. Four inline-SVG
+  charts (cases per agent with team average; occupancy and utilisation; agent x date heatmap;
+  daily team average with min-max band); a computed insights block (most/least loaded vs mean,
+  agents outside +/-15%, late-coverage agents' share of last-2h work, fairness CV/Jain);
+  "Export agent summary" (one Excel-friendly CSV: summary table + agent x date matrix).
 - An **Agent Performance Summary**: per-agent busy/idle/off minutes, occupancy %, cases
   handled (counted at completion, credited to the agent who finishes the case — a case parked
   and resumed by another agent is no longer counted twice), resumes, max daily busy vs daily budget (flagged on violation), and an
