@@ -21,6 +21,7 @@ import {
   StaffingRequirement,
   StandardInterval,
 } from '../types/wfm';
+import type { DispatchFairnessConfig } from '../types/wfm';
 import {
   convertSlaDurationToMinutes,
   formatDateTime24,
@@ -1266,6 +1267,7 @@ export function evaluateCandidateStatistical(params: {
   queueArchitecture?: 'pooled' | 'siloed';
   precomputedCaseSets?: PrecomputedCaseSet[];
   shiftDistribution?: ShiftDistributionByCategory;
+  dispatchFairness?: DispatchFairnessConfig;
 }): {
   primaryStats: PrimarySLAStatisticalResult;
   repResults: DESResult[];
@@ -1288,6 +1290,7 @@ export function evaluateCandidateStatistical(params: {
     queueArchitecture = 'pooled',
     precomputedCaseSets,
     shiftDistribution,
+    dispatchFairness,
   } = params;
 
   const R = Math.max(1, replications);
@@ -1310,6 +1313,7 @@ export function evaluateCandidateStatistical(params: {
       precomputedCases: repCases,
       skipCaseResultsAndTimeline: true,
       shiftDistribution,
+      dispatchFairness,
     });
     repResults.push(res);
     primarySamples.push(res.primaryAchievedPct);
@@ -1344,6 +1348,7 @@ async function evaluateCandidateStatisticalAsync(params: {
   shouldCancel?: () => boolean;
   onRepProgress?: (completedReps: number, totalReps: number) => void;
   shiftDistribution?: ShiftDistributionByCategory;
+  dispatchFairness?: DispatchFairnessConfig;
 }): Promise<{
   primaryStats: PrimarySLAStatisticalResult;
   repResults: DESResult[];
@@ -1368,6 +1373,7 @@ async function evaluateCandidateStatisticalAsync(params: {
     shouldCancel,
     onRepProgress,
     shiftDistribution,
+    dispatchFairness,
   } = params;
 
   const R = Math.max(1, replications);
@@ -1391,6 +1397,7 @@ async function evaluateCandidateStatisticalAsync(params: {
       precomputedCases: repCases,
       skipCaseResultsAndTimeline: true,
       shiftDistribution,
+      dispatchFairness,
     });
     repResults.push(res);
     primarySamples.push(res.primaryAchievedPct);
@@ -1500,6 +1507,7 @@ export function searchOptimalHC(params: {
   userMaxHC?: number;
   replications?: number;
   queueArchitecture?: 'pooled' | 'siloed';
+  dispatchFairness?: DispatchFairnessConfig;
 }): HCSearchOutput {
   let {
     intervals,
@@ -1512,6 +1520,7 @@ export function searchOptimalHC(params: {
     userMaxHC = 500,
     replications = 30,
     queueArchitecture = 'pooled',
+    dispatchFairness,
   } = params;
 
   // Workload reduction is applied ONCE, here, by discounting category AHT — see
@@ -1693,6 +1702,7 @@ export function searchOptimalHC(params: {
       replications: rToUse,
       queueArchitecture,
       precomputedCaseSets,
+      dispatchFairness,
     });
 
     let finalRes = uniformRes;
@@ -1722,7 +1732,7 @@ export function searchOptimalHC(params: {
           const coverageRes = evaluateCandidateStatistical({
             operationalHC: n, intervals, openingWIP, categories, calendar, labor, sla,
             baseSeed: seed, replications: rToUse, queueArchitecture, precomputedCaseSets,
-            shiftDistribution: coverageDist,
+            shiftDistribution: coverageDist, dispatchFairness,
           });
           if (coverageRes.passesAllConstraints) {
             finalRes = coverageRes;
@@ -1754,6 +1764,7 @@ export function searchOptimalHC(params: {
           queueArchitecture,
           precomputedCaseSets,
           shiftDistribution: placementDist,
+          dispatchFairness,
         });
         const picked = pickPlacementOrUniform(finalRes, placedRes, placementDist);
         finalRes = picked.result;
@@ -1921,6 +1932,7 @@ export function searchOptimalHC(params: {
     queueArchitecture,
     precomputedCases: precomputedCaseSets ? precomputedCaseSets[repIdx] : undefined,
     shiftDistribution: winningDistributionByN.get(evalN),
+    dispatchFairness,
   });
 
   let isInfeasibleAdjacent = false;
@@ -1951,6 +1963,7 @@ export function searchOptimalHC(params: {
       queueArchitecture,
       precomputedCases: precomputedCaseSets ? precomputedCaseSets[repIdx] : undefined,
       shiftDistribution: winningDistributionByN.get(evalN - 1),
+      dispatchFairness,
     });
   }
 
@@ -2096,6 +2109,7 @@ export async function searchOptimalHCAsync(params: {
   queueArchitecture?: 'pooled' | 'siloed';
   onProgress?: (progress: SearchProgressState) => void;
   shouldCancel?: () => boolean;
+  dispatchFairness?: DispatchFairnessConfig;
 }): Promise<HCSearchOutput> {
   let {
     intervals,
@@ -2110,6 +2124,7 @@ export async function searchOptimalHCAsync(params: {
     queueArchitecture = 'pooled',
     onProgress,
     shouldCancel,
+    dispatchFairness,
   } = params;
 
   // Workload reduction is applied ONCE, here, by discounting category AHT — see
@@ -2351,6 +2366,7 @@ export async function searchOptimalHCAsync(params: {
       replications: rToUse,
       queueArchitecture,
       precomputedCaseSets,
+      dispatchFairness,
       shouldCancel,
       onRepProgress: (completedReps, totalReps) => {
         onProgress?.({
@@ -2391,7 +2407,7 @@ export async function searchOptimalHCAsync(params: {
           const coverageRes = await evaluateCandidateStatisticalAsync({
             operationalHC: n, intervals, openingWIP, categories, calendar, labor, sla,
             baseSeed: seed, replications: rToUse, queueArchitecture, precomputedCaseSets,
-            shouldCancel, shiftDistribution: coverageDist,
+            shouldCancel, shiftDistribution: coverageDist, dispatchFairness,
           });
           if (coverageRes.passesAllConstraints) {
             finalRes = coverageRes;
@@ -2438,6 +2454,7 @@ export async function searchOptimalHCAsync(params: {
           precomputedCaseSets,
           shouldCancel,
           shiftDistribution: placementDist,
+          dispatchFairness,
         });
         const picked = pickPlacementOrUniform(finalRes, placedRes, placementDist);
         finalRes = picked.result;
@@ -2654,6 +2671,7 @@ export async function searchOptimalHCAsync(params: {
     queueArchitecture,
     precomputedCases: precomputedCaseSets ? precomputedCaseSets[repIdx] : undefined,
     shiftDistribution: winningDistributionByN.get(evalN),
+    dispatchFairness,
   });
 
   let isInfeasibleAdjacent = false;
@@ -2683,6 +2701,7 @@ export async function searchOptimalHCAsync(params: {
       queueArchitecture,
       precomputedCases: precomputedCaseSets ? precomputedCaseSets[repIdx] : undefined,
       shiftDistribution: winningDistributionByN.get(evalN - 1),
+      dispatchFairness,
     });
   }
 

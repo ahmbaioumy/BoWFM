@@ -66,6 +66,67 @@ export interface LaborConfig {
   shiftSlapMinutes?: number;
 }
 
+/**
+ * Fair agent-assignment tolerances (des-engine.ts selectFairAgent). Agent SELECTION only —
+ * which case goes next is still Earliest-Deadline-First. Each cascade level (utilisation ->
+ * case count -> busy minutes -> longest idle -> seeded RNG) keeps every candidate within the
+ * tolerance of that level's MINIMUM. Omitted = defaults (2 pp / 1 case / 5 min, whole horizon).
+ */
+export interface DispatchFairnessConfig {
+  /** Utilisation band, percentage points above the least-utilised candidate. Default 2. */
+  utilTolerancePp?: number;
+  /** Cases-completed band above the candidate with the fewest. Default 1. */
+  countTolerance?: number;
+  /** Busy-minutes band above the candidate with the least. Default 5. */
+  workloadToleranceMin?: number;
+  /** Reset the fairness counters at each working-day start instead of accruing over the whole horizon. Default false. */
+  resetDaily?: boolean;
+}
+
+/** Which cascade level narrowed the candidate set to the chosen agent. */
+export type DispatchDecidedBy = 'single' | 'util' | 'count' | 'workload' | 'idle' | 'rng';
+
+/** An agent's fairness counters at the moment of an assignment decision. */
+export interface AgentFairnessSnapshot {
+  agentId: number;
+  casesCompleted: number;
+  busyMinutes: number;
+  availableMinutes: number;
+  utilPct: number;
+}
+
+/** Per-agent fairness summary for the audit run (whole horizon, never reset by resetDaily). */
+export interface AgentFairnessRow {
+  agentId: number;
+  agentLabel: string;
+  /** Siloed: the agent's category. Pooled: null. */
+  category: string | null;
+  casesCompleted: number;
+  busyMinutes: number;
+  /** On-shift minutes the agent was available (own shift window, accrued day by day). */
+  availableMinutes: number;
+  idleMinutes: number;
+  utilPct: number;
+}
+
+export interface AgentFairnessMetrics {
+  agents: number;
+  /** max / min cases completed; null when the minimum is 0. */
+  casesMaxMinRatio: number | null;
+  casesCv: number;
+  utilCv: number;
+  /** Jain's fairness index on per-agent utilisation, 1 = perfectly even. */
+  utilJain: number;
+}
+
+export interface AgentFairnessSummary {
+  perAgent: AgentFairnessRow[];
+  overall: AgentFairnessMetrics;
+  /** Siloed runs only: metrics per category. */
+  perCategory?: Record<string, AgentFairnessMetrics>;
+  config: Required<DispatchFairnessConfig>;
+}
+
 /** One shift-start offset (minutes from that day's business open) and how many agents start there. */
 export interface ShiftSlap {
   startMinutesFromOpen: number; // on the shiftSlapMinutes grid, >= 0
@@ -302,6 +363,15 @@ export interface CaseRunResult {
   // ASA metrics
   asaDurationMinutes: number; // If started, working/wall duration from clockStart to firstStartTime; if unfinished, censored to horizonEnd
   asaCensored: boolean;
+
+  // Assignment ledger (audit run only; absent when skipCaseResultsAndTimeline). Describes the
+  // case's FIRST dispatch decision; assignedAgents lists every agent who worked it, in order.
+  assignedAgent?: number;
+  assignedAgents?: number[];
+  candidateCount?: number;
+  decidedBy?: DispatchDecidedBy;
+  chosenAtDecision?: AgentFairnessSnapshot;
+  runnerUpAtDecision?: AgentFairnessSnapshot | null;
 }
 
 export interface DESResult {
@@ -371,6 +441,9 @@ export interface DESResult {
 
   /** Echoes the shiftDistribution passed to runBackofficeDES, when one was supplied. */
   shiftDistributionUsed?: ShiftDistributionByCategory;
+
+  /** Per-agent fairness summary. Audit run only (absent when skipCaseResultsAndTimeline). */
+  agentFairness?: AgentFairnessSummary;
 }
 
 export interface StaffingRequirement {

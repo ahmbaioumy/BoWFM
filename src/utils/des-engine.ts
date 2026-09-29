@@ -4,6 +4,9 @@
  */
 
 import {
+  AgentFairnessMetrics,
+  AgentFairnessRow,
+  AgentFairnessSnapshot,
   AgentRosterSource,
   AgentSliceState,
   AgentWorkSlice,
@@ -12,6 +15,8 @@ import {
   CaseRunResult,
   CategoryConfig,
   DESResult,
+  DispatchDecidedBy,
+  DispatchFairnessConfig,
   EventType,
   LaborConfig,
   OpeningWIPCase,
@@ -283,6 +288,123 @@ function createPrng(seed: number) {
     t = Math.imul(t ^ (t >>> 15), t | 1);
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Fair agent-assignment defaults (DispatchFairnessConfig). Agent SELECTION only: which case
+ * goes next stays Earliest-Deadline-First (CaseMinHeap.compare / pickNextCase, frozen #2).
+ */
+export const DEFAULT_DISPATCH_FAIRNESS: Required<DispatchFairnessConfig> = {
+  utilTolerancePp: 2,
+  countTolerance: 1,
+  workloadToleranceMin: 5,
+  resetDaily: false,
+};
+
+/** Missing / non-finite / negative tolerances fall back to the default; resetDaily is a strict boolean. */
+export function resolveDispatchFairness(cfg?: DispatchFairnessConfig): Required<DispatchFairnessConfig> {
+  const pick = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : d);
+  return {
+    utilTolerancePp: pick(cfg?.utilTolerancePp, DEFAULT_DISPATCH_FAIRNESS.utilTolerancePp),
+    countTolerance: pick(cfg?.countTolerance, DEFAULT_DISPATCH_FAIRNESS.countTolerance),
+    workloadToleranceMin: pick(cfg?.workloadToleranceMin, DEFAULT_DISPATCH_FAIRNESS.workloadToleranceMin),
+    resetDaily: cfg?.resetDaily === true,
+  };
+}
+
+const FAIR_EPS = 1e-9;
+
+/**
+ * Picks WHICH eligible idle agent takes the next case. One shared function for the pooled and
+ * siloed dispatch paths. Operates on candidate SLOTS 0..n-1 (the caller has already dropped
+ * agents with no budget / past their own shift end and filled the per-slot metric arrays).
+ *
+ * Cascade — each level keeps only the survivors within tolerance of THAT LEVEL'S MINIMUM
+ * (anchored to the minimum, not the mean), so a tolerance band can never exclude the
+ * least-loaded agent:
+ *   1. utilisation (busy / available)  band: utilFrac (fraction, = pp / 100)
+ *   2. cases completed                  band: count
+ *   3. busy minutes                     band: workload
+ *   4. longest idle (smallest idleSinceMs), exact
+ *   5. seeded RNG among the survivors, sorted by agent id so the pick depends only on the SET
+ *      of survivors, never on idle-list order. The RNG is consumed ONLY when >1 survives.
+ * decidedBy is the first level that reduced the set to one agent ('single' = lone candidate).
+ * Linear in n; `surv` is caller-owned scratch of length >= n (no per-call allocation).
+ */
+export function selectFairAgent(
+  n: number,
+  agentIds: ArrayLike<number>,
+  util: ArrayLike<number>,
+  cases: ArrayLike<number>,
+  busy: ArrayLike<number>,
+  idleSince: ArrayLike<number>,
+  tol: { utilFrac: number; count: number; workload: number },
+  rng: () => number,
+  surv: Int32Array
+): { slot: number; decidedBy: DispatchDecidedBy } {
+  if (n <= 1) return { slot: 0, decidedBy: 'single' };
+  let m = n;
+  for (let k = 0; k < n; k++) surv[k] = k;
+
+  const narrow = (metric: ArrayLike<number>, band: number): boolean => {
+    let min = Infinity;
+    for (let k = 0; k < m; k++) {
+      const v = metric[surv[k]];
+      if (v < min) min = v;
+    }
+    const limit = min + band + FAIR_EPS;
+    let w = 0;
+    for (let k = 0; k < m; k++) {
+      const s = surv[k];
+      if (metric[s] <= limit) surv[w++] = s;
+    }
+    m = w;
+    return m === 1;
+  };
+
+  if (narrow(util, tol.utilFrac)) return { slot: surv[0], decidedBy: 'util' };
+  if (narrow(cases, tol.count)) return { slot: surv[0], decidedBy: 'count' };
+  if (narrow(busy, tol.workload)) return { slot: surv[0], decidedBy: 'workload' };
+  if (narrow(idleSince, 0)) return { slot: surv[0], decidedBy: 'idle' };
+
+  // Order survivors by agent id (insertion sort — m is small) before the seeded pick.
+  for (let a = 1; a < m; a++) {
+    const s = surv[a];
+    const id = agentIds[s];
+    let b = a - 1;
+    while (b >= 0 && agentIds[surv[b]] > id) {
+      surv[b + 1] = surv[b];
+      b--;
+    }
+    surv[b + 1] = s;
+  }
+  return { slot: surv[Math.min(m - 1, Math.floor(rng() * m))], decidedBy: 'rng' };
+}
+
+/** Population coefficient of variation (0 for an empty / zero-mean input). */
+function cvOf(values: number[]): number {
+  if (values.length === 0) return 0;
+  const mean = values.reduce((a, b) => a + b, 0) / values.length;
+  if (mean <= 0) return 0;
+  const variance = values.reduce((a, b) => a + (b - mean) * (b - mean), 0) / values.length;
+  return Math.sqrt(variance) / mean;
+}
+
+/** Fairness metrics over a set of per-agent rows (Jain's index on utilisation). */
+export function computeAgentFairnessMetrics(rows: Array<Pick<AgentFairnessRow, 'casesCompleted' | 'utilPct'>>): AgentFairnessMetrics {
+  const cases = rows.map((r) => r.casesCompleted);
+  const utils = rows.map((r) => r.utilPct);
+  const minCases = cases.length ? Math.min(...cases) : 0;
+  const maxCases = cases.length ? Math.max(...cases) : 0;
+  const sum = utils.reduce((a, b) => a + b, 0);
+  const sumSq = utils.reduce((a, b) => a + b * b, 0);
+  return {
+    agents: rows.length,
+    casesMaxMinRatio: minCases > 0 ? maxCases / minCases : null,
+    casesCv: cvOf(cases),
+    utilCv: cvOf(utils),
+    utilJain: sumSq > 0 ? (sum * sum) / (rows.length * sumSq) : 1,
   };
 }
 
@@ -579,6 +701,11 @@ export function runBackofficeDES(params: {
    * siloed queueArchitecture, or '__POOLED__' for pooled.
    */
   shiftDistribution?: ShiftDistributionByCategory;
+  /**
+   * Fair agent-assignment tolerances (see selectFairAgent). Omitted = DEFAULT_DISPATCH_FAIRNESS.
+   * Changes WHO works a case, never WHICH case goes next, and never the requirements.
+   */
+  dispatchFairness?: DispatchFairnessConfig;
 }): DESResult {
   const {
     operationalHC,
@@ -593,6 +720,7 @@ export function runBackofficeDES(params: {
     precomputedCases,
     skipCaseResultsAndTimeline = false,
     shiftDistribution,
+    dispatchFairness,
   } = params;
 
   const categoryMap = new Map<string, CategoryConfig>();
@@ -868,6 +996,90 @@ export function runBackofficeDES(params: {
     }
   }
 
+  // --- Fair agent-assignment state ---------------------------------------------------------
+  // Per-agent utilisation counters that drive selectFairAgent. Maintained in EVERY mode (gated
+  // replications included — the same agent choice must be made there as in the audit run), but
+  // the assignment LEDGER and the summary are built only when !skipCaseResultsAndTimeline.
+  // These are per-agent fairness counters, NOT the frozen occupancy metric (#3): occupancy stays
+  // demand / planned capacity; utilisation here is busy / on-shift-available for ONE agent.
+  const fairCfg = resolveDispatchFairness(dispatchFairness);
+  const fairTol = { utilFrac: fairCfg.utilTolerancePp / 100, count: fairCfg.countTolerance, workload: fairCfg.workloadToleranceMin };
+  // Separate seeded stream for tie-breaks, derived from the run seed with a fixed salt. The
+  // case-generation PRNG is a different stream and is never touched (CRN preserved).
+  const fairRng = createPrng((seed ^ 0x5f41a1) | 0);
+  // Whole-horizon totals (reported). With resetDaily the SELECTION counters are separate arrays
+  // zeroed at each agent's day start; otherwise they alias the totals.
+  const repCases = new Int32Array(operationalHC);
+  const repBusy = new Float64Array(operationalHC);
+  const selCases = fairCfg.resetDaily ? new Int32Array(operationalHC) : repCases;
+  const selBusy = fairCfg.resetDaily ? new Float64Array(operationalHC) : repBusy;
+  // Availability: full windows of past days + the current day's window, clamped by "now".
+  const availPriorMin = new Float64Array(operationalHC);
+  const availDayStartMs = new Float64Array(operationalHC).fill(Infinity);
+  const availDayWindowMin = new Float64Array(operationalHC);
+  const idleSinceMs = new Float64Array(operationalHC).fill(horizonStart.getTime());
+  function availableToday(agentId: number, nowMs: number): number {
+    const elapsed = (nowMs - availDayStartMs[agentId]) / 60000;
+    return elapsed <= 0 ? 0 : Math.min(elapsed, availDayWindowMin[agentId]);
+  }
+  function availableForSelection(agentId: number, nowMs: number): number {
+    return fairCfg.resetDaily ? availableToday(agentId, nowMs) : availPriorMin[agentId] + availableToday(agentId, nowMs);
+  }
+  // A new working day starts for these agents: fold the previous day's full window into the
+  // running total and open today's window (their own shift, clipped at business close).
+  function startAvailabilityDay(agentIds: ArrayLike<number>, nowMs: number, closeMs: number) {
+    const toClose = Math.max(0, (closeMs - nowMs) / 60000);
+    for (let k = 0; k < agentIds.length; k++) {
+      const a = agentIds[k];
+      availPriorMin[a] += availDayWindowMin[a];
+      availDayStartMs[a] = nowMs;
+      availDayWindowMin[a] = staggeredMode ? Math.min(toClose, labor.dailyProductiveHours * 60) : toClose;
+      if (fairCfg.resetDaily) {
+        selCases[a] = 0;
+        selBusy[a] = 0;
+      }
+    }
+  }
+  // Horizon opens mid-day: agents already on the floor start accruing from horizonStart.
+  if (operationalHC > 0 && isWorking(horizonStart, calendar)) {
+    const { openTime: dOpen, closeTime: dClose } = getDailyOpenClose(horizonStart, calendar);
+    for (let i = 0; i < operationalHC; i++) {
+      if (staggeredMode && agentOnShiftToday![i] !== 1) continue; // its own AgentAvailable will open the window
+      const ownEndMs = staggeredMode
+        ? Math.min(dClose.getTime(), dOpen.getTime() + (agentSlapStartMinutes[i] + labor.dailyProductiveHours * 60) * 60000)
+        : dClose.getTime();
+      availDayStartMs[i] = horizonStart.getTime();
+      availDayWindowMin[i] = Math.max(0, (ownEndMs - horizonStart.getTime()) / 60000);
+    }
+  }
+  // Scratch for selection (no per-dispatch allocation).
+  const fairIds = new Int32Array(operationalHC);
+  const fairPos = new Int32Array(operationalHC);
+  const fairUtil = new Float64Array(operationalHC);
+  const fairCases = new Float64Array(operationalHC);
+  const fairBusy = new Float64Array(operationalHC);
+  const fairIdle = new Float64Array(operationalHC);
+  const fairSurv = new Int32Array(operationalHC);
+  const fairAllIds = Int32Array.from({ length: operationalHC }, (_, i) => i);
+  // Assignment ledger (audit run only).
+  const ledger = new Map<string, {
+    assignedAgents: number[];
+    candidateCount: number;
+    decidedBy: DispatchDecidedBy;
+    chosen: AgentFairnessSnapshot;
+    runnerUp: AgentFairnessSnapshot | null;
+  }>();
+  function fairSnapshot(agentId: number, nowMs: number): AgentFairnessSnapshot {
+    const avail = availableForSelection(agentId, nowMs);
+    return {
+      agentId,
+      casesCompleted: selCases[agentId],
+      busyMinutes: selBusy[agentId],
+      availableMinutes: avail,
+      utilPct: avail > 0 ? (selBusy[agentId] / avail) * 100 : 0,
+    };
+  }
+
   // --- Business-open/close event scheduling (step 2) ---------------------------------------
   let curDay = new Date(horizonStart);
   curDay.setHours(0, 0, 0, 0);
@@ -1033,16 +1245,87 @@ export function runBackofficeDES(params: {
       if (openMinutesRemainingInDay <= 0) return;
     }
 
-    while (queue.length > 0 && idleList.length > 0) {
-      const agentId = idleList.pop()!;
-      if (agentDailyMinutesRemaining[agentId] <= 0.01) {
-        continue;
-      }
+    // Day-open instant for the per-agent shift-end bound (staggered mode only) — constant for
+    // this whole dispatch call, so resolve it once instead of per candidate.
+    const dispatchDayOpenMs = staggeredMode ? getDailyOpenClose(currTime, calendar).openTime.getTime() : 0;
 
+    while (queue.length > 0 && idleList.length > 0) {
+      // --- WHO: collect the eligible idle agents, then pick fairly (selectFairAgent) ---------
+      // Eligibility is unchanged from the old stack-pop loop: an agent with no daily budget left
+      // is dropped from the idle list (it used to be discarded when popped); an agent already past
+      // its OWN shift end (staggered) cannot take work and is skipped.
+      let nCand = 0;
+      for (let k = 0; k < idleList.length; ) {
+        const a = idleList[k];
+        if (agentDailyMinutesRemaining[a] <= 0.01) {
+          idleList[k] = idleList[idleList.length - 1];
+          idleList.pop();
+          continue;
+        }
+        if (staggeredMode) {
+          const ownEndMs = dispatchDayOpenMs + (agentSlapStartMinutes[a] + shiftLengthMinutes) * 60000;
+          if (ownEndMs - currMs <= 0) {
+            k++;
+            continue;
+          }
+        }
+        fairIds[nCand] = a;
+        fairPos[nCand] = k;
+        const avail = availableForSelection(a, currMs);
+        fairUtil[nCand] = avail > 0 ? selBusy[a] / avail : 0;
+        fairCases[nCand] = selCases[a];
+        fairBusy[nCand] = selBusy[a];
+        fairIdle[nCand] = idleSinceMs[a];
+        nCand++;
+        k++;
+      }
+      if (nCand === 0) break;
+
+      // --- WHICH: case order is untouched Earliest-Deadline-First (frozen #2) ---------------
       const assignedCase = pickNextCase(queue, currTime);
-      if (!assignedCase) {
-        idleList.push(agentId);
-        break;
+      if (!assignedCase) break;
+
+      const fair = selectFairAgent(nCand, fairIds, fairUtil, fairCases, fairBusy, fairIdle, fairTol, fairRng, fairSurv);
+      const agentId = fairIds[fair.slot];
+      if (!skipCaseResultsAndTimeline) {
+        let runnerUp: AgentFairnessSnapshot | null = null;
+        if (nCand > 1) {
+          let best = -1;
+          for (let k = 0; k < nCand; k++) {
+            if (k === fair.slot) continue;
+            if (
+              best === -1 ||
+              fairUtil[k] < fairUtil[best] ||
+              (fairUtil[k] === fairUtil[best] &&
+                (fairCases[k] < fairCases[best] ||
+                  (fairCases[k] === fairCases[best] &&
+                    (fairBusy[k] < fairBusy[best] ||
+                      (fairBusy[k] === fairBusy[best] &&
+                        (fairIdle[k] < fairIdle[best] || (fairIdle[k] === fairIdle[best] && fairIds[k] < fairIds[best])))))))
+            ) {
+              best = k;
+            }
+          }
+          runnerUp = fairSnapshot(fairIds[best], currMs);
+        }
+        const prev = ledger.get(assignedCase.id);
+        if (prev) {
+          prev.assignedAgents.push(agentId);
+        } else {
+          ledger.set(assignedCase.id, {
+            assignedAgents: [agentId],
+            candidateCount: nCand,
+            decidedBy: fair.decidedBy,
+            chosen: fairSnapshot(agentId, currMs),
+            runnerUp,
+          });
+        }
+      }
+      // Swap-remove the chosen agent from the idle list (order in the list carries no meaning now).
+      {
+        const pos = fairPos[fair.slot];
+        idleList[pos] = idleList[idleList.length - 1];
+        idleList.pop();
       }
 
       const agentBudget = agentDailyMinutesRemaining[agentId];
@@ -1175,6 +1458,7 @@ export function runBackofficeDES(params: {
   }
 
   function returnAgentToIdle(agentId: number, category?: string) {
+    idleSinceMs[agentId] = simTimeMs;
     if (!isSiloed) {
       pooledIdleAgents.push(agentId);
     } else {
@@ -1231,6 +1515,12 @@ export function runBackofficeDES(params: {
           c.completeTime = currTime;
           completedCount++;
           totalHandlingMinutes += ev.data?.workDoneMinutes || 0;
+          // Fair-assignment counters: the case is credited (once) to the agent who FINISHES it;
+          // busy minutes go to every agent who worked any part of it (see CasePark / DayClose).
+          repBusy[proc.agentIndex] += ev.data?.workDoneMinutes || 0;
+          if (selBusy !== repBusy) selBusy[proc.agentIndex] += ev.data?.workDoneMinutes || 0;
+          repCases[proc.agentIndex]++;
+          if (selCases !== repCases) selCases[proc.agentIndex]++;
 
           const hasBudget = agentDailyMinutesRemaining[proc.agentIndex] > 0.01;
           const canWork = isWorking(currTime, calendar) && hasBudget;
@@ -1255,6 +1545,8 @@ export function runBackofficeDES(params: {
           c.remainingWorkMinutes -= ev.data?.workDoneMinutes || 0;
           c.parkCount++;
           totalHandlingMinutes += ev.data?.workDoneMinutes || 0;
+          repBusy[proc.agentIndex] += ev.data?.workDoneMinutes || 0;
+          if (selBusy !== repBusy) selBusy[proc.agentIndex] += ev.data?.workDoneMinutes || 0;
 
           if (ev.data?.handover) {
             // This agent's OWN shift ended mid-case (staggeredMode) — hand the case back to
@@ -1361,6 +1653,12 @@ export function runBackofficeDES(params: {
           agentDailyMinutesRemaining.fill(dailyBudgetMinutes);
         }
 
+        // Fair-assignment availability: this cohort's working day starts now (mode-independent).
+        {
+          const { closeTime: availCloseTime } = getDailyOpenClose(currTime, calendar);
+          startAvailabilityDay(scopedAgentIds ?? fairAllIds, simTimeMs, availCloseTime.getTime());
+        }
+
         // Mark the affected cohort on-shift for today — mode-independent (never gated behind
         // skipCaseResultsAndTimeline; see the declaration of agentOnShiftToday above for why).
         if (staggeredMode) {
@@ -1406,6 +1704,7 @@ export function runBackofficeDES(params: {
               ? agentOnShiftToday![i] === 1 && !busyAgentIdsForRepop!.has(i)
               : (agentState[i] === 'idle' || skipCaseResultsAndTimeline);
             if (eligible) {
+              idleSinceMs[i] = simTimeMs;
               pooledIdleAgents.push(i);
             }
           }
@@ -1416,6 +1715,7 @@ export function runBackofficeDES(params: {
               ? agentOnShiftToday![i] === 1 && !busyAgentIdsForRepop!.has(i)
               : (agentState[i] === 'idle' || skipCaseResultsAndTimeline);
             if (eligible) {
+              idleSinceMs[i] = simTimeMs;
               const cat = agentCategoryMap.get(i) || (categories[0] ? categories[0].name : 'General');
               let list = siloedIdleAgents.get(cat);
               if (!list) {
@@ -1491,6 +1791,8 @@ export function runBackofficeDES(params: {
             c.remainingWorkMinutes = Math.max(0, c.remainingWorkMinutes - workDone);
             c.parkCount++;
             totalHandlingMinutes += workDone;
+            repBusy[proc.agentIndex] += workDone;
+            if (selBusy !== repBusy) selBusy[proc.agentIndex] += workDone;
             parkedWIP.set(c.id, c);
 
             let nextResumeTime: Date | null = null;
@@ -1673,8 +1975,50 @@ export function runBackofficeDES(params: {
         isHorizonRemainder: !isCompleted,
         asaDurationMinutes: Math.round(asaDurationMinutes * 10) / 10,
         asaCensored,
+        ...(() => {
+          const l = ledger.get(c.id);
+          return l
+            ? {
+                assignedAgent: l.assignedAgents[0],
+                assignedAgents: l.assignedAgents,
+                candidateCount: l.candidateCount,
+                decidedBy: l.decidedBy,
+                chosenAtDecision: l.chosen,
+                runnerUpAtDecision: l.runnerUp,
+              }
+            : {};
+        })(),
       });
     }
+  }
+
+  // Per-agent fairness summary (audit run only). Whole-horizon totals — never reset by
+  // resetDaily. availableMinutes accrues each agent's own on-shift window through the end of
+  // the simulated run (drain days included), so utilisation = busy / on-shift-available for the
+  // SAME span the busy minutes were worked in.
+  let agentFairness: DESResult['agentFairness'];
+  if (!skipCaseResultsAndTimeline && operationalHC > 0) {
+    const rows: AgentFairnessRow[] = [];
+    for (let i = 0; i < operationalHC; i++) {
+      const avail = availPriorMin[i] + availableToday(i, simTimeMs);
+      rows.push({
+        agentId: i,
+        agentLabel: `Agent-${i + 1}`,
+        category: isSiloed ? agentCategoryMap.get(i) ?? null : null,
+        casesCompleted: repCases[i],
+        busyMinutes: repBusy[i],
+        availableMinutes: avail,
+        idleMinutes: Math.max(0, avail - repBusy[i]),
+        utilPct: avail > 0 ? (repBusy[i] / avail) * 100 : 0,
+      });
+    }
+    let perCategory: Record<string, AgentFairnessMetrics> | undefined;
+    if (isSiloed) {
+      perCategory = {};
+      const names = Array.from(new Set(rows.map((r) => r.category).filter((c): c is string => c !== null))).sort();
+      for (const name of names) perCategory[name] = computeAgentFairnessMetrics(rows.filter((r) => r.category === name));
+    }
+    agentFairness = { perAgent: rows, overall: computeAgentFairnessMetrics(rows), perCategory, config: fairCfg };
   }
 
   // Finalize Category Stats
@@ -1777,6 +2121,7 @@ export function runBackofficeDES(params: {
     caseResults,
     agentTimeline,
     ...(shiftDistribution ? { shiftDistributionUsed: shiftDistribution } : {}),
+    ...(agentFairness ? { agentFairness } : {}),
   };
 }
 

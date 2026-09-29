@@ -2857,6 +2857,266 @@ console.log('\n--- Suite D42: workload reduction reaches the recommendation + ho
   );
 }
 
+// =================================================================
+// Suite D43 — Fair case-to-agent distribution (agent SELECTION only)
+//
+// Defect (FAIR-AGENT): the idle-agent list was a stack (`idleList.pop()`), agents returned
+// by `push`, so when spare capacity existed the agent who had JUST finished took the next
+// case and a few high-id agents did most of the work. Fix: `selectFairAgent` cascade
+// (utilisation -> case count -> busy minutes -> longest idle -> seeded RNG), tolerance bands
+// anchored to the minimum. It changes WHO works a case, never WHICH case goes next (EDF,
+// CaseMinHeap.compare untouched) and never the requirements (N_min / recommended HC / gross
+// HC) — those are pinned by D43.13 on pooled / siloed / staggered / 24x7 fixtures.
+//
+// Pre-fix, D43.1, D43.2, D43.3, D43.5, D43.6, D43.8b/c, D43.10, D43.11, D43.12 fail. D43.4,
+// D43.7, D43.8a and D43.9 are CONTROLS (properties that already held and must keep holding).
+// =================================================================
+console.log('\n--- Suite D43: fair case-to-agent distribution ---');
+{
+  const BIZ43: CalendarConfig = { workingDays: [1, 2, 3, 4, 5], dailyOpenHour: 9, dailyOpenMinute: 0, dailyCloseHour: 17, dailyCloseMinute: 0, holidays: [] };
+  const LAB43: LaborConfig = { dailyProductiveHours: 8, adherencePct: 1.0, workingDaysPerWeek: 5, offDaysPerWeek: 2, contractualHoursSource: 'derived', shifts: [] };
+  const SLA43: SLAPolicyConfig = {
+    primaryPct: 80, primaryWindow: 3, primaryUnit: 'days', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes',
+    asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'arrival',
+    occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 95,
+  };
+  const cat43 = (name: string, aht: number, priority = 1): CategoryConfig => ({ id: name, name, ahtMinutes: aht, shrinkagePct: 0.2, priority });
+  const ivs43 = (startDay: number, days: number, fromH: number, toH: number, vols: Record<string, number>, cal: CalendarConfig = BIZ43, fromMin = 0): StandardInterval[] => {
+    const out: StandardInterval[] = [];
+    let idx = 0;
+    for (let d = 0; d < days; d++) {
+      const day = new Date(2026, 9, startDay + d);
+      if (!cal.workingDays.includes(day.getDay())) continue;
+      for (let h = fromH; h < toH; h++) {
+        for (const m of [0, 30]) {
+          if (d === 0 && h === fromH && m < fromMin) continue;
+          for (const [category, volume] of Object.entries(vols)) {
+            out.push({ intervalIndex: idx++, start: new Date(2026, 9, startDay + d, h, m), end: new Date(2026, 9, startDay + d, h, m + 30), volume, category });
+          }
+        }
+      }
+    }
+    return out;
+  };
+  const scn43 = {
+    // budgets and close never bind on the first five (asserted via parkCount === 0 in D43.7)
+    seqPooled: () => ({ operationalHC: 10, intervals: ivs43(5, 5, 9, 15, { General: 6 }), openingWIP: [], categories: [cat43('General', 20)], calendar: BIZ43, labor: LAB43, sla: SLA43, seed: 42 }),
+    seqSiloed: () => ({ operationalHC: 10, intervals: ivs43(5, 5, 9, 15, { A: 4, B: 3 }), openingWIP: [], categories: [cat43('A', 20, 1), cat43('B', 30, 2)], calendar: BIZ43, labor: LAB43, sla: SLA43, seed: 42, queueArchitecture: 'siloed' as const }),
+    uniform: () => ({ operationalHC: 8, intervals: ivs43(5, 14, 9, 15, { General: 8 }), openingWIP: [], categories: [cat43('General', 20)], calendar: BIZ43, labor: LAB43, sla: SLA43, seed: 42 }),
+    mixed: () => ({ operationalHC: 10, intervals: ivs43(5, 14, 9, 15, { Quick: 12, Mid: 1, Long: 1 }), openingWIP: [], categories: [cat43('Quick', 5, 1), cat43('Mid', 45, 2), cat43('Long', 120, 3)], calendar: BIZ43, labor: LAB43, sla: SLA43, seed: 42 }),
+    siloed: () => ({ operationalHC: 12, intervals: ivs43(5, 14, 9, 15, { A: 6, B: 4 }), openingWIP: [], categories: [cat43('A', 20, 1), cat43('B', 30, 2)], calendar: BIZ43, labor: LAB43, sla: SLA43, seed: 42, queueArchitecture: 'siloed' as const }),
+    c247: () => ({ operationalHC: 8, intervals: ivs43(5, 10, 0, 24, { General: 2 }, CAL_24X7), openingWIP: [], categories: [cat43('General', 30)], calendar: CAL_24X7, labor: { ...LAB43, workingDaysPerWeek: 7, offDaysPerWeek: 0 }, sla: SLA43, seed: 42 }),
+    // staggered: 10 agents, two 6h cohorts (09:00-15:00 and 11:00-17:00); the horizon opens at
+    // 13:00 on day 1, so the late cohort has 2h MORE availability than the early one (240 vs 120
+    // min on day 1, then 360 each on day 2).
+    staggered: () => ({
+      operationalHC: 10,
+      intervals: [...ivs43(5, 1, 13, 17, { General: 8 }), ...ivs43(6, 1, 9, 17, { General: 8 })],
+      openingWIP: [], categories: [cat43('General', 20)], calendar: BIZ43, labor: { ...LAB43, dailyProductiveHours: 6 }, sla: SLA43, seed: 42,
+      shiftDistribution: { __POOLED__: { slapMinutes: 120, slaps: [{ startMinutesFromOpen: 0, agentCount: 5 }, { startMinutesFromOpen: 120, agentCount: 5 }] } } as ShiftDistributionByCategory,
+    }),
+  };
+  const STRICT = { utilTolerancePp: 0, countTolerance: 0, workloadToleranceMin: 0 };
+
+  // Per-agent stats derived from the TIMELINE only, so the same helper runs on the pre-fix engine.
+  function agentStats43(des: any) {
+    const n = des.operationalHC as number;
+    const busy = new Array<number>(n).fill(0);
+    const cases = new Array<number>(n).fill(0);
+    const cats: Array<Set<string>> = Array.from({ length: n }, () => new Set<string>());
+    const last = new Map<string, { agent: number; to: number }>();
+    for (const s of des.agentTimeline as any[]) {
+      if (s.state !== 'busy') continue;
+      busy[s.agentId] += s.minutes;
+      if (s.category) cats[s.agentId].add(s.category);
+      const to = s.to.getTime();
+      const p = last.get(s.caseId);
+      if (!p || to >= p.to) last.set(s.caseId, { agent: s.agentId, to });
+    }
+    const done = new Set((des.caseResults as any[]).filter((c) => c.isCompleted).map((c) => c.caseId));
+    for (const [cid, v] of last) if (done.has(cid)) cases[v.agent]++;
+    return { busy, cases, cats };
+  }
+  const spread43 = (a: number[]) => (a.length ? Math.max(...a) - Math.min(...a) : 0);
+  function timesDigest43(des: any): number {
+    const hs = des.horizonStart.getTime();
+    let h = 2166136261;
+    const rows = [...(des.caseResults as any[])].sort((a, b) => (a.caseId < b.caseId ? -1 : 1));
+    for (const c of rows) {
+      const s = `${c.caseId}:${c.firstStartTime ? (c.firstStartTime.getTime() - hs) / 60000 : 'x'}:${c.completeTime ? (c.completeTime.getTime() - hs) / 60000 : 'x'}`;
+      for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    }
+    return h >>> 0;
+  }
+  const run43 = (s: any, extra: any = {}) => runBackofficeDES({ ...s, ...extra });
+
+  // --- D43.1: identical agents, uniform AHT, steady below-capacity load -----------------------
+  const uni = scn43.uniform();
+  const uniStrict = run43(uni, { dispatchFairness: STRICT });
+  const uniStrictStats = agentStats43(uniStrict);
+  assert(uniStrict.completedCases === uniStrict.totalCases && uniStrict.totalCases === 960, 'D43.1a control: uniform fixture fully completes (load is below capacity)', `completed=${uniStrict.completedCases}/${uniStrict.totalCases}`);
+  assert(spread43(uniStrictStats.cases) <= 1, 'D43.1b identical agents, uniform AHT, zero tolerances: case counts differ by <= 1 (pre-fix: LIFO stack piles work on a few agents)', `cases per agent=${JSON.stringify(uniStrictStats.cases)}`);
+  const uniDefStats = agentStats43(run43(uni));
+  const uniAvailMin = 10 * 480; // 10 working days x 480 min window
+  const uniCaseBound = Math.ceil((0.02 * uniAvailMin) / 20) + 1; // default 2pp util band expressed in 20-min cases, +1 count band
+  assert(spread43(uniDefStats.cases) <= uniCaseBound, `D43.1c default tolerances: case-count spread within the tolerance-derived bound (<= ${uniCaseBound})`, `cases per agent=${JSON.stringify(uniDefStats.cases)}`);
+
+  // --- D43.2: highly variable AHT (5 / 45 / 120 min in one pooled queue) ------------------------
+  const mixedRun = run43(scn43.mixed());
+  const mixedStats = agentStats43(mixedRun);
+  const mixedAvail = 10 * 480;
+  const utilsMixed = mixedStats.busy.map((b) => (b / mixedAvail) * 100);
+  const utilBoundPp = 2 + (2 * 120 * 100) / mixedAvail; // util band + two longest-case granularity
+  assert(spread43(utilsMixed) <= utilBoundPp, `D43.2a variable AHT: per-agent utilisation spread <= ${utilBoundPp.toFixed(1)} pp (2 pp band + 2 x longest case / horizon)`, `spread=${spread43(utilsMixed).toFixed(1)}pp utils=${utilsMixed.map((u) => u.toFixed(1)).join(',')}`);
+  const meanCases = mixedStats.cases.reduce((a, b) => a + b, 0) / mixedStats.cases.length;
+  const sdCases = Math.sqrt(mixedStats.cases.reduce((a, b) => a + (b - meanCases) ** 2, 0) / mixedStats.cases.length);
+  assert(sdCases / meanCases <= 0.15, 'D43.2b variable AHT: case-count coefficient of variation stays bounded (<= 0.15)', `cv=${(sdCases / meanCases).toFixed(3)} cases=${JSON.stringify(mixedStats.cases)}`);
+
+  // --- D43.3: staggered cohorts with unequal availability ---------------------------------------
+  const stag = run43(scn43.staggered());
+  const stagStats = agentStats43(stag);
+  const early = stagStats.cases.slice(0, 5).reduce((a, b) => a + b, 0);
+  const late = stagStats.cases.slice(5).reduce((a, b) => a + b, 0);
+  const avEarly = 120 + 360; // day-1 remainder from 13:00 to its 15:00 shift end + full day 2
+  const avLate = 240 + 360;
+  const stagUtils = stagStats.busy.map((b, i) => (b / (i < 5 ? avEarly : avLate)) * 100);
+  assert(late > early && late / early <= (avLate / avEarly) * 1.25, 'D43.3a late cohort (more availability) gets more cases, roughly in proportion to its availability', `early=${early} late=${late} ratio=${(late / Math.max(1, early)).toFixed(2)} availRatio=${(avLate / avEarly).toFixed(2)}`);
+  assert(spread43(stagUtils) <= 2 + (2 * 20 * 100) / avEarly + 6, 'D43.3b staggered: utilisation (busy / own availability) stays balanced across cohorts', `spread=${spread43(stagUtils).toFixed(1)}pp utils=${stagUtils.map((u) => u.toFixed(1)).join(',')}`);
+
+  // --- D43.4: no assignment outside own shift, no budget overrun, no overlapping busy intervals ---
+  const noOverlap = (des: any) => {
+    const byAgent = new Map<number, Array<{ from: number; to: number }>>();
+    for (const s of des.agentTimeline as any[]) {
+      if (s.state !== 'busy') continue;
+      if (!byAgent.has(s.agentId)) byAgent.set(s.agentId, []);
+      byAgent.get(s.agentId)!.push({ from: s.from.getTime(), to: s.to.getTime() });
+    }
+    for (const [id, arr] of byAgent) {
+      arr.sort((a, b) => a.from - b.from);
+      for (let i = 1; i < arr.length; i++) if (arr[i].from < arr[i - 1].to - 1) return `agent ${id} overlaps at ${new Date(arr[i].from).toISOString()}`;
+    }
+    return '';
+  };
+  const c247Run = run43(scn43.c247());
+  const siloCtl = run43(scn43.siloed());
+  const overlapMsg = [noOverlap(uniStrict), noOverlap(siloCtl), noOverlap(c247Run), noOverlap(stag)].filter(Boolean).join('; ');
+  assert(overlapMsg === '', 'D43.4a control: no agent has overlapping busy intervals (pooled, siloed, 24x7, staggered)', overlapMsg);
+  let shiftViolation = '';
+  for (const s of stag.agentTimeline as any[]) {
+    if (s.state !== 'busy') continue;
+    const dayOpen = new Date(s.from); dayOpen.setHours(9, 0, 0, 0);
+    const off = s.agentId < 5 ? 0 : 120;
+    const startMin = (s.from.getTime() - dayOpen.getTime()) / 60000;
+    const endMin = (s.to.getTime() - dayOpen.getTime()) / 60000;
+    if (startMin < off - 1e-6 || endMin > off + 360 + 1e-6) { shiftViolation = `agent ${s.agentId} busy ${startMin}-${endMin} outside [${off},${off + 360}]`; break; }
+  }
+  assert(shiftViolation === '', 'D43.4b control: staggered agents are never assigned outside their own shift window', shiftViolation);
+  const invStag = verifyAgentTimelineInvariants(stag, { ...LAB43, dailyProductiveHours: 6 }, BIZ43);
+  const inv247 = verifyAgentTimelineInvariants(c247Run, { ...LAB43, workingDaysPerWeek: 7, offDaysPerWeek: 0 }, CAL_24X7);
+  assert(invStag.valid && inv247.valid, 'D43.4c control: no daily budget overrun (timeline invariants) under fair selection, staggered and 24x7', JSON.stringify([...invStag.errors, ...inv247.errors]));
+
+  // --- D43.5: determinism of the assignment ledger ----------------------------------------------
+  const ledger = (d: any) => JSON.stringify((d.caseResults as any[]).map((c) => [c.caseId, c.assignedAgent, c.candidateCount, c.decidedBy]));
+  const uniA = run43(uni), uniB = run43(uni);
+  assert(uniA.caseResults.length > 0 && uniA.caseResults.every((c: any) => c.assignedAgent !== undefined && c.decidedBy !== undefined), 'D43.5a audit run populates the assignment ledger on every case (assignedAgent, candidateCount, decidedBy)', 'ledger fields missing');
+  assert(ledger(uniA) === ledger(uniB), 'D43.5b same seed + input gives a byte-identical ledger', '');
+  const gen43 = generateCaseEntities({ intervals: uni.intervals, openingWIP: [], categories: uni.categories, calendar: BIZ43, sla: SLA43, seed: 42 });
+  const pre43 = { cases: gen43.cases, horizonStart: gen43.horizonStart, horizonEnd: gen43.horizonEnd };
+  const seedRun = (seed: number) => runBackofficeDES({ ...uni, seed, precomputedCases: pre43 });
+  const s1 = seedRun(1), s2 = seedRun(2);
+  const assigned = (d: any) => (d.caseResults as any[]).map((c) => c.assignedAgent).join(',');
+  assert(s1.caseResults.every((c: any) => c.assignedAgent !== undefined) && assigned(s1) !== assigned(s2), 'D43.5c different seeds (identical cases, CRN) break ties differently — the RNG tie-break stream is seeded, not fixed', 'assignments identical or missing');
+  assert(timesDigest43(s1) === timesDigest43(s2), 'D43.5d ...but case start/complete times are identical across seeds (agents are interchangeable; only WHO changes)', '');
+
+  // --- D43.6: agent-id invariance (no first-in-list / last-returned bias) ---------------------------
+  const perId = new Array<number>(8).fill(0);
+  for (let seed = 1; seed <= 8; seed++) {
+    const st = agentStats43(run43(uni, { seed }));
+    st.cases.forEach((c, i) => { perId[i] += c; });
+  }
+  const meanId = perId.reduce((a, b) => a + b, 0) / perId.length;
+  const idx = perId.map((_, i) => i);
+  const meanIdx = 3.5;
+  const cov = idx.reduce((a, i) => a + (i - meanIdx) * (perId[i] - meanId), 0);
+  const varI = idx.reduce((a, i) => a + (i - meanIdx) ** 2, 0);
+  const varC = perId.reduce((a, c) => a + (c - meanId) ** 2, 0);
+  const corr = varC > 0 ? cov / Math.sqrt(varI * varC) : 0;
+  const lowHalf = perId.slice(0, 4).reduce((a, b) => a + b, 0), highHalf = perId.slice(4).reduce((a, b) => a + b, 0);
+  assert(Math.abs(corr) < 0.6 && Math.abs(lowHalf - highHalf) / (lowHalf + highHalf) < 0.03, 'D43.6 agent id does not predict load over 8 seeds (|corr| < 0.6, low/high id halves within 3%)', `corr=${corr.toFixed(2)} perId=${JSON.stringify(perId)}`);
+
+  // --- D43.7: case ORDER unchanged (golden captured from the pre-change engine) ---------------------
+  // Scenarios where no daily budget or business close binds (asserted: zero parked cases), so agent
+  // choice cannot shift timing and every case's first-start / complete instant must equal the
+  // pre-change engine's. Digest = FNV-1a over `caseId:startMin:completeMin` (minutes since horizon
+  // start, timezone-independent).
+  const GOLDEN_TIMES: Record<string, number> = { seqPooled: 139882310, seqSiloed: 949840959, uniform: 3777605062, mixed: 1989481177, siloed: 3903947605 };
+  for (const [name, golden] of Object.entries(GOLDEN_TIMES)) {
+    const d = run43((scn43 as any)[name]());
+    const parkedCases = (d.caseResults as any[]).filter((c) => c.parkCount > 0).length;
+    assert(parkedCases === 0 && timesDigest43(d) === golden, `D43.7 ${name}: dispatch timing identical to the pre-change engine (EDF case order untouched)`, `parked=${parkedCases} digest=${timesDigest43(d)} golden=${golden}`);
+  }
+
+  // --- D43.8: siloed — no cross-category assignment, fairness holds within each category ---------------
+  const silo = run43(scn43.siloed(), { dispatchFairness: STRICT });
+  const siloStats = agentStats43(silo);
+  assert(siloStats.cats.every((s) => s.size <= 1), 'D43.8a control: every siloed agent works exactly one category', JSON.stringify(siloStats.cats.map((s) => [...s])));
+  const perCat = new Map<string, number[]>();
+  siloStats.cats.forEach((s, i) => { const c = [...s][0]; if (c) { if (!perCat.has(c)) perCat.set(c, []); perCat.get(c)!.push(siloStats.cases[i]); } });
+  const siloSpreads = [...perCat.entries()].map(([c, a]) => `${c}:${JSON.stringify(a)}`);
+  assert(perCat.size === 2 && [...perCat.values()].every((a) => spread43(a) <= 1), 'D43.8b siloed, zero tolerances: case counts within each category differ by <= 1', siloSpreads.join(' '));
+  const ledgerCatOk = (silo.caseResults as any[]).every((c) => {
+    const ag = c.assignedAgent as number | undefined;
+    return ag !== undefined && siloStats.cats[ag].has(c.category);
+  });
+  assert(ledgerCatOk, 'D43.8c ledger: every case is assigned to an agent of its own category (no cross-category assignment)', 'cross-category assignment or missing ledger');
+
+  // --- D43.9: monotone pass/fail across an N sweep (control) -----------------------------------------
+  const tightSla: SLAPolicyConfig = { ...SLA43, primaryWindow: 4, primaryUnit: 'hours' };
+  const sweepBase = { ...uni, sla: tightSla };
+  const sweepGen = generateCaseEntities({ intervals: sweepBase.intervals, openingWIP: [], categories: sweepBase.categories, calendar: BIZ43, sla: tightSla, seed: 42 });
+  const sweepPre = { cases: sweepGen.cases, horizonStart: sweepGen.horizonStart, horizonEnd: sweepGen.horizonEnd };
+  for (const [label, extra] of [['default', {}], ['strict', { dispatchFairness: STRICT }]] as const) {
+    const flags: boolean[] = [];
+    for (let n = 1; n <= 14; n++) flags.push(runBackofficeDES({ ...sweepBase, operationalHC: n, precomputedCases: sweepPre, skipCaseResultsAndTimeline: true, ...extra }).allPassed);
+    const firstPass = flags.indexOf(true);
+    assert(firstPass > 0 && flags.slice(firstPass).every(Boolean), `D43.9 (${label}) pass/fail is monotone in N over 1..14 and the sweep straddles the threshold`, flags.map((f) => (f ? 'P' : 'F')).join(''));
+  }
+
+  // --- D43.10: agentFairness summary: present in audit runs only, reconciles with totals ------------------
+  const af = (uniA as any).agentFairness;
+  assert(!!af && Array.isArray(af.perAgent) && af.perAgent.length === 8, 'D43.10a audit run exposes agentFairness with one row per agent', `got ${JSON.stringify(af)?.slice(0, 120)}`);
+  if (af) {
+    const sumCases = af.perAgent.reduce((a: number, r: any) => a + r.casesCompleted, 0);
+    const sumBusy = af.perAgent.reduce((a: number, r: any) => a + r.busyMinutes, 0);
+    assert(sumCases === uniA.completedCases && Math.abs(sumBusy - uniA.totalHandlingMinutes) <= Math.max(0.01, uniA.totalHandlingMinutes * 1e-5), 'D43.10b per-agent completed cases sum to completedCases and busy minutes to totalHandlingMinutes (no split-case double-count)', `cases=${sumCases}/${uniA.completedCases} busy=${sumBusy}/${uniA.totalHandlingMinutes}`);
+    const busyFromTimeline = agentStats43(uniA).busy;
+    assert(af.perAgent.every((r: any, i: number) => Math.abs(r.busyMinutes - busyFromTimeline[i]) < 0.01), 'D43.10c per-agent busy minutes match the agent timeline exactly', '');
+  }
+  const leanRun = runBackofficeDES({ ...uni, skipCaseResultsAndTimeline: true });
+  assert((leanRun as any).agentFairness === undefined && leanRun.caseResults.length === 0, 'D43.10d gated (skip) runs stay lean: no fairness ledger or summary', '');
+
+  // --- D43.11: tolerance semantics --------------------------------------------------------------------------
+  const wide = run43(uni, { dispatchFairness: { utilTolerancePp: 1000, countTolerance: 1e9, workloadToleranceMin: 1e9 } });
+  const decided = new Set((wide.caseResults as any[]).map((c) => c.decidedBy));
+  assert(decided.size > 0 && !decided.has(undefined) && [...decided].every((d) => d === 'single' || d === 'idle' || d === 'rng'), 'D43.11a with every band wide open, only the idle-time / RNG levels (or a lone candidate) can decide', JSON.stringify([...decided]));
+  const strictDecided = new Set((uniStrict.caseResults as any[]).map((c) => c.decidedBy));
+  assert(strictDecided.has('util') || strictDecided.has('count'), 'D43.11b with zero bands the utilisation/count levels do decide', JSON.stringify([...strictDecided]));
+  const explicitDefaults = run43(uni, { dispatchFairness: { utilTolerancePp: 2, countTolerance: 1, workloadToleranceMin: 5 } });
+  assert(uniA.caseResults.every((c: any) => c.assignedAgent !== undefined) && ledger(explicitDefaults) === ledger(uniA), 'D43.11c omitted dispatchFairness == documented defaults (2 pp / 1 case / 5 min): identical ledger', '');
+
+  // --- D43.12: sync/async threading (D11 drift guard) --------------------------------------------------------
+  const hcSrc = readFileSync(join(resolve(import.meta.dirname, '..'), 'src', 'utils', 'hc-search.ts'), 'utf-8');
+  const syncBody = hcSrc.slice(hcSrc.indexOf('export function searchOptimalHC('), hcSrc.indexOf('export async function searchOptimalHCAsync('));
+  const asyncBody = hcSrc.slice(hcSrc.indexOf('export async function searchOptimalHCAsync('));
+  const cnt = (s: string, re: RegExp) => (s.match(re) || []).length;
+  assert(cnt(syncBody, /dispatchFairness/g) > 0 && cnt(syncBody, /dispatchFairness/g) === cnt(asyncBody, /dispatchFairness/g), 'D43.12a searchOptimalHC and searchOptimalHCAsync thread dispatchFairness identically (same number of references)', `sync=${cnt(syncBody, /dispatchFairness/g)} async=${cnt(asyncBody, /dispatchFairness/g)}`);
+  const searchParams43 = { intervals: ivs43(5, 5, 9, 15, { General: 6 }), openingWIP: [], categories: [cat43('General', 20)], calendar: BIZ43, labor: LAB43, sla: SLA43, seed: 42, userMaxHC: 30, replications: 4, dispatchFairness: { utilTolerancePp: 5, countTolerance: 2, workloadToleranceMin: 10 } };
+  const fSync = searchOptimalHC(searchParams43);
+  const fAsync = await searchOptimalHCAsync(searchParams43);
+  assert(fSync.recommendedHC === fAsync.recommendedHC && fSync.staffing?.grossHCTotal === fAsync.staffing?.grossHCTotal, 'D43.12b sync/async parity with a custom dispatchFairness', `sync=${fSync.recommendedHC} async=${fAsync.recommendedHC}`);
+  assert(cnt(hcSrc, /dispatchFairness/g) >= 8, 'D43.12c hc-search.ts passes dispatchFairness to every runBackofficeDES call site (sync + async, gated + audit + failedN)', `references=${cnt(hcSrc, /dispatchFairness/g)}`);
+}
+
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');
