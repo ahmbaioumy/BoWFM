@@ -70,8 +70,9 @@ of that level's minimum:
 Siloed agents choose only within their own category. Counters run in every replication; the
 per-case assignment ledger and per-agent summary exist only in the single-seed audit run.
 It changes *who* works a case, not *which* case goes next, and not the requirements — N_min is
-unchanged, and recommended HC moved by +1 in 2 of 125 measured scenarios (the coverage gate
-counts remaining budget as presence). A Labor-tab button turns it off (`dispatchFairness.enabled
+unchanged, and recommended HC is identical to the legacy pick in all 18 re-measured scenarios (the earlier +1 in 2 of 125 was the
+budget-as-presence coverage artefact, removed 2026-09-29: coverage presence is now the agent's own shift window
+[start, start + shiftLength), independent of remaining budget). A Labor-tab button turns it off (`dispatchFairness.enabled
 = false`), which restores the legacy pick and the original numbers exactly. Note: once a daily
 budget binds, a different agent choice can shift when cases are parked, so case *timing* may
 differ; case *order* is identical while budgets do not bind.

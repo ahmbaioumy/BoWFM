@@ -303,9 +303,26 @@ optional). `dispatchFairness.enabled` (default true; the Labor-tab button) false
 exact legacy LIFO pick through one branch in that step. `dispatchFairness` is threaded through
 both `searchOptimalHC` and `searchOptimalHCAsync` (D43.12 pins the reference counts). Counters
 run in gated replications too; the assignment ledger and `DESResult.agentFairness` exist only
-in the audit run. Requirements: N_min unchanged; recommended HC +1 on 2 of 125 measured
-scenarios (coverage gate, PRD L17); OFF reproduces the original numbers (D43.13/14). Agent busy-ness is the
+in the audit run. Requirements: N_min unchanged; recommended HC identical to OFF on all 18
+re-measured scenarios since C6 (the earlier +1 on 2 of 125 was the coverage-proxy artefact,
+PRD L17); OFF reproduces the original numbers (D43.13/14). Agent busy-ness is the
 mode-independent `agentActive` flag (D44: no double-booking in gated runs).
+
+**Coverage presence (C6, 2026-09-29; D46).** `countAgentsOnShiftNow(atMs)` in `des-engine.ts` is the
+single presence function the coverage sampler uses: an agent is present iff
+`dayOpen + startOffset <= t < dayOpen + startOffset + shiftLength` (`shiftLength =
+dailyProductiveHours x 60`, un-adhered; uniform = offset 0). Budget and busy state play no part;
+budget still caps work and dispatch is unchanged. A uniform shift shorter than the open day is
+therefore a structural coverage failure that only staggered starts fix. A `CoverageCheck` marker
+event fires at the uniform shift end so the sampler sees the drop. In the search, `planCoverageRepair`
+(shared by `searchOptimalHC` and `searchOptimalHCAsync`) evaluates coverage repair FIRST when
+uniform is structurally unable to pass (non-24x7, floor on, shift < window) and reports a failing
+repair as that N's result without evaluating uniform; `coverageRepairReasons` records per-N repair
+failure reasons so `resolveCoverageBinding` labels `min_coverage` from the path that actually
+decided N-1 (repair when available, else uniform). Measured: real files -30 to -40% recommended HC,
+samples unchanged, fair ON == OFF everywhere. This changes the definition of coverage, which is not
+one of CLAUDE.md's ten frozen decisions; it is recorded here (not added to CLAUDE.md) and flagged for
+the owner to promote if wanted.
 
 > **This walk-down is only valid if pass/fail is monotone in N.** See §6.10 — that assumption
 > was violated by a real defect, and the guard against it must not be removed. DES pass/fail
@@ -677,6 +694,18 @@ seat.
 
 **Never revert this to largest-remainder.**
 
+### 6.11 Min-coverage presence = the agent's own shift window
+`des-engine.ts` `countAgentsOnShiftNow`; suite D46. Frozen 2026-09-29.
+*Looks like:* an agent whose productive budget is spent can't work, so shouldn't count as
+covering the queue.
+*Actually:* agents work fixed contiguous shifts; adherence loss is small logouts spread through
+the day, not leaving early. Counting "budget remaining" as presence made every shift end
+`(1 - adherence) x shiftLength` minutes early, so coverage repair always failed and real-file
+recommendations inflated 30–40%. Presence is `dayOpen + startOffset <= t < dayOpen +
+startOffset + dailyProductiveHours*60`; adherence still reduces daily productive time.
+
+**Never reintroduce budget-as-presence.**
+
 ---
 
 ## 7. Domain primer
@@ -789,14 +818,14 @@ Keep full precision through the chain. Compare floats with a tolerance, never `=
 ### 9.1 Two suites, both must be green
 
 ```bash
-npm test              # all suites — 500 checks + artifact freshness
+npm test              # all suites — 613 checks + artifact freshness
 npm run test:sizing   # sizing-chain suite only (faster)
 ```
 
 | Suite | Tests | Covers |
 |---|---|---|
 | `scripts/verify-fixes.mts` | 174 | Legacy regression — CSV/date parsing, calendar arithmetic, CRN consistency, occupancy semantics, artifact integrity, analytical infeasibility diagnosis, 24x7 midnight budget accounting. **Treat as append-only.** |
-| `scripts/verify-sizing-fixes.mts` | 280 | Sizing chain — `D1` working-day counting, `D3` apportionment monotonicity, `D7` staffing-chain integrity, `D9` offline enforcement, `D20`-`D26` deadline-coverage shift placement (Stage 3a: valid-slap enumeration, no-regression, greedy monotonicity/optimality, I1/I2 invariants under staggering, seed determinism, positive control, I4 occupancy-ceiling regression guard), `D27` day-open telemetry off-by-one, `D28` fast-path/full-path attainment agreement, `D29` I5 per-agent stagger-offset compliance (check #8), `D30`/`D31` shift-end enforcement + in-flight case handover, `D32`/`D33` minimum-coverage floor + flag-independent redistribution repair, `D34` N_sla walk-down safety-net fix, `D35` adherence/capacity conflation closed-form pin, `D36` 24×7 coverage-gate regression fix, `D37` real 24×7 multi-start (staggering, shift-end, coverage repair), `D38` "exact minimum" wording pin (source-text based — the message is unreachable dead code), `D39` empirical monotonicity sweep for the uniform-only predicate (N=1..25, no violation found), `D40` extra-OFF coverage-ratio fix (ratio table sweep + integer-exactness cases — see §6.4a), `D41` non-blocking DQ warnings for zero off-days / override-vs-horizon scale / calendar-open days with no uploaded rows |
+| `scripts/verify-sizing-fixes.mts` | 393 | Sizing chain — `D1` working-day counting, `D3` apportionment monotonicity, `D7` staffing-chain integrity, `D9` offline enforcement, `D20`-`D26` deadline-coverage shift placement (Stage 3a: valid-slap enumeration, no-regression, greedy monotonicity/optimality, I1/I2 invariants under staggering, seed determinism, positive control, I4 occupancy-ceiling regression guard), `D27` day-open telemetry off-by-one, `D28` fast-path/full-path attainment agreement, `D29` I5 per-agent stagger-offset compliance (check #8), `D30`/`D31` shift-end enforcement + in-flight case handover, `D32`/`D33` minimum-coverage floor + flag-independent redistribution repair, `D34` N_sla walk-down safety-net fix, `D35` adherence/capacity conflation closed-form pin, `D36` 24×7 coverage-gate regression fix, `D37` real 24×7 multi-start (staggering, shift-end, coverage repair), `D38` "exact minimum" wording pin (source-text based — the message is unreachable dead code), `D39` empirical monotonicity sweep for the uniform-only predicate (N=1..25, no violation found), `D40` extra-OFF coverage-ratio fix (ratio table sweep + integer-exactness cases — see §6.4a), `D41` non-blocking DQ warnings for zero off-days / override-vs-horizon scale / calendar-open days with no uploaded rows |
 | `scripts/verify-agent-analytics.mts` | 46 | `EX` export timestamps == on-screen formatter (fixed UTC+4 TZ, midnight-crossing, real engine rows, static no-`toISOString` guard); `AA` agent analytics (reconciles to `completedCases`/`totalHandlingMinutes`/`agentFairness`, date/category/agent filters, determinism, late cohorts) |
 | `scripts/check-artifact-freshness.mts` | gate | Fails if `BoWFM.html` is missing or older than `src/` / build inputs (`npm run check:artifact`) |
 
@@ -938,15 +967,17 @@ Work down the chain in order — the fault is almost always upstream of where it
 | **Fair agent assignment** (`selectFairAgent`; D43 suite; 2026-09-29) — added, not a defect fix | Idle agents were a LIFO stack, so the agent who had just finished took the next case: on real data max/min cases per agent 5.5x–16x (pooled), utilisation CV 0.50–0.79. Now about 1.02x and CV 0.02. Cost: recommended HC +1 on 2 of 125 scenarios (coverage gate); toggle OFF restores the original numbers exactly. Search runtime -31% on the real files after removing a per-event Set allocation in the coverage sampler. |
 | **Gated-run 24x7 midnight double-booking** (`GATED-DOUBLE-BOOK`; `des-engine.ts` daily idle rebuild; D44 suite; 2026-09-29) | The rebuild used `agentState[i] === 'idle' || skipCaseResultsAndTimeline`; agentState is audit-only, so in gated replications every unstaggered 24x7 agent re-entered the idle pool at midnight, even mid-case, and could be assigned a second case (measured 44–224 double bookings per fixture; gated and audit results diverged, e.g. SLA 97.2% vs 96.7%). Now eligibility = `agentActive` flag (mode-independent, shared by both branches and the coverage sampler). Measured over all 125 scenarios: N_min / recommended HC / gross HC unchanged, non-24x7 results byte-identical; only a 24x7 infeasible trusted-source case shows different gated ASA numbers. New invariant: `DESResult.doubleBookedAssignments === 0`. |
 | **Per-agent available-minutes double-count on day 1** (`AVAIL-DOUBLE-COUNT`; `startAvailabilityDay` in `des-engine.ts`; D45 suite; 2026-09-29) | When the horizon opened exactly at an agent's shift start, the horizon-start pre-seed and the same-instant AgentAvailable event both counted day 1 (e.g. 5280 vs 4800 min), inflating Results availability/utilisation and skewing the fair cascade. One accrual path now (fold skipped if the window already opened at that instant). Gated over all measured scenarios: no HC change on suites or `test_files`; `support` sample pooled 28/35 (never released) → 27/34 = the original. Also extracted, no behaviour change: `buildSampleDataset`/`nextMondayAt8` (`src/utils/sample-data.ts`) and the `DEFAULT_*` config (`src/utils/default-config.ts`); the D45.2 test pins all three samples' HC with a fixed Monday. |
+| **Coverage presence was budget-remaining, not the shift window** (C6; `countAgentsOnShiftNow` in `des-engine.ts`, `planCoverageRepair` / `resolveCoverageBinding` in `hc-search.ts`; D46 suite; 2026-09-29) | At adherence 0.98 the daily budget (470.4 min) is shorter than a 480-min shift, so a saturated late cohort 'left' before close and coverage repair never passed on real files; uniform passed only by over-hiring. Presence is now inside the agent's own shift window (budget still caps work). Real-file recommendations fell 30-40% (`AJM_Simu` pooled 104→64, `EGS_Only` 81→49), samples unchanged, N_min unchanged, fair ON == OFF. Also: `min_coverage` binding label (repair path judged, not uniform), repair-first search when uniform is structurally unable to pass. D33.7 (coverage now costs +1 head on the 9h/14h fixture), D21.4 and D43.13 expectations updated with written reasons. |
 
 ### Known drift risks — the things most likely to bite you
 
-**The minimum-coverage gate drives the recommended HC on real data (PRD P0-5).** Unstaggered
-"on shift" = budget remaining > 0.01 or busy. Measured 2026-09-29: swapping it for a gap rule
-(a zero-coverage gap must last at least the shortest AHT to count) cuts recommended HC 30–40%
-on `test_files/` (103→64, 96→66, 81→49), with fair and legacy assignment agreeing exactly.
-Fair assignment exposes the sensitivity (+1 HC on 2 of 125 scenarios). Do not change the gate
-without an explicit decision.
+**Coverage presence is the agent's own shift window (resolved 2026-09-29, formerly PRD P0-5).**
+The old proxy ("budget remaining > 0.01 or busy") made every shift leave `(1 - adherence) x
+shiftLength` minutes early, inflating real-file recommendations 30-40%. Do not reintroduce budget
+as presence. Consequence to remember: on real files the binding label stays the SLA gate, because
+the staggered repair layout coverage forces costs some SLA (e.g. `AJM_Simu` pooled: SLA alone at ~61 with
+an unconstrained layout, 64 recommended); `min_coverage` appears when repair is unavailable at N-1 or
+fails coverage alone.
 
 **The two search implementations can still diverge (D11), even though the one measured
 instance of it is fixed.** `searchOptimalHC` (sync) previously contained an off-hours
