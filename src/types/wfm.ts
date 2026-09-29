@@ -294,6 +294,7 @@ export type EventType =
   | 'CaseResume'
   | 'AgentAvailable'
   | 'ShiftEnd'
+  | 'CoverageCheck'
   | 'DayClose'
   | 'SimulationEnd'
   | 'CaseArrival'
@@ -556,7 +557,7 @@ export interface HCSearchOutput {
   infeasibleReason?: string;
   isInfeasibleAdjacent?: boolean;
   infeasibleAdjacentWarning?: string;
-  bindingConstraintType?: 'statistical_primary_sla' | 'bo_asa_cap' | 'occupancy_cap' | 'analytical_baseline' | 'category_aht_exceeds_window';
+  bindingConstraintType?: 'statistical_primary_sla' | 'bo_asa_cap' | 'occupancy_cap' | 'analytical_baseline' | 'category_aht_exceeds_window' | 'min_coverage';
   bindingConstraintDescription?: string;
   searchHistory: Array<{
     hc: number;

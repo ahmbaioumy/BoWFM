@@ -1151,7 +1151,11 @@ console.log('\n--- Suite D21: No-regression when shiftPlacementEnabled is off/om
   assert(runOmitted.recommendedHC === runFalse.recommendedHC, 'D21.1 omitted vs explicit-false give identical recommendedHC', `omitted=${runOmitted.recommendedHC} false=${runFalse.recommendedHC}`);
   assert(runOmitted.finalDESResult?.primaryAchievedPct === runFalse.finalDESResult?.primaryAchievedPct, 'D21.2 identical primaryAchievedPct', `${runOmitted.finalDESResult?.primaryAchievedPct} vs ${runFalse.finalDESResult?.primaryAchievedPct}`);
   assert(runOmitted.shiftPlacement === undefined, 'D21.3 shiftPlacement telemetry is undefined when the flag is off', `got ${JSON.stringify(runOmitted.shiftPlacement)}`);
-  assert(runOmitted.finalDESResult?.shiftDistributionUsed === undefined, 'D21.4 finalDESResult.shiftDistributionUsed is undefined when the flag is off', `got ${JSON.stringify(runOmitted.finalDESResult?.shiftDistributionUsed)}`);
+  // D21.4 (updated 2026-09-29, C6): with the flag off this was undefined because coverage repair could never pass (a saturated
+  // late cohort 'left' early under budget-as-presence). Presence is now the agent's own shift window, so the unconditional
+  // coverage repair passes and its minimal layout (<= 2 start times, no SLA-driven placement) is legitimately reported.
+  const usedOmitted = runOmitted.finalDESResult?.shiftDistributionUsed;
+  assert(JSON.stringify(usedOmitted) === JSON.stringify(runFalse.finalDESResult?.shiftDistributionUsed) && (usedOmitted === undefined || (usedOmitted.__POOLED__?.slaps.length ?? 99) <= 2), 'D21.4 flag off: shiftDistributionUsed is identical omitted vs false and is at most the minimal coverage-repair layout', `got ${JSON.stringify(usedOmitted)}`);
   assert(runOmitted.occupancyFeasibleFloor !== undefined && runOmitted.occupancyFeasibleFloor > 0, 'D21.5 occupancyFeasibleFloor is still always computed (diagnostic-only, independent of the flag)', `got ${runOmitted.occupancyFeasibleFloor}`);
 
   // A plain runBackofficeDES call with no shiftDistribution argument must be byte-identical
@@ -2062,8 +2066,12 @@ console.log('\n--- Suite D33: Phase 3 — coverage repair (redistribution before
   });
   assert(searchNoCoverage.recommendedHC !== null, 'D33.6 setup: the same scenario passes SLA on uniform alone once coverage is disabled (isolates the coverage cost)', `recommendedHC=${searchNoCoverage.recommendedHC}`);
   assert(
-    searchWithCoverage.recommendedHC === searchNoCoverage.recommendedHC,
-    'D33.7 coverage costs ZERO extra headcount here — same recommendation with the floor on vs off (redistribution, not more heads)',
+    // Updated 2026-09-29 (C6): was 'costs ZERO extra headcount' (21 = 21). That equality relied on budget-as-presence:
+    // uniform 9h shifts 'covered' a 14h window because agents with unused budget counted as present until close. Fixed
+    // shifts cannot cover 14h from one start, so one seat moves to a late cohort and stops serving the morning peak:
+    // coverage costs exactly one extra head here (22 vs 21).
+    searchWithCoverage.recommendedHC === (searchNoCoverage.recommendedHC ?? -1) + 1,
+    'D33.7 coverage costs exactly ONE extra head here (a 9h shift cannot cover a 14h window; one seat moves to a late cohort)',
     `withCoverage=${searchWithCoverage.recommendedHC} withoutCoverage=${searchNoCoverage.recommendedHC}`
   );
 
@@ -3121,9 +3129,9 @@ console.log('\n--- Suite D43: fair case-to-agent distribution ---');
   // --- D43.13: HC-pinning regression + the OFF toggle reproduces the ORIGINAL (pre-fairness) numbers --
   // Fixtures: pooled (D42.1: 20% workload reduction), siloed, staggered (shift placement), 24x7.
   // OFF = legacy LIFO pick = the pre-change values (captured before the engine edit; D42.1 13/16).
-  // ON (default) = the values gated on 2026-09-29: identical everywhere except D42.1 (+1 HC) because
-  // the coverage gate counts 'budget remaining' as presence and fair dispatch drains every agent's
-  // budget together at ~98% occupancy (PRD §10). N_min is identical in both modes.
+  // ON (default) = identical to OFF on every fixture. Until C6 (2026-09-29) D42.1 was +1 HC under ON (14/18): the coverage
+  // gate counted 'budget remaining' as presence and fair dispatch drains every agent's budget together at ~98% occupancy.
+  // Presence is now the shift window, so that artefact is gone. N_min is identical in both modes.
   {
     const slaPin: SLAPolicyConfig = { ...SLA43, primaryPct: 80, primaryWindow: 8, primaryUnit: 'hours', occupancyCapPct: 85 };
     const d42Iv: StandardInterval[] = [];
@@ -3134,7 +3142,7 @@ console.log('\n--- Suite D43: fair case-to-agent distribution ---');
       for (let h = 9; h < 17; h++) d42Iv.push({ intervalIndex: ixp++, start: new Date(2026, 2, 2 + d, h, 0), end: new Date(2026, 2, 2 + d, h + 1, 0), category: 'General', volume: 30 });
     }
     const pinFx: Record<string, { p: any; nMin: number; off: [number, number]; on: [number, number] }> = {
-      pooled: { p: { intervals: d42Iv, openingWIP: [], categories: [{ ...cat43('General', 30), shrinkagePct: 0.2 }], calendar: BIZ43, labor: { ...LAB43, dailyProductiveHours: 7.5 }, sla: { ...slaPin, workloadReductionEnabled: true, workloadReductionPct: 20 }, seed: 12345, userMaxHC: 200, replications: 8 }, nMin: 12, off: [13, 16], on: [14, 18] },
+      pooled: { p: { intervals: d42Iv, openingWIP: [], categories: [{ ...cat43('General', 30), shrinkagePct: 0.2 }], calendar: BIZ43, labor: { ...LAB43, dailyProductiveHours: 7.5 }, sla: { ...slaPin, workloadReductionEnabled: true, workloadReductionPct: 20 }, seed: 12345, userMaxHC: 200, replications: 8 }, nMin: 12, off: [13, 16], on: [13, 16] },
       siloed: { p: { intervals: ivs43(5, 10, 9, 17, { A: 10, B: 6 }), openingWIP: [], categories: [cat43('A', 20, 1), cat43('B', 30, 2)], calendar: BIZ43, labor: LAB43, sla: slaPin, seed: 42, userMaxHC: 60, replications: 5, queueArchitecture: 'siloed' }, nMin: 12, off: [13, 16], on: [13, 16] },
       staggered: { p: { intervals: ivs43(5, 10, 9, 17, { General: 8 }), openingWIP: [], categories: [cat43('General', 20)], calendar: BIZ43, labor: { ...LAB43, dailyProductiveHours: 6, shiftPlacementEnabled: true, shiftSlapMinutes: 30 }, sla: { ...slaPin, primaryWindow: 4 }, seed: 42, userMaxHC: 60, replications: 5 }, nMin: 7, off: [8, 10], on: [8, 10] },
       c247: { p: { intervals: ivs43(5, 10, 0, 24, { General: 2 }, CAL_24X7), openingWIP: [], categories: [cat43('General', 30)], calendar: CAL_24X7, labor: { ...LAB43, workingDaysPerWeek: 7, offDaysPerWeek: 0 }, sla: slaPin, seed: 42, userMaxHC: 60, replications: 5 }, nMin: 6, off: [6, 8], on: [6, 8] },
@@ -3340,6 +3348,98 @@ console.log('\n--- Suite D45: availableMinutes accrual ---');
         assert(got.join('/') === pin.join('/'), `D45.2 sample ${type} ${arch}, fair ${enabled ? 'ON' : 'OFF'}: N_min/rec/gross = ${pin.join('/')}`, `got ${got.join('/')}`);
       }
     }
+  }
+}
+
+// =================================================================
+// Suite D46 — Coverage presence = inside the agent's own shift window (C6, PRD P0-5)
+//
+// Coverage used to count an agent present only while daily BUDGET remained (or while busy).
+// At adherence 0.98 the budget (470.4 min) is shorter than the 480-min shift, so a saturated
+// late cohort "left" ~9.6 min before close and repair could never pass on real files. Presence
+// is now purely clock-based: dayOpen + startOffset <= t < dayOpen + startOffset + shiftLength.
+// Budget still caps WORK; dispatch eligibility is unchanged.
+// Pre-fix: D46.1, D46.2b, D46.3 (structural) and D46.4 (binding label) fail; D46.5 and the
+// 'control' assertions hold before and after (staggered presence already honoured the shift window).
+// =================================================================
+console.log('\n--- Suite D46: coverage presence = own shift window ---');
+{
+  const WIN46: CalendarConfig = { workingDays: [1, 2, 3, 4, 5], dailyOpenHour: 8, dailyOpenMinute: 0, dailyCloseHour: 22, dailyCloseMinute: 0, holidays: [] };
+  const lab46 = (hours: number, adh: number): LaborConfig => ({ dailyProductiveHours: hours, adherencePct: adh, workingDaysPerWeek: 5, offDaysPerWeek: 2, contractualHoursSource: 'derived', shifts: [] });
+  const sla46: SLAPolicyConfig = {
+    primaryPct: 50, primaryWindow: 5, primaryUnit: 'days', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes',
+    asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'arrival',
+    occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 95, minCoverageEnabled: true, minAgentsPerInterval: 1,
+  };
+  const cat46: CategoryConfig[] = [{ id: 'g', name: 'General', ahtMinutes: 20, shrinkagePct: 0.2, priority: 1 }];
+  const iv46 = (days: number, volPerHalfHour: number): StandardInterval[] => {
+    const out: StandardInterval[] = [];
+    let idx = 0;
+    for (let d = 0; d < days; d++) {
+      for (let h = 8; h < 22; h++) for (const m of [0, 30]) {
+        out.push({ intervalIndex: idx++, start: new Date(2026, 9, 5 + d, h, m), end: new Date(2026, 9, 5 + d, h, m + 30), volume: volPerHalfHour, category: 'General' });
+      }
+    }
+    return out;
+  };
+  const dist46 = (counts: Array<[number, number]>): ShiftDistributionByCategory => ({ __POOLED__: { slapMinutes: 30, slaps: counts.map(([o, n]) => ({ startMinutesFromOpen: o, agentCount: n })) } });
+  const run46 = (hc: number, hours: number, adh: number, vol: number, sd?: ShiftDistributionByCategory) =>
+    runBackofficeDES({ operationalHC: hc, intervals: iv46(3, vol), openingWIP: [], categories: cat46, calendar: WIN46, labor: lab46(hours, adh), sla: sla46, seed: 42, shiftDistribution: sd });
+
+  // D46.1: a saturated late-cohort agent whose budget ends before its shift end is still present
+  // until shift end. 2 agents (08:00 + 14:00 cohorts), adherence 0.98 => budget 470.4 < 480 shift;
+  // 56 cases/day of 20 min saturates both, so the late agent works until its budget is gone.
+  {
+    const r = run46(2, 8, 0.98, 2, dist46([[0, 1], [360, 1]]));
+    assert(r.minCoverageObserved >= 1 && r.passesCoverage, 'D46.1 late-cohort agent whose budget ends before shift end still counts present until shift end (min coverage >= 1)', `minCoverageObserved=${r.minCoverageObserved}`);
+  }
+
+  // D46.2: adherence 0.98, 14h window: repair distribution passes coverage at N=2 (the minimum
+  // that can tile the window), and the search recommends a plausible N.
+  {
+    const cw = undefined;
+    const repair = buildCoverageRepairDistribution({ n: 2, calendar: WIN46, labor: lab46(8, 0.98), minAgentsPerInterval: 1, queueArchitecture: 'pooled', categoryWorkloadMinutes: cw });
+    assert(!!repair, 'D46.2a repair distribution exists at N=2', '');
+    const r = run46(2, 8, 0.98, 2, repair ?? undefined);
+    assert(r.passesCoverage, 'D46.2b saturated adherence-0.98 fixture: repair at N=2 passes coverage', `minCoverageObserved=${r.minCoverageObserved}`);
+    const s = searchOptimalHC({ intervals: iv46(3, 2), openingWIP: [], categories: cat46, calendar: WIN46, labor: lab46(8, 0.98), sla: sla46, seed: 42, userMaxHC: 40, replications: 3 });
+    assert(s.recommendedHC !== null && s.recommendedHC <= 4, 'D46.2c control: search recommends a plausible N (<= 4) for a 2-agent-sized load with coverage on', `recommendedHC=${s.recommendedHC}`);
+  }
+
+  // D46.3: uniform placement with an open day longer than the shift fails coverage for any N
+  // (structural) — extra agents cannot manufacture presence after the shift ends.
+  for (const hc of [1, 5, 20]) {
+    const r = run46(hc, 8, 1.0, 0.2);
+    assert(r.minCoverageObserved === 0 && !r.passesCoverage, `D46.3 uniform, 14h window, 8h shift, N=${hc}: coverage fails structurally (agents gone after 16:00)`, `minCoverageObserved=${r.minCoverageObserved}`);
+  }
+  {
+    const r = run46(5, 14, 1.0, 0.2);
+    assert(r.minCoverageObserved >= 1 && r.passesCoverage, 'D46.3b control: uniform with shift length == open day passes coverage', `minCoverageObserved=${r.minCoverageObserved}`);
+  }
+
+  // D46.4: when coverage is what sets the recommendation, the binding constraint says so — in both
+  // the sync and async search. Load is light enough that SLA/occupancy pass at N=1 (analytic floor
+  // 1) but one agent can never cover a 14h window with 8h shifts, so the search must climb to 2 and
+  // the N-1 candidate fails coverage ONLY. Controls: SLA-driven and floor-driven runs keep their labels.
+  {
+    const p46 = { openingWIP: [], categories: cat46, calendar: WIN46, labor: lab46(8, 0.98), sla: sla46, seed: 42, userMaxHC: 40, replications: 3 };
+    const syncCov = searchOptimalHC({ ...p46, intervals: iv46(3, 0.2) });
+    const asyncCov = await searchOptimalHCAsync({ ...p46, intervals: iv46(3, 0.2) });
+    assert(syncCov.recommendedHC === 2 && syncCov.bindingConstraintType === 'min_coverage' && /coverage/i.test(syncCov.bindingConstraintDescription ?? ''), 'D46.4a sync: coverage-bound recommendation (N=2, floor 1) reports bindingConstraintType min_coverage', `rec=${syncCov.recommendedHC} type=${syncCov.bindingConstraintType} desc=${syncCov.bindingConstraintDescription}`);
+    assert(asyncCov.recommendedHC === syncCov.recommendedHC && asyncCov.bindingConstraintType === syncCov.bindingConstraintType && asyncCov.bindingConstraintDescription === syncCov.bindingConstraintDescription, 'D46.4b async reports the identical recommendation and binding constraint', `async type=${asyncCov.bindingConstraintType}`);
+    const noCov = searchOptimalHC({ ...p46, intervals: iv46(3, 0.2), sla: { ...sla46, minCoverageEnabled: false } });
+    assert(noCov.recommendedHC === 1 && noCov.bindingConstraintType !== 'min_coverage', 'D46.4c control: coverage gate OFF recommends N=1 and never reports min_coverage', `rec=${noCov.recommendedHC} type=${noCov.bindingConstraintType}`);
+    const floorBound = searchOptimalHC({ ...p46, intervals: iv46(3, 4) });
+    assert(floorBound.bindingConstraintType !== 'min_coverage', 'D46.4d control: load-driven recommendation is not labelled coverage', `type=${floorBound.bindingConstraintType}`);
+  }
+
+  // D46.5: an agent outside its shift window is never counted present, even with budget left.
+  // 6h shifts at 08:00 and 16:00 leave 14:00-16:00 uncovered (light demand, budgets untouched).
+  {
+    const r = run46(2, 6, 1.0, 0.2, dist46([[0, 1], [480, 1]]));
+    assert(r.minCoverageObserved === 0 && !r.passesCoverage, 'D46.5 gap between two 6h shifts (14:00-16:00) is a coverage failure even though both agents have unused budget', `minCoverageObserved=${r.minCoverageObserved}`);
+    const ok = run46(3, 6, 1.0, 0.2, dist46([[0, 1], [360, 1], [480, 1]]));
+    assert(ok.minCoverageObserved >= 1 && ok.passesCoverage, 'D46.5b control: 6h shifts at 08:00, 14:00 and 16:00 tile 08:00-22:00 without a gap', `minCoverageObserved=${ok.minCoverageObserved}`);
   }
 }
 

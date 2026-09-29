@@ -853,6 +853,31 @@ isn't; only its use as the seat-to-roster multiplier was the bug.
 
 ---
 
+### 2026-09-29 (C6) - Coverage presence = the agent's own shift window (supersedes the budget-as-presence entries above)
+
+The coverage entries above describe presence as "has daily budget remaining, or is busy". That was an
+implementation proxy, and it was wrong on real data: at adherence 0.98 the daily budget (470.4 min) is
+shorter than a 480-min shift, so a saturated late cohort "left" up to 9.6 min before close, coverage
+repair never passed, and uniform passed only by hiring enough agents that some kept unused budget until
+close. Measured recommended HC (pooled): `AJM_Simu.csv` 104 with SLA alone needing ~61.
+
+Fix (user-confirmed facts: agents work fixed contiguous shifts, no split shifts; the 08:00-22:00 window is
+real; adherence only shrinks the productive budget inside the shift; the queue is never unattended in
+business hours): an agent is present iff `dayOpen + startOffset <= t < dayOpen + startOffset +
+dailyProductiveHours x 60`, regardless of remaining budget or busy state (`countAgentsOnShiftNow`,
+`des-engine.ts`). Uniform layouts use offset 0, so a shift shorter than the open day fails coverage for any
+N and only staggered starts (coverage repair) can pass. Dispatch eligibility and the work budget are
+unchanged. Results (same seeds; N_min identical everywhere): `AJM_Only` 12->7 / 11->7, `AJM_Simu` 104->64 /
+96->66, `EGS_Only` 81->49 / 77->50, `EGS_Only` with 20% reduction 52->31 / 52->35 (pooled / siloed); the three
+built-in samples unchanged; fair vs legacy assignment identical in all 18 re-measured scenarios (the old
+"+1 from fairness" was this artefact). One suite fixture (D33: 9h shift, 14h window) now needs +1 head with
+coverage on (22 vs 21): one seat must move to a late cohort, which is the honest cost of fixed shifts.
+Side fixes: the binding label reports `min_coverage` when the path that decided N-1 (repair, else uniform)
+failed coverage alone; the search evaluates repair first when uniform is structurally unable to pass.
+Known caveat: on real files the forced staggered layout costs some SLA, so their label remains the SLA gate.
+
+---
+
 ## C. Retracted after measurement
 
 ### D2 — "Occupancy window mismatch" — **NOT A BUG**
