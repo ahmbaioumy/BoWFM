@@ -17,8 +17,28 @@
  *   Utilisation %         = busy / scheduled. Lower than occupancy whenever an agent has scheduled
  *                           time outside the queue. NOT the Fairness panel figure: that panel's
  *                           "Occupancy %" is busy / on-shift available.
- *   Cases handled         = cases the agent COMPLETED (credited to the finisher, never double-counted).
- *   Cases touched         = distinct cases the agent worked on (>= handled; includes split cases).
+ *   Work share            = PRIMARY load metric. For every COMPLETED case, each agent earns
+ *                           (that agent's busy minutes on the case) / (all agents' busy minutes on the
+ *                           case), attributed to the calendar date of each busy slice (so date filters
+ *                           work). A case worked by one agent is worth 1.0 to that agent; a case split
+ *                           A:30 min / B:10 min is 0.75 / 0.25. Sum over ALL agents == finished cases
+ *                           (within float tolerance; a completed case with zero busy minutes credits 1.0
+ *                           to its finisher on its completion date). The denominator always uses every
+ *                           agent's slices on the case, even when an agent/date filter hides some of them.
+ *                           Unfinished cases carry no work share (their busy time still counts in Busy).
+ *   Finished              = cases the agent COMPLETED (finisher credit, never double-counted). It credits
+ *                           the WHOLE case to whoever closes it, so a late-shift agent who only resumes
+ *                           parked cases looks overloaded here — use Work share for load.
+ *   Cases touched         = distinct cases the agent worked on (>= finished; includes split cases).
+ *   Avg handle            = busy minutes the agent spent on COMPLETED cases / work share. It is the
+ *                           share-weighted mean total handle time of the cases the agent contributed to
+ *                           (a sole worker of a case gets that case's full handle time). null when the
+ *                           agent has no work share in range.
+ *   Cases per day         = work share / on-shift days.
+ *   Single-agent cover    = intervals (>= 30 business minutes, inside opening hours) where exactly one
+ *                           agent was in the queue on shift; reported per agent with the cases it
+ *                           finished during those intervals that other agents had started.
+ *   Fairness / heatmap / trend / team average all use work share (not finisher credit).
  *
  * Per-date bucketing uses calendar.ts (formatDate24 / getDailyOpenClose / workingDuration /
  * addWorkingTime) — no hand-rolled Date arithmetic.
@@ -54,7 +74,12 @@ export interface AgentAnalyticsRow {
   cohortStart: string;
   /** True when the agent's cohort starts later than the earliest cohort in the run. */
   isLateShift: boolean;
+  /** Finisher credit: whole cases this agent completed ("Finished" in the UI). */
   casesCompleted: number;
+  /** Fractional work share on completed cases in range (see file header). Primary load metric. */
+  workShare: number;
+  /** Busy minutes spent on completed cases in range (numerator of avg handle). */
+  workBusyMin: number;
   casesTouched: number;
   /** Touched cases another agent finished (excludes cases still unfinished at run end). */
   casesHandedOver: number;
@@ -68,11 +93,11 @@ export interface AgentAnalyticsRow {
   scheduledMin: number;
   occupancyPct: number;
   utilisationPct: number;
-  /** Busy minutes per case touched; null when nothing touched. */
+  /** workBusyMin / workShare; null when workShare is 0. */
   avgHandleMin: number | null;
   /** Days in range on which the agent was on shift. */
   onShiftDays: number;
-  /** casesCompleted / onShiftDays; null when never on shift in range. */
+  /** workShare / onShiftDays; null when never on shift in range. */
   casesPerDay: number | null;
   /** Busy minutes inside the last `lateWindowMin` of each business day. */
   lateWindowBusyMin: number;
@@ -80,11 +105,25 @@ export interface AgentAnalyticsRow {
 
 export interface AgentTrendPoint {
   date: string;
-  /** Mean cases completed per on-shift agent. */
+  /** Mean work share per on-shift agent. */
   avg: number;
   min: number;
   max: number;
   agents: number;
+}
+
+export interface SoloCover {
+  agentId: number;
+  agentLabel: string;
+  /** Most common solo window, 'HH:mm'. */
+  windowStart: string;
+  windowEnd: string;
+  /** Distinct dates with a solo window. */
+  days: number;
+  /** Total business minutes as the only agent in the queue. */
+  minutes: number;
+  /** Cases this agent finished inside its solo windows that another agent had started. */
+  finishedFromOthers: number;
 }
 
 export interface AgentAnalytics {
@@ -94,14 +133,20 @@ export interface AgentAnalytics {
   dates: string[];
   categories: string[];
   rows: AgentAnalyticsRow[];
-  /** matrix[rowIdx][dateIdx] = cases completed by that agent on that date. */
+  /** matrix[rowIdx][dateIdx] = work share earned by that agent on that date. */
   matrix: number[][];
   /** onShiftMatrix[rowIdx][dateIdx] = the agent was on shift that date. */
   onShiftMatrix: boolean[][];
   trend: AgentTrendPoint[];
+  /** Intervals where exactly one agent was in the queue while open (date range only; agents kept by the filter). */
+  soloCover: SoloCover[];
   team: {
     agents: number;
+    /** Finisher-credit total (whole cases). */
     casesTotal: number;
+    /** Work-share total across the kept agents. */
+    workShareTotal: number;
+    /** Mean work share per kept agent (the team-average line). */
     casesMean: number;
     busyMin: number;
     availableMin: number;
@@ -116,6 +161,7 @@ export interface AgentAnalytics {
 }
 
 export const DEFAULT_LATE_WINDOW_MIN = 120;
+const SOLO_MIN_MINUTES = 30;
 
 interface Cell {
   busy: number;
@@ -230,19 +276,97 @@ export function computeAgentAnalytics(input: {
     return out;
   };
 
-  // ---- Completer of each finished case ----------------------------------------------------
+  // ---- Completer + work share of each finished case ---------------------------------------
+  // Slices are grouped per case over ALL agents/dates so the share denominator is the case's true
+  // total busy time; the filters only decide which shares are counted.
+  const busyByCase = new Map<string, typeof slices>();
+  for (const s of slices) {
+    if (s.state !== 'busy' || !s.caseId) continue;
+    let l = busyByCase.get(s.caseId);
+    if (!l) busyByCase.set(s.caseId, (l = []));
+    l.push(s);
+  }
   const completerOf = new Map<string, number>();
   const completedByAgentDate = new Map<number, Map<string, number>>();
+  const workShareByAgentDate = new Map<number, Map<string, number>>();
+  const workBusyByAgent = new Map<number, number>();
+  const addTo = (m: Map<number, Map<string, number>>, id: number, d: string, v: number) => {
+    let inner = m.get(id);
+    if (!inner) m.set(id, (inner = new Map()));
+    inner.set(d, (inner.get(d) || 0) + v);
+  };
+  const finishedByAgent = new Map<number, Array<{ t: number; fromOthers: boolean }>>();
   for (const c of des.caseResults ?? []) {
     if (!c.isCompleted || !c.completeTime || !c.assignedAgents || c.assignedAgents.length === 0) continue;
     const who = c.assignedAgents[c.assignedAgents.length - 1];
     completerOf.set(c.caseId, who);
+    const cs = busyByCase.get(c.caseId) ?? [];
+    let fl = finishedByAgent.get(who);
+    if (!fl) finishedByAgent.set(who, (fl = []));
+    fl.push({ t: c.completeTime.getTime(), fromOthers: cs.some((x) => x.agentId !== who) });
     if (catFilter && c.category !== catFilter) continue;
     const d = formatDate24(c.completeTime);
-    if (!inRange(d)) continue;
-    let m = completedByAgentDate.get(who);
-    if (!m) completedByAgentDate.set(who, (m = new Map()));
-    m.set(d, (m.get(d) || 0) + 1);
+    if (inRange(d)) addTo(completedByAgentDate, who, d, 1);
+    let total = 0;
+    for (const x of cs) total += x.minutes;
+    if (total > 0) {
+      for (const x of cs) {
+        const xd = formatDate24(x.from);
+        if (!inRange(xd)) continue;
+        addTo(workShareByAgentDate, x.agentId, xd, x.minutes / total);
+        workBusyByAgent.set(x.agentId, (workBusyByAgent.get(x.agentId) || 0) + x.minutes);
+      }
+    } else if (inRange(d)) {
+      addTo(workShareByAgentDate, who, d, 1);
+    }
+  }
+
+  // ---- Single-agent cover -----------------------------------------------------------------
+  const soloAcc = new Map<number, { dates: Set<string>; minutes: number; finished: number; windows: Map<string, number> }>();
+  if (new Set(slices.filter((s) => s.state !== 'off').map((s) => s.agentId)).size > 1) {
+    const evByDate = new Map<string, Array<{ t: number; agent: number; delta: number }>>();
+    for (const s of slices) {
+      if (s.state === 'off') continue;
+      const d = formatDate24(s.from);
+      if (!inRange(d)) continue;
+      let l = evByDate.get(d);
+      if (!l) evByDate.set(d, (l = []));
+      l.push({ t: s.from.getTime(), agent: s.agentId, delta: 1 }, { t: s.to.getTime(), agent: s.agentId, delta: -1 });
+    }
+    for (const d of Array.from(evByDate.keys()).sort()) {
+      const evs = evByDate.get(d)!.sort((a, b) => a.t - b.t || a.delta - b.delta || a.agent - b.agent);
+      const first = new Date(evs[0].t);
+      if (!isWorkingDay(first, calendar)) continue;
+      const { openTime, closeTime } = getDailyOpenClose(first, calendar);
+      const active = new Map<number, number>();
+      const segs: Array<{ agent: number; from: number; to: number }> = [];
+      for (let i = 0; i < evs.length; i++) {
+        const e = evs[i];
+        active.set(e.agent, (active.get(e.agent) || 0) + e.delta);
+        if (active.get(e.agent) === 0) active.delete(e.agent);
+        const nextT = i + 1 < evs.length ? evs[i + 1].t : e.t;
+        if (active.size === 1 && nextT > e.t) {
+          const agent = active.keys().next().value as number;
+          const lo = Math.max(e.t, openTime.getTime());
+          const hi = Math.min(nextT, closeTime.getTime());
+          if (hi <= lo) continue;
+          const last = segs[segs.length - 1];
+          if (last && last.agent === agent && last.to === lo) last.to = hi;
+          else segs.push({ agent, from: lo, to: hi });
+        }
+      }
+      for (const sg of segs) {
+        const mins = workingDuration(new Date(sg.from), new Date(sg.to), calendar);
+        if (mins < SOLO_MIN_MINUTES) continue;
+        let acc = soloAcc.get(sg.agent);
+        if (!acc) soloAcc.set(sg.agent, (acc = { dates: new Set(), minutes: 0, finished: 0, windows: new Map() }));
+        acc.dates.add(d);
+        acc.minutes += mins;
+        for (const f of finishedByAgent.get(sg.agent) ?? []) if (f.fromOthers && f.t > sg.from && f.t <= sg.to) acc.finished++;
+        const key = `${formatTime24(new Date(sg.from), '')}|${formatTime24(new Date(sg.to), '')}`;
+        acc.windows.set(key, (acc.windows.get(key) || 0) + 1);
+      }
+    }
   }
 
   // ---- Per agent-date accumulation --------------------------------------------------------
@@ -319,6 +443,9 @@ export function computeAgentAnalytics(input: {
     // Filtered-category runs: idle is category-agnostic, so keep available/scheduled as recorded.
     let completed = 0;
     for (const n of (completedByAgentDate.get(id) ?? new Map<string, number>()).values()) completed += n;
+    let workShare = 0;
+    for (const n of (workShareByAgentDate.get(id) ?? new Map<string, number>()).values()) workShare += n;
+    const workBusy = workBusyByAgent.get(id) ?? 0;
     let handedOver = 0;
     for (const cid of touched) {
       const who = completerOf.get(cid);
@@ -332,6 +459,8 @@ export function computeAgentAnalytics(input: {
       cohortStart: cohort || '-',
       isLateShift: lateShift,
       casesCompleted: completed,
+      workShare,
+      workBusyMin: workBusy,
       casesTouched: touched.size,
       casesHandedOver: handedOver,
       resumes,
@@ -341,9 +470,9 @@ export function computeAgentAnalytics(input: {
       scheduledMin: Math.max(scheduled, available),
       occupancyPct: pct(busy, available),
       utilisationPct: pct(busy, Math.max(scheduled, available)),
-      avgHandleMin: touched.size > 0 ? busy / touched.size : null,
+      avgHandleMin: workShare > 1e-9 ? workBusy / workShare : null,
       onShiftDays,
-      casesPerDay: onShiftDays > 0 ? completed / onShiftDays : null,
+      casesPerDay: onShiftDays > 0 ? workShare / onShiftDays : null,
       lateWindowBusyMin: lateBusy,
     });
   }
@@ -352,7 +481,7 @@ export function computeAgentAnalytics(input: {
   const matrix: number[][] = [];
   const onShiftMatrix: boolean[][] = [];
   for (const r of rows) {
-    const cm = completedByAgentDate.get(r.agentId) ?? new Map<string, number>();
+    const cm = workShareByAgentDate.get(r.agentId) ?? new Map<string, number>();
     const bd = cells.get(r.agentId) ?? new Map<string, Cell>();
     matrix.push(dates.map((d) => cm.get(d) ?? 0));
     onShiftMatrix.push(dates.map((d) => bd.get(d)?.hasOnShift === true));
@@ -374,6 +503,23 @@ export function computeAgentAnalytics(input: {
   });
 
   const casesTotal = rows.reduce((a, r) => a + r.casesCompleted, 0);
+  const workShareTotal = rows.reduce((a, r) => a + r.workShare, 0);
+  const keptSet = new Set(keptIds);
+  const soloCover: SoloCover[] = [];
+  for (const [agentId, acc] of soloAcc) {
+    if (!keptSet.has(agentId)) continue;
+    let best = '';
+    let bestN = -1;
+    for (const [k, n] of [...acc.windows.entries()].sort((x, y) => x[0].localeCompare(y[0]))) {
+      if (n > bestN) {
+        best = k;
+        bestN = n;
+      }
+    }
+    const [ws, we] = best.split('|');
+    soloCover.push({ agentId, agentLabel: `Agent-${agentId + 1}`, windowStart: ws, windowEnd: we, days: acc.dates.size, minutes: acc.minutes, finishedFromOthers: acc.finished });
+  }
+  soloCover.sort((x, y) => y.finishedFromOthers - x.finishedFromOthers || y.minutes - x.minutes || x.agentId - y.agentId);
   const busyMin = rows.reduce((a, r) => a + r.busyMin, 0);
   const availableMin = rows.reduce((a, r) => a + r.availableMin, 0);
   const scheduledMin = rows.reduce((a, r) => a + r.scheduledMin, 0);
@@ -386,26 +532,28 @@ export function computeAgentAnalytics(input: {
     matrix,
     onShiftMatrix,
     trend,
+    soloCover,
     team: {
       agents: rows.length,
       casesTotal,
-      casesMean: rows.length > 0 ? casesTotal / rows.length : 0,
+      workShareTotal,
+      casesMean: rows.length > 0 ? workShareTotal / rows.length : 0,
       busyMin,
       availableMin,
       scheduledMin,
       occupancyPct: pct(busyMin, availableMin),
       utilisationPct: pct(busyMin, scheduledMin),
     },
-    fairness: computeAgentFairnessMetrics(rows.map((r) => ({ casesCompleted: r.casesCompleted, utilPct: r.utilisationPct }))),
+    fairness: computeAgentFairnessMetrics(rows.map((r) => ({ casesCompleted: r.workShare, utilPct: r.utilisationPct }))),
     lateWindowMin,
     earliestCohortStart,
     filter: { fromDate, toDate, category: catFilter, agentIds: agentSel ? [...agentSel].sort((a, b) => a - b) : [] },
   };
 }
 
-/** Deterministic ordering for the "cases per agent" bar chart: cases desc, then agent id asc. */
+/** Deterministic ordering for the "cases per agent" bar chart: work share desc, then agent id asc. */
 export function sortRowsByCases(rows: AgentAnalyticsRow[]): AgentAnalyticsRow[] {
-  return [...rows].sort((a, b) => b.casesCompleted - a.casesCompleted || a.agentId - b.agentId);
+  return [...rows].sort((a, b) => b.workShare - a.workShare || a.agentId - b.agentId);
 }
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
@@ -427,16 +575,23 @@ export function buildAgentInsights(a: AgentAnalytics, opts: { bandPct?: number }
     const low = sorted[sorted.length - 1];
     const dev = (n: number) => (mean > 0 ? ((n - mean) / mean) * 100 : 0);
     out.push(
-      `Most loaded: ${top.agentLabel} completed ${top.casesCompleted} cases (${signed(dev(top.casesCompleted))} vs the team average of ${r1(mean)}). ` +
-        `Least loaded: ${low.agentLabel} completed ${low.casesCompleted} (${signed(dev(low.casesCompleted))}).`
+      `Most loaded: ${top.agentLabel} has a work share of ${r1(top.workShare)} cases (${signed(dev(top.workShare))} vs the team average of ${r1(mean)}). ` +
+        `Least loaded: ${low.agentLabel} at ${r1(low.workShare)} (${signed(dev(low.workShare))}).`
     );
-    const outside = sorted.filter((r) => Math.abs(dev(r.casesCompleted)) > band);
+    const outside = sorted.filter((r) => Math.abs(dev(r.workShare)) > band);
     if (outside.length === 0) {
       out.push(`Every selected agent is within +/-${band}% of the average cases per agent.`);
     } else {
-      const names = outside.slice(0, 6).map((r) => `${r.agentLabel} (${signed(dev(r.casesCompleted))})`).join(', ');
+      const names = outside.slice(0, 6).map((r) => `${r.agentLabel} (${signed(dev(r.workShare))})`).join(', ');
       out.push(`${outside.length} of ${rows.length} agents are outside +/-${band}% of the average cases per agent: ${names}${outside.length > 6 ? ', ...' : ''}.`);
     }
+  }
+
+  for (const sc of a.soloCover.slice(0, 2)) {
+    out.push(
+      `${sc.agentLabel} is the only agent on shift ${sc.windowStart}-${sc.windowEnd} (${sc.days} day${sc.days === 1 ? '' : 's'}) and finishes ${sc.finishedFromOthers} cases started by others, ` +
+        `so its "Finished" count overstates its load; the work-share figures split those cases by minutes worked.`
+    );
   }
 
   const occSorted = [...rows].sort((x, y) => y.occupancyPct - x.occupancyPct || x.agentId - y.agentId);
@@ -467,7 +622,7 @@ export function buildAgentInsights(a: AgentAnalytics, opts: { bandPct?: number }
   const fm = a.fairness;
   if (rows.length > 1) {
     out.push(
-      `Fairness over this range: cases max/min ${fm.casesMaxMinRatio === null ? 'n/a (an agent has 0)' : fm.casesMaxMinRatio.toFixed(2)}, ` +
+      `Fairness over this range (on work share): cases max/min ${fm.casesMaxMinRatio === null ? 'n/a (an agent has 0)' : fm.casesMaxMinRatio.toFixed(2)}, ` +
         `cases CV ${fm.casesCv.toFixed(3)}, utilisation CV ${fm.utilCv.toFixed(3)}, Jain's index ${fm.utilJain.toFixed(3)} (1 = perfectly even).`
     );
   }
@@ -486,7 +641,8 @@ export function buildAgentAnalyticsExport(a: AgentAnalytics): {
     Category: r.category,
     'Shift Start': r.cohortStart,
     'Late Coverage Shift': r.isLateShift ? 'YES' : 'NO',
-    'Cases Completed': r.casesCompleted,
+    'Work Share (cases)': rd(r.workShare),
+    'Cases Finished': r.casesCompleted,
     'Cases Touched': r.casesTouched,
     'Cases Handed Over': r.casesHandedOver,
     Resumes: r.resumes,
@@ -496,22 +652,22 @@ export function buildAgentAnalyticsExport(a: AgentAnalytics): {
     'Scheduled (min)': rd(r.scheduledMin),
     'Occupancy %': rd(r.occupancyPct),
     'Utilisation %': rd(r.utilisationPct),
-    'Avg Handle (min per case touched)': rd(r.avgHandleMin),
+    'Avg Handle (min per case of work share)': rd(r.avgHandleMin),
     'On-Shift Days': r.onShiftDays,
     'Cases per Day': rd(r.casesPerDay),
   }));
   const matrix = a.rows.map((r, i) => {
     const row: Record<string, unknown> = { Agent: r.agentLabel, Category: r.category };
     a.dates.forEach((d, j) => {
-      row[d] = a.onShiftMatrix[i][j] ? a.matrix[i][j] : '';
+      row[d] = a.onShiftMatrix[i][j] ? Math.round(a.matrix[i][j] * 100) / 100 : '';
     });
-    row['Total'] = r.casesCompleted;
+    row['Total'] = rd(r.workShare);
     return row;
   });
   return {
     sections: [
       { title: `Agent summary - ${scope}`, rows: summary },
-      { title: 'Cases completed per agent per date (blank = not on shift)', rows: matrix },
+      { title: 'Work share (cases) per agent per date (blank = not on shift)', rows: matrix },
     ],
   };
 }
