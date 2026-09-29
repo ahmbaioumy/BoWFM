@@ -5,6 +5,7 @@
 
 import React, { useState } from 'react';
 import { exportToExcelCSV } from '../utils/csv-parser';
+import { formatDateTime24 } from '../utils/calendar';
 import { Download, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 
 export interface ColumnDef<T> {
@@ -67,7 +68,7 @@ export function DataTable<T extends Record<string, any>>({
       const q = searchTerm.toLowerCase();
       const match = Object.values(row).some((val) => {
         if (val === null || val === undefined) return false;
-        if (val instanceof Date) return val.toISOString().toLowerCase().includes(q);
+        if (val instanceof Date) return formatDateTime24(val, '').toLowerCase().includes(q);
         return String(val).toLowerCase().includes(q);
       });
       if (!match) return false;
@@ -117,7 +118,7 @@ export function DataTable<T extends Record<string, any>>({
       const r: Record<string, any> = {};
       columns.forEach((col) => {
         const val = row[col.key];
-        r[col.header] = val instanceof Date ? val.toISOString() : val;
+        r[col.header] = val; // exporter renders Dates via formatDateTime24 (local, matches screen)
       });
       return r;
     });
