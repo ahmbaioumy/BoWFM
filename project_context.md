@@ -694,6 +694,18 @@ seat.
 
 **Never revert this to largest-remainder.**
 
+### 6.11 Min-coverage presence = the agent's own shift window
+`des-engine.ts` `countAgentsOnShiftNow`; suite D46. Frozen 2026-09-29.
+*Looks like:* an agent whose productive budget is spent can't work, so shouldn't count as
+covering the queue.
+*Actually:* agents work fixed contiguous shifts; adherence loss is small logouts spread through
+the day, not leaving early. Counting "budget remaining" as presence made every shift end
+`(1 - adherence) x shiftLength` minutes early, so coverage repair always failed and real-file
+recommendations inflated 30–40%. Presence is `dayOpen + startOffset <= t < dayOpen +
+startOffset + dailyProductiveHours*60`; adherence still reduces daily productive time.
+
+**Never reintroduce budget-as-presence.**
+
 ---
 
 ## 7. Domain primer

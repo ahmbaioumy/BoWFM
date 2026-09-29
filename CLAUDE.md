@@ -88,6 +88,12 @@ shrinkage gross-up, harmonic blend, sum, then a single `round`).
     Webster–Sainte-Laguë method). Never replace with largest-remainder/Hamilton — that
     reintroduces the apportionment Alabama paradox (measured: 14 reversals over N=1..200,
     including a silo dropping to zero agents).
+11. **Min-coverage presence = the agent's own fixed shift window** (`countAgentsOnShiftNow`,
+    `des-engine.ts`; suite D46). An agent counts as present iff
+    `dayOpen + startOffset <= t < dayOpen + startOffset + dailyProductiveHours*60`. Never
+    reintroduce "productive budget remaining" as presence — adherence loss shortens the
+    budget, so every shift "left" early and real-file recommendations inflated 30–40%.
+    Adherence stays a reduction of daily productive time, not a gap at shift start/end.
 
 | Concern | File |
 |---|---|
