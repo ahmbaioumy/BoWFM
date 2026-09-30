@@ -184,6 +184,14 @@ export interface SLAPolicyConfig {
   minCoverageEnabled?: boolean;
   /** Minimum on-shift agents required at every open business interval; clamped [0, N]. Default 1. */
   minAgentsPerInterval?: number;
+  /**
+   * Workload floor. undefined/true (default) = N_min and N_occ are the hard search floor
+   * (frozen decision #4, byte-for-byte today's behavior). false = the search may walk below
+   * both floors while every SLA/occupancy/coverage gate still passes (approved 2026-09-30);
+   * such results can rely on backlog draining after the horizon and are flagged via
+   * HCSearchOutput.belowWorkloadFloor.
+   */
+  nMinFloorEnabled?: boolean;
 }
 
 export interface SimulationParams {
@@ -545,6 +553,47 @@ export interface SearchProgressState {
   currentMessage: string;
 }
 
+/** Business-hours coverage of one roster against the workload it must absorb (Stage 3b). */
+export interface CoverageSummary {
+  /** Fewest agents on shift at the start of any open bucket. */
+  minOnShift: number;
+  /** % of open buckets where agents on shift >= agents the released work needs. */
+  bucketsMeetingNeedPct: number;
+  /** Sum over open buckets of max(0, required - onShift) x bucket hours. */
+  gapAgentHours: number;
+}
+
+/** Stage 3b roster polish outcome: the roster is re-spread at the SAME headcount. */
+export interface RosterPolishResult {
+  /**
+   * adopted: the full target coverage roster passed every CI gate and covers business hours better.
+   * adopted_partial: only k of K one-agent moves toward the target pass every gate (movesApplied / movesTotal).
+   * kept_current_failed_gate: even the first move broke a gate; current roster kept.
+   * no_improvement: no re-spread covers business hours better (higher minOnShift, tie lower gap).
+   * not_applicable: no staggering possible (24x7, shift >= open window, no valid starts, no demand).
+   */
+  status: 'adopted' | 'adopted_partial' | 'kept_current_failed_gate' | 'no_improvement' | 'not_applicable';
+  /** Failing constraint(s) of the smallest failing step (partial / kept_current); explanation for not_applicable. */
+  reason?: string;
+  /** Moves of one agent from the current roster toward the target that were adopted / are needed to reach it. */
+  movesApplied?: number;
+  movesTotal?: number;
+  current: CoverageSummary;
+  /** Coverage of the adopted roster (or of the target roster when nothing was adopted). */
+  polished?: CoverageSummary;
+  /** Median primary SLA % across replications at the recommended HC, current / polished roster. */
+  currentSlaPct?: number;
+  polishedSlaPct?: number;
+  /** Per open bucket (bucketStartMinutes = minutes after business open). Full precision. */
+  profile: {
+    bucketMinutes: number;
+    bucketStartMinutes: number[];
+    requiredAgents: number[];
+    onShiftCurrent: number[];
+    onShiftPolished?: number[];
+  };
+}
+
 export interface HCSearchOutput {
   nMinAnalytical: number;
   nMinBeforeReduction?: number; // N_min as it would have been WITHOUT the reduction — display/audit only, never a search input.
@@ -580,6 +629,11 @@ export interface HCSearchOutput {
    * floor unconditionally — these are additional, non-authoritative diagnostics.
    */
   occupancyFeasibleFloor?: number; // N_occ: smallest N whose occupancy can be ≤ cap
+  /**
+   * True iff the workload floor toggle is OFF and recommendedHC sits below max(N_min, N_occ).
+   * Such a team only clears the gates by draining backlog after the planning horizon — optimistic.
+   */
+  belowWorkloadFloor?: boolean;
   shiftPlacement?: {
     enabledForRun: boolean;
     slapMinutes: number;
@@ -588,6 +642,8 @@ export interface HCSearchOutput {
     /** The distribution actually used for the returned recommendedHC, if placement won. */
     winningDistribution?: ShiftDistributionByCategory;
   };
+  /** Stage 3b roster polish. Present only when shift placement is ON and a HC was recommended. */
+  rosterPolish?: RosterPolishResult;
 }
 
 export interface SensitivityScenario {

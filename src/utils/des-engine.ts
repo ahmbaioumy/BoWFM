@@ -14,6 +14,7 @@ import {
   CaseEntity,
   CaseRunResult,
   CategoryConfig,
+  ClockStartPolicy,
   DESResult,
   DispatchDecidedBy,
   DispatchFairnessConfig,
@@ -483,6 +484,17 @@ export function allocateAgentsToCategories(
   return seats;
 }
 
+/**
+ * Effective SLA clock-start policy — the single source of truth (approved 2026-09-30).
+ * A business-time SLA only runs while the business is open, so its clock always starts at the
+ * next open moment (addWorkingTime already does this, making the choice HC-neutral); the stored
+ * value is ignored. A wall-clock SLA honours the stored policy, defaulting to 'arrival'.
+ */
+export function resolveClockStartPolicy(sla: SLAPolicyConfig): ClockStartPolicy {
+  if (sla.clockBasis === 'business_time') return 'next_open';
+  return sla.clockStartPolicy ?? 'arrival';
+}
+
 export function generateCaseEntities(params: {
   intervals: StandardInterval[];
   openingWIP: OpeningWIPCase[];
@@ -510,6 +522,7 @@ export function generateCaseEntities(params: {
     sla.clockBasis,
     calendar
   );
+  const clockStartPolicy = resolveClockStartPolicy(sla);
 
   // Add opening WIP
   for (const wip of openingWIP) {
@@ -524,7 +537,7 @@ export function generateCaseEntities(params: {
     };
 
     const arrival = wip.arrival && !isNaN(wip.arrival.getTime()) ? new Date(wip.arrival) : new Date(horizonStart);
-    const clockStart = sla.clockStartPolicy === 'next_open' ? nextOpen(arrival, calendar) : new Date(arrival);
+    const clockStart = clockStartPolicy === 'next_open' ? nextOpen(arrival, calendar) : new Date(arrival);
 
     const primaryWinMin =
       cat.primaryWindow !== undefined && cat.primaryUnit
@@ -595,7 +608,7 @@ export function generateCaseEntities(params: {
       const offsetMs = Math.floor(prng() * intervalDurationMs);
       const arrival = new Date(intervalStartMs + offsetMs);
       const clockStart =
-        sla.clockStartPolicy === 'next_open' && !isWorking(arrival, calendar)
+        clockStartPolicy === 'next_open' && !isWorking(arrival, calendar)
           ? nextOpen(arrival, calendar)
           : new Date(arrival);
 

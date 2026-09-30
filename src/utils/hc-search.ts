@@ -8,11 +8,13 @@ import {
   CalendarConfig,
   CaseEntity,
   CategoryConfig,
+  CoverageSummary,
   DESResult,
   HCSearchOutput,
   LaborConfig,
   OpeningWIPCase,
   PrimarySLAStatisticalResult,
+  RosterPolishResult,
   SearchProgressState,
   ShiftDistributionByCategory,
   ShiftSlap,
@@ -422,8 +424,15 @@ export function computeShiftPlacement(params: {
   shiftLengthMinutes: number;
   n: number;
   slapMinutes: number;
+  /**
+   * Optional pre-placed agents (start offset in minutes-from-open -> count), used by the roster
+   * polish (Stage 3b) to seed the coverage-floor cover. The greedy is incremental, so only the
+   * remaining n - seeded agents are placed. Ignored (treated as no seed) if it holds more than n
+   * agents or an offset that is not a valid start. Absent/empty = byte-identical to no seed.
+   */
+  initialCounts?: Map<number, number>;
 }): ShiftSlapDistribution {
-  const { grid, validStarts, shiftLengthMinutes, n, slapMinutes } = params;
+  const { grid, validStarts, shiftLengthMinutes, n, slapMinutes, initialCounts } = params;
   if (validStarts.length === 0 || n <= 0 || grid.totalWorkMinutes <= 0) {
     return { slapMinutes, slaps: [] };
   }
@@ -432,8 +441,24 @@ export function computeShiftPlacement(params: {
   const prefix = build2DPrefixSum(matrix, size);
   const discriminates = computeWindowDiscrimination(validStarts, shiftLengthMinutes, windowLengthMinutes, gridMinutes, size);
   const counts = new Map<number, number>(validStarts.map((s) => [s, 0]));
+  let seeded = 0;
+  if (initialCounts && initialCounts.size > 0) {
+    let total = 0;
+    let valid = true;
+    for (const [off, cnt] of initialCounts.entries()) {
+      if (cnt <= 0) continue;
+      if (!counts.has(off)) valid = false;
+      total += cnt;
+    }
+    if (valid && total <= n) {
+      for (const [off, cnt] of initialCounts.entries()) {
+        if (cnt > 0) counts.set(off, (counts.get(off) || 0) + cnt);
+      }
+      seeded = total;
+    }
+  }
 
-  for (let agent = 0; agent < n; agent++) {
+  for (let agent = seeded; agent < n; agent++) {
     let bestOffset = validStarts[0];
     let bestResultingDeficit = Infinity;
     // Ties broken toward the EARLIEST candidate offset (ascending iteration, only switching on
@@ -587,6 +612,25 @@ export function computeCandidatePlacementDistribution(params: {
 }
 
 /**
+ * Greedy minimal interval cover of the business window by equal-length shifts: the sorted set of
+ * start offsets (always including 0) such that every point of the window is inside some chosen
+ * shift. Shared by buildCoverageRepairDistribution and the roster polish seed so the two can never
+ * drift on what "minimal cover" means.
+ */
+function computeMinimalCoverStarts(validStarts: number[], shiftLengthMinutes: number, windowLengthMinutes: number): number[] {
+  const sortedDesc = [...validStarts].sort((a, b) => b - a);
+  const chosen = new Set<number>([0]);
+  let frontier = 0;
+  while (frontier < windowLengthMinutes - 1e-9) {
+    const pick = sortedDesc.find((s) => s <= frontier + 1e-9);
+    if (pick === undefined) break; // unreachable: offset 0 is always a valid start
+    chosen.add(pick);
+    frontier = pick + shiftLengthMinutes;
+  }
+  return Array.from(chosen).sort((a, b) => a - b);
+}
+
+/**
  * Builds the minimal shift-start distribution needed to satisfy the coverage floor (at least
  * minAgentsPerInterval on shift at every point in the business window) — independent of SLA/
  * deadline objectives, and independent of shiftPlacementEnabled: G1 ("the queue may never be
@@ -621,16 +665,7 @@ export function buildCoverageRepairDistribution(params: {
   if (shiftLengthMinutes >= windowLengthMinutes) return null; // offset 0 alone already covers
 
   const buildForSeats = (seats: number): ShiftSlapDistribution | null => {
-    const sortedDesc = [...validStarts].sort((a, b) => b - a);
-    const chosen = new Set<number>([0]);
-    let frontier = 0;
-    while (frontier < windowLengthMinutes - 1e-9) {
-      const pick = sortedDesc.find((s) => s <= frontier + 1e-9);
-      if (pick === undefined) break; // unreachable: offset 0 is always a valid start
-      chosen.add(pick);
-      frontier = pick + shiftLengthMinutes;
-    }
-    const nonZero = Array.from(chosen).filter((o) => o > 0).sort((a, b) => a - b);
+    const nonZero = computeMinimalCoverStarts(validStarts, shiftLengthMinutes, windowLengthMinutes).filter((o) => o > 0);
     // Offset 0 must ALSO independently satisfy the floor for its own portion of the window —
     // it is not merely "whatever's left over" after the other offsets are seeded. Missing
     // this left offset 0 with zero agents whenever seats exactly matched the non-zero
@@ -733,6 +768,456 @@ export function resolveCoverageBinding(
   return {
     type: 'min_coverage',
     description: `Minimum Coverage Floor (≥ ${minAgents} agent${minAgents === 1 ? '' : 's'} on shift at every open interval) — SLA and occupancy already pass one agent lower`,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Stage 3b — roster polish at fixed HC (only when labor.shiftPlacementEnabled). ONE implementation
+// of the pure parts, shared by searchOptimalHC and searchOptimalHCAsync (D11: never duplicate).
+// The HC search is untouched; after recommendedHC is decided the roster is re-spread across the
+// business day and adopted iff the SAME CI gates still pass and business-hour coverage is better.
+// ---------------------------------------------------------------------------------------------
+
+/** Per-bucket business-hours coverage of one roster: agents on shift vs agents the released work needs. */
+export interface CoverageProfile extends CoverageSummary {
+  bucketMinutes: number;
+  /** Minutes after business open at which each bucket starts. */
+  bucketStartMinutes: number[];
+  /** Agents whose OWN fixed shift window covers the bucket start (same presence rule as countAgentsOnShiftNow, frozen decision #11). */
+  onShift: number[];
+  /** Work released in the bucket per working day / (bucket minutes x effective adherence). Full precision. */
+  requiredAgents: number[];
+}
+
+/** Seat count per distribution key: the whole pool, or the frozen Webster split for siloed. */
+function seatsByDistributionKey(cases: CaseEntity[], n: number, queueArchitecture: 'pooled' | 'siloed'): Map<string, number> {
+  if (queueArchitecture === 'pooled') return new Map<string, number>([['__POOLED__', n]]);
+  const catWorkloadMinutes = new Map<string, number>();
+  for (const c of cases) catWorkloadMinutes.set(c.category, (catWorkloadMinutes.get(c.category) || 0) + c.totalAhtMinutes);
+  return allocateAgentsToCategories(catWorkloadMinutes, n);
+}
+
+/** Every agent's start offset, expanded the way runBackofficeDES assigns slaps (ascending, remainder at offset 0). */
+function expandAgentStartOffsets(distribution: ShiftDistributionByCategory | undefined, seats: Map<string, number>): number[] {
+  const offsets: number[] = [];
+  for (const [key, seatCount] of seats.entries()) {
+    let placed = 0;
+    const dist = distribution?.[key];
+    if (dist) {
+      const sorted = [...dist.slaps].sort((a, b) => a.startMinutesFromOpen - b.startMinutesFromOpen);
+      for (const slap of sorted) {
+        for (let k = 0; k < slap.agentCount && placed < seatCount; k++, placed++) offsets.push(slap.startMinutesFromOpen);
+      }
+    }
+    while (placed < seatCount) {
+      offsets.push(0);
+      placed++;
+    }
+  }
+  return offsets;
+}
+
+/**
+ * Coverage of `distribution` (undefined = uniform: every agent at open) at headcount `n` against the
+ * one-representative-day demand. null when not measurable (24x7 calendar or no demand).
+ */
+export function computeCoverageProfile(params: {
+  distribution: ShiftDistributionByCategory | undefined;
+  n: number;
+  cases: CaseEntity[];
+  calendar: CalendarConfig;
+  labor: LaborConfig;
+  queueArchitecture: 'pooled' | 'siloed';
+}): CoverageProfile | null {
+  const { distribution, n, cases, calendar, labor, queueArchitecture } = params;
+  if (calendar.is24x7 || n <= 0) return null;
+  const grid = buildOneDayDemandGrid(cases, calendar, resolveShiftSlapMinutes(labor));
+  if (grid.totalWorkMinutes <= 0) return null;
+  const adherence = resolveEffectiveAdherence(labor);
+  const shiftLengthMinutes = labor.dailyProductiveHours * 60;
+  const offsets = expandAgentStartOffsets(distribution, seatsByDistributionKey(cases, n, queueArchitecture));
+
+  const bucketStartMinutes: number[] = [];
+  const onShift: number[] = [];
+  const requiredAgents: number[] = [];
+  let met = 0;
+  let gapAgentHours = 0;
+  let minOnShift = Infinity;
+  for (let i = 0; i < grid.size; i++) {
+    const start = i * grid.gridMinutes;
+    const len = Math.min(grid.gridMinutes, grid.windowLengthMinutes - start);
+    if (len <= 1e-9) break;
+    let released = 0;
+    for (let j = 0; j < grid.size; j++) released += grid.matrix[i * grid.size + j];
+    const required = released / (len * adherence);
+    let present = 0;
+    for (const off of offsets) if (off <= start + 1e-9 && start < off + shiftLengthMinutes - 1e-9) present++;
+    bucketStartMinutes.push(start);
+    onShift.push(present);
+    requiredAgents.push(required);
+    if (present >= required - 1e-9) met++;
+    else gapAgentHours += ((required - present) * len) / 60;
+    if (present < minOnShift) minOnShift = present;
+  }
+  const buckets = onShift.length;
+  if (buckets === 0) return null;
+  return {
+    bucketMinutes: grid.gridMinutes,
+    bucketStartMinutes,
+    onShift,
+    requiredAgents,
+    minOnShift,
+    bucketsMeetingNeedPct: (100 * met) / buckets,
+    gapAgentHours,
+  };
+}
+
+/**
+ * Builds the floor-aware coverage roster at headcount n: the minimal coverage-floor cover (the
+ * minAgentsPerInterval agents at each start of the minimal interval cover, offset 0 included) is
+ * the seed, and the Hall-deficit greedy places every remaining agent by demand. Pooled = one grid
+ * keyed '__POOLED__'; siloed = one grid per category on the frozen Webster split, seeded per
+ * category only when that category's seats can hold the cover. distribution null => not applicable.
+ */
+export function buildPolishedRoster(params: {
+  n: number;
+  cases: CaseEntity[];
+  calendar: CalendarConfig;
+  labor: LaborConfig;
+  sla: SLAPolicyConfig;
+  queueArchitecture: 'pooled' | 'siloed';
+}): { distribution: ShiftDistributionByCategory | null; reason?: string } {
+  const { n, cases, calendar, labor, sla, queueArchitecture } = params;
+  if (n <= 0) return { distribution: null, reason: 'no headcount to place' };
+  if (calendar.is24x7) return { distribution: null, reason: '24x7 calendar: every hour is open, so there is no business-hours window to stagger across' };
+  const shiftLengthMinutes = labor.dailyProductiveHours * 60;
+  const windowLengthMinutes = getDailyWindowLengthHours(calendar) * 60;
+  if (shiftLengthMinutes >= windowLengthMinutes - 1e-9) {
+    return { distribution: null, reason: 'the shift is as long as the open window, so every agent already covers all business hours' };
+  }
+  const slapMinutes = resolveShiftSlapMinutes(labor);
+  const validStarts = getValidSlapStarts(calendar, shiftLengthMinutes, slapMinutes);
+  if (validStarts.length === 0) return { distribution: null, reason: 'no valid shift start fits inside the open window' };
+
+  const capacityMinutes = shiftLengthMinutes * resolveEffectiveAdherence(labor);
+  const minAgents = resolveMinAgentsPerInterval(sla, n);
+  const cover = computeMinimalCoverStarts(validStarts, shiftLengthMinutes, windowLengthMinutes);
+  const placeSeats = (grid: DemandGrid, seats: number): ShiftSlapDistribution => {
+    const seed =
+      minAgents > 0 && cover.length * minAgents <= seats
+        ? new Map<number, number>(cover.map((o) => [o, minAgents]))
+        : undefined;
+    return computeShiftPlacement({ grid, validStarts, shiftLengthMinutes: capacityMinutes, n: seats, slapMinutes, initialCounts: seed });
+  };
+
+  if (queueArchitecture === 'pooled') {
+    const grid = buildOneDayDemandGrid(cases, calendar, slapMinutes);
+    if (grid.totalWorkMinutes <= 0) return { distribution: null, reason: 'no demand to shape a roster around' };
+    const dist = placeSeats(grid, n);
+    return dist.slaps.length > 0 ? { distribution: { __POOLED__: dist } } : { distribution: null, reason: 'no roster could be placed' };
+  }
+
+  const casesByCategory = new Map<string, CaseEntity[]>();
+  for (const c of cases) {
+    if (!casesByCategory.has(c.category)) casesByCategory.set(c.category, []);
+    casesByCategory.get(c.category)!.push(c);
+  }
+  const result: ShiftDistributionByCategory = {};
+  let any = false;
+  for (const [catName, seatCount] of seatsByDistributionKey(cases, n, 'siloed').entries()) {
+    if (seatCount <= 0) continue;
+    const grid = buildOneDayDemandGrid(casesByCategory.get(catName) || [], calendar, slapMinutes);
+    if (grid.totalWorkMinutes <= 0) continue; // its agents stay at open, as in the DES
+    const dist = placeSeats(grid, seatCount);
+    if (dist.slaps.length > 0) {
+      result[catName] = dist;
+      any = true;
+    }
+  }
+  return any ? { distribution: result } : { distribution: null, reason: 'no demand to shape a roster around' };
+}
+
+/**
+ * Agent counts per start offset for each distribution key, expanded exactly the way
+ * runBackofficeDES assigns slaps (ascending offsets, remainder at offset 0). undefined = uniform.
+ */
+function countsByKey(distribution: ShiftDistributionByCategory | undefined, seats: Map<string, number>): Map<string, Map<number, number>> {
+  const out = new Map<string, Map<number, number>>();
+  for (const key of Array.from(seats.keys()).sort()) {
+    const seatCount = seats.get(key)!;
+    const counts = new Map<number, number>();
+    let placed = 0;
+    const dist = distribution?.[key];
+    if (dist) {
+      const sorted = [...dist.slaps].sort((a, b) => a.startMinutesFromOpen - b.startMinutesFromOpen);
+      for (const slap of sorted) {
+        for (let k = 0; k < slap.agentCount && placed < seatCount; k++, placed++) {
+          counts.set(slap.startMinutesFromOpen, (counts.get(slap.startMinutesFromOpen) || 0) + 1);
+        }
+      }
+    }
+    if (placed < seatCount) counts.set(0, (counts.get(0) || 0) + (seatCount - placed));
+    out.set(key, counts);
+  }
+  return out;
+}
+
+/** One agent moved from one start offset to another, within one distribution key. */
+export interface RosterMove {
+  key: string;
+  from: number;
+  to: number;
+}
+
+/**
+ * Deterministic one-agent-at-a-time path from the CURRENT roster to the TARGET roster. Each move
+ * takes one agent from the offset with the largest surplus (current - target; ties -> earliest
+ * offset) to the offset with the largest deficit (target - current; ties -> latest offset). Keys
+ * are processed in sorted order (siloed: per category). rosterAt(0) is the current roster exactly
+ * as passed (so it passes by construction); rosterAt(K) has the target's per-offset counts.
+ */
+export function buildRosterInterpolation(params: {
+  current: ShiftDistributionByCategory | undefined;
+  target: ShiftDistributionByCategory;
+  seats: Map<string, number>;
+  slapMinutes: number;
+}): { moves: RosterMove[]; totalMoves: number; rosterAt: (k: number) => ShiftDistributionByCategory | undefined } {
+  const { current, target, seats, slapMinutes } = params;
+  const curCounts = countsByKey(current, seats);
+  const tgtCounts = countsByKey(target, seats);
+  const moves: RosterMove[] = [];
+  const work = new Map<string, Map<number, number>>();
+  for (const [key, cur] of curCounts.entries()) {
+    const c = new Map(cur);
+    const t = tgtCounts.get(key)!;
+    const offsets = Array.from(new Set([...c.keys(), ...t.keys()])).sort((a, b) => a - b);
+    for (;;) {
+      let from: number | null = null;
+      let fromSurplus = 0;
+      let to: number | null = null;
+      let toDeficit = 0;
+      for (const o of offsets) {
+        const diff = (c.get(o) || 0) - (t.get(o) || 0);
+        if (diff > fromSurplus) { from = o; fromSurplus = diff; } // strict: ties keep the earliest
+        if (-diff >= toDeficit && -diff > 0) { to = o; toDeficit = -diff; } // non-strict: ties keep the latest
+      }
+      if (from === null || to === null) break;
+      c.set(from, (c.get(from) || 0) - 1);
+      c.set(to, (c.get(to) || 0) + 1);
+      moves.push({ key, from, to });
+    }
+    work.set(key, new Map(cur));
+  }
+  const rosterAt = (k: number): ShiftDistributionByCategory | undefined => {
+    if (k <= 0) return current;
+    const counts = new Map<string, Map<number, number>>();
+    for (const [key, m] of work.entries()) counts.set(key, new Map(m));
+    for (let i = 0; i < Math.min(k, moves.length); i++) {
+      const mv = moves[i];
+      const m = counts.get(mv.key)!;
+      m.set(mv.from, (m.get(mv.from) || 0) - 1);
+      m.set(mv.to, (m.get(mv.to) || 0) + 1);
+    }
+    const result: ShiftDistributionByCategory = {};
+    for (const [key, m] of counts.entries()) {
+      const slaps: ShiftSlap[] = Array.from(m.entries())
+        .filter(([, agentCount]) => agentCount > 0)
+        .map(([startMinutesFromOpen, agentCount]) => ({ startMinutesFromOpen, agentCount }))
+        .sort((a, b) => a.startMinutesFromOpen - b.startMinutesFromOpen);
+      if (slaps.length > 0) result[key] = { slapMinutes, slaps };
+    }
+    return result;
+  };
+  return { moves, totalMoves: moves.length, rosterAt };
+}
+
+/** One evaluated step of the k-search. */
+export interface RosterStepEval {
+  passes: boolean;
+  reasons: string[];
+  slaPct: number;
+}
+
+/**
+ * Deterministic search control for "largest passing k in [0, K]": evaluate K first (pass -> done);
+ * otherwise binary search between lo = 0 (current, passes by construction) and hi = K. At most
+ * ceil(log2(K)) + 1 evaluations, cached by k; only evaluated-passing rosters are ever accepted.
+ * Sync and async searches drive the SAME state machine and differ only in the evaluator call.
+ */
+export function createRosterKSearch(totalMoves: number) {
+  const evals = new Map<number, RosterStepEval>();
+  let lo = 0;
+  let hi = totalMoves;
+  let started = false;
+  let done = totalMoves <= 0;
+  return {
+    /** Next k to evaluate, or null when finished. */
+    next(): number | null {
+      if (done) return null;
+      if (!started) return totalMoves;
+      if (hi - lo <= 1) { done = true; return null; }
+      return Math.floor((lo + hi) / 2);
+    },
+    record(k: number, ev: RosterStepEval): void {
+      evals.set(k, ev);
+      if (!started) {
+        started = true;
+        if (ev.passes) { lo = totalMoves; done = true; }
+        return;
+      }
+      if (ev.passes) lo = k;
+      else hi = k;
+    },
+    result(): { bestK: number; evals: Map<number, RosterStepEval> } {
+      return { bestK: lo, evals };
+    },
+  };
+}
+
+/** Plan for the polish step: whether it applies, and whether the target roster covers better (else no DES run is needed). */
+export type RosterPolishPlan =
+  | { applicable: false; reason: string; current?: CoverageProfile }
+  | {
+      applicable: true;
+      current: CoverageProfile;
+      targetProfile: CoverageProfile;
+      totalMoves: number;
+      rosterAt: (k: number) => ShiftDistributionByCategory | undefined;
+      cases: CaseEntity[];
+      n: number;
+      calendar: CalendarConfig;
+      labor: LaborConfig;
+      queueArchitecture: 'pooled' | 'siloed';
+      improves: boolean;
+    };
+
+/** Strictly better coverage: higher minimum on shift across open buckets; tie -> strictly lower gap (agent-hours). */
+function coverageIsBetter(candidate: CoverageSummary, baseline: CoverageSummary): boolean {
+  if (candidate.minOnShift > baseline.minOnShift) return true;
+  return candidate.minOnShift === baseline.minOnShift && candidate.gapAgentHours < baseline.gapAgentHours - 1e-9;
+}
+
+export function planRosterPolish(params: {
+  n: number;
+  cases: CaseEntity[];
+  calendar: CalendarConfig;
+  labor: LaborConfig;
+  sla: SLAPolicyConfig;
+  queueArchitecture: 'pooled' | 'siloed';
+  /** The roster the search actually won with at n (undefined = uniform). */
+  currentDistribution: ShiftDistributionByCategory | undefined;
+}): RosterPolishPlan {
+  const { n, cases, calendar, labor, sla, queueArchitecture, currentDistribution } = params;
+  const current = computeCoverageProfile({ distribution: currentDistribution, n, cases, calendar, labor, queueArchitecture });
+  const built = buildPolishedRoster({ n, cases, calendar, labor, sla, queueArchitecture });
+  if (!built.distribution || !current) {
+    return { applicable: false, reason: built.reason ?? 'no demand grid to measure coverage against', current: current ?? undefined };
+  }
+  const targetProfile = computeCoverageProfile({ distribution: built.distribution, n, cases, calendar, labor, queueArchitecture });
+  if (!targetProfile) return { applicable: false, reason: 'no demand grid to measure coverage against', current };
+  const interp = buildRosterInterpolation({
+    current: currentDistribution,
+    target: built.distribution,
+    seats: seatsByDistributionKey(cases, n, queueArchitecture),
+    slapMinutes: resolveShiftSlapMinutes(labor),
+  });
+  return {
+    applicable: true,
+    current,
+    targetProfile,
+    totalMoves: interp.totalMoves,
+    rosterAt: interp.rosterAt,
+    cases, n, calendar, labor, queueArchitecture,
+    improves: interp.totalMoves > 0 && coverageIsBetter(targetProfile, current),
+  };
+}
+
+const summarizeCoverage = (p: CoverageProfile): CoverageSummary => ({
+  minOnShift: p.minOnShift,
+  bucketsMeetingNeedPct: p.bucketsMeetingNeedPct,
+  gapAgentHours: p.gapAgentHours,
+});
+
+/**
+ * Decision. Adopt Roster(k*) — k* = largest evaluated-passing k — iff it improves coverage
+ * (higher minOnShift, tie -> lower gap). adopted = k* is the full target; adopted_partial = 0 < k* < K;
+ * kept_current_failed_gate = no k >= 1 passed. `search` is only supplied when plan.improves.
+ */
+export function finalizeRosterPolish(params: {
+  plan: RosterPolishPlan;
+  search?: { bestK: number; evals: Map<number, RosterStepEval> };
+  currentSlaPct?: number;
+}): { rosterPolish: RosterPolishResult; adoptedDistribution?: ShiftDistributionByCategory } {
+  const { plan, search, currentSlaPct } = params;
+  if (plan.applicable === false) {
+    const cur = plan.current;
+    return {
+      rosterPolish: {
+        status: 'not_applicable',
+        reason: plan.reason,
+        current: cur ? summarizeCoverage(cur) : { minOnShift: 0, bucketsMeetingNeedPct: 0, gapAgentHours: 0 },
+        currentSlaPct,
+        profile: {
+          bucketMinutes: cur?.bucketMinutes ?? 0,
+          bucketStartMinutes: cur?.bucketStartMinutes ?? [],
+          requiredAgents: cur?.requiredAgents ?? [],
+          onShiftCurrent: cur?.onShift ?? [],
+        },
+      },
+    };
+  }
+  const K = plan.totalMoves;
+  const mkProfile = (polishedProfile: CoverageProfile) => ({
+    current: summarizeCoverage(plan.current),
+    polished: summarizeCoverage(polishedProfile),
+    currentSlaPct,
+    movesTotal: K,
+    profile: {
+      bucketMinutes: plan.current.bucketMinutes,
+      bucketStartMinutes: plan.current.bucketStartMinutes,
+      requiredAgents: plan.current.requiredAgents,
+      onShiftCurrent: plan.current.onShift,
+      onShiftPolished: polishedProfile.onShift,
+    },
+  });
+  const noImprovement = (): { rosterPolish: RosterPolishResult } => ({
+    rosterPolish: {
+      status: 'no_improvement',
+      reason: 'no re-spread of this roster covers business hours better at this headcount',
+      ...mkProfile(plan.targetProfile),
+    },
+  });
+  if (!plan.improves || !search) return noImprovement();
+
+  const { bestK, evals } = search;
+  const firstFail = evals.get(bestK + 1); // smallest failing k above the best passing one
+  const failReason = firstFail ? firstFail.reasons.join('; ') || 'a CI gate failed' : undefined;
+  if (bestK <= 0) {
+    return {
+      rosterPolish: {
+        status: 'kept_current_failed_gate',
+        reason: failReason ?? 'a CI gate failed',
+        ...mkProfile(plan.targetProfile),
+        movesApplied: 0,
+        polishedSlaPct: firstFail?.slaPct,
+      },
+    };
+  }
+  const adoptedRoster = bestK >= K ? plan.rosterAt(K) : plan.rosterAt(bestK);
+  const adoptedProfile =
+    bestK >= K
+      ? plan.targetProfile
+      : computeCoverageProfile({ distribution: adoptedRoster, n: plan.n, cases: plan.cases, calendar: plan.calendar, labor: plan.labor, queueArchitecture: plan.queueArchitecture });
+  if (!adoptedProfile || !coverageIsBetter(adoptedProfile, plan.current)) return noImprovement();
+  return {
+    rosterPolish: {
+      status: bestK >= K ? 'adopted' : 'adopted_partial',
+      reason: bestK >= K ? undefined : failReason,
+      ...mkProfile(adoptedProfile),
+      movesApplied: bestK,
+      polishedSlaPct: evals.get(bestK)?.slaPct,
+    },
+    adoptedDistribution: adoptedRoster,
   };
 }
 
@@ -1568,6 +2053,29 @@ function formatImpossibleCategoriesReason(
   return `The following categories can never meet their SLA at any headcount, because their AHT exceeds their own SLA window: ${names}. No amount of additional staff changes this. Even with unlimited headcount, the maximum achievable overall Primary SLA attainment is ${achievableCeilingPct.toFixed(1)}%. Reduce AHT, widen the SLA window, or exclude these categories — increasing userMaxHC will not help.`;
 }
 
+/**
+ * Search start / lower bound / baseline-vs-cap verdict — the ONE place both searchOptimalHC and
+ * searchOptimalHCAsync derive them (D11: never inline this in either).
+ *
+ * Floor ON (nMinFloorEnabled !== false, default; frozen decision #4): the search starts at
+ * max(N_min, N_occ) and never walks below it; N_min > cap is infeasible outright.
+ * Floor OFF (approved 2026-09-30): same start point, but the walk-down may go to N = 1, and the
+ * baseline is not a reason to declare infeasibility (the search decides on the gates alone).
+ * N_sla is deliberately not an input (Gap A).
+ */
+export function resolveSearchBounds(p: {
+  nMinFloorEnabled?: boolean;
+  nMinAnalytical: number;
+  occupancyFeasibleFloor: number;
+  searchCap: number;
+}): { startN: number; floorN: number; capInfeasible: boolean } {
+  const startN = Math.min(p.searchCap, Math.max(1, p.nMinAnalytical, p.occupancyFeasibleFloor));
+  if (p.nMinFloorEnabled === false) {
+    return { startN, floorN: 1, capInfeasible: false };
+  }
+  return { startN, floorN: startN, capInfeasible: p.nMinAnalytical > p.searchCap };
+}
+
 export function searchOptimalHC(params: {
   intervals: StandardInterval[];
   openingWIP: OpeningWIPCase[];
@@ -1868,7 +2376,14 @@ export function searchOptimalHC(params: {
 
   const impossibleCheck = findImpossibleCategories({ categories, intervals: validIntervals, openingWIP, sla, calendar });
   const hasImpossibleCategory = impossibleCheck.impossibleCategories.length > 0;
-  const baselineExceedsCap = nMinAnalytical > searchCap;
+  const searchBounds = resolveSearchBounds({
+    nMinFloorEnabled: sla.nMinFloorEnabled,
+    nMinAnalytical,
+    occupancyFeasibleFloor,
+    searchCap,
+  });
+  const floorEnabled = sla.nMinFloorEnabled !== false;
+  const baselineExceedsCap = searchBounds.capInfeasible;
 
   if (hasImpossibleCategory) {
     isInfeasible = true;
@@ -1908,28 +2423,30 @@ export function searchOptimalHC(params: {
     // recommended 15 — see suite D34). N_sla remains reported as
     // HCSearchOutput.shiftPlacement.placementFeasibleFloor for diagnostic/UI use — it is
     // simply never used to gate or seed the search.
-    const startN = Math.min(
-      searchCap,
-      Math.max(1, nMinAnalytical, occupancyFeasibleFloor)
-    );
+    // startN / floorN come from resolveSearchBounds (shared with the async twin). With the
+    // workload floor ON floorN === startN, so the walk-down below never goes under the start
+    // point (today's behavior); OFF lets it walk down to 1 (approved 2026-09-30).
+    const { startN, floorN } = searchBounds;
     searchStartN = startN;
     const startEval = evaluateN(startN);
 
-    if (startEval.passesAllConstraints) {
+    if (startEval.passesAllConstraints && floorN >= startN) {
       primaryDrivenHC = startN;
       primaryPassedResult = startEval;
       recommendedHC = startN;
       evalN = startN;
       isInfeasible = false;
     } else {
-      primaryFailedResult = startEval;
+      // Start passed but the floor is OFF: skip the leap and feed startN straight into the
+      // Phase-2 walk-down as the ceiling.
+      if (!startEval.passesAllConstraints) primaryFailedResult = startEval;
       let lastFail = startN;
       let step = 1;
-      let ceilingHigh: number | null = null;
+      let ceilingHigh: number | null = startEval.passesAllConstraints ? startN : null;
 
       // Phase 1 — LEAP UP (speed, find first passing candidate)
       let n = lastFail;
-      while (n < searchCap) {
+      while (ceilingHigh === null && n < searchCap) {
         n = Math.min(searchCap, n + step);
         const probeRes = evaluateN(n, Math.min(R, 5));
         if (!probeRes.passesAllConstraints) {
@@ -1955,7 +2472,6 @@ export function searchOptimalHC(params: {
         // Phase 2 — WALK DOWN BY EXACTLY −1
         let lastPass = ceilingHigh;
         let currN = ceilingHigh - 1;
-        const floorN = startN;
 
         while (currN >= floorN) {
           const res = evaluateN(currN);
@@ -1984,6 +2500,32 @@ export function searchOptimalHC(params: {
         evalN = searchCap;
       }
     }
+  }
+
+  // Stage 3b — roster polish at the FIXED recommendedHC (placement ON only). Pure parts live in
+  // planRosterPolish / finalizeRosterPolish, shared with the async twin; only the evaluator differs.
+  let rosterPolish: RosterPolishResult | undefined;
+  if (labor.shiftPlacementEnabled && recommendedHC !== null && !isInfeasible && representativeCases && primaryPassedResult) {
+    const plan = planRosterPolish({
+      n: recommendedHC, cases: representativeCases, calendar, labor, sla, queueArchitecture,
+      currentDistribution: winningDistributionByN.get(recommendedHC),
+    });
+    let search: ReturnType<ReturnType<typeof createRosterKSearch>['result']> | undefined;
+    if (plan.applicable && plan.improves) {
+      const ks = createRosterKSearch(plan.totalMoves);
+      for (let k = ks.next(); k !== null; k = ks.next()) {
+        const r = evaluateCandidateStatistical({
+          operationalHC: recommendedHC, intervals, openingWIP, categories, calendar, labor, sla,
+          baseSeed: seed, replications: R, queueArchitecture, precomputedCaseSets,
+          shiftDistribution: plan.rosterAt(k), dispatchFairness,
+        });
+        ks.record(k, { passes: r.passesAllConstraints, reasons: r.failingReasons, slaPct: r.primaryStats.achievedPctMedian });
+      }
+      search = ks.result();
+    }
+    const fin = finalizeRosterPolish({ plan, search, currentSlaPct: primaryPassedResult.primaryStats.achievedPctMedian });
+    rosterPolish = fin.rosterPolish;
+    if (fin.adoptedDistribution) winningDistributionByN.set(recommendedHC, fin.adoptedDistribution);
   }
 
   // 4. Run final DES audit pass at evalN
@@ -2049,7 +2591,7 @@ export function searchOptimalHC(params: {
   } else if (isInfeasible) {
     bindingConstraintType = 'analytical_baseline';
     bindingConstraintDescription = `Infeasible at User Cap (N = ${searchCap})`;
-  } else if (recommendedHC !== null && searchStartN !== null && recommendedHC === searchStartN) {
+  } else if (floorEnabled && recommendedHC !== null && searchStartN !== null && recommendedHC === searchStartN) {
     // The search passed at its very first candidate, so it never had to climb above the
     // analytic capacity floor — that floor, not any DES gate, is what set this number.
     //
@@ -2162,6 +2704,8 @@ export function searchOptimalHC(params: {
     boundaryEvidence,
     searchHistory,
     occupancyFeasibleFloor,
+    belowWorkloadFloor:
+      !floorEnabled && recommendedHC !== null && recommendedHC < Math.max(nMinAnalytical, occupancyFeasibleFloor ?? 0),
     shiftPlacement: labor.shiftPlacementEnabled
       ? {
           enabledForRun: true,
@@ -2170,6 +2714,7 @@ export function searchOptimalHC(params: {
           winningDistribution: recommendedHC !== null ? winningDistributionByN.get(recommendedHC) : undefined,
         }
       : undefined,
+    ...(rosterPolish ? { rosterPolish } : {}),
   };
 }
 
@@ -2562,7 +3107,14 @@ export async function searchOptimalHCAsync(params: {
 
   const impossibleCheck = findImpossibleCategories({ categories, intervals: validIntervals, openingWIP, sla, calendar });
   const hasImpossibleCategory = impossibleCheck.impossibleCategories.length > 0;
-  const baselineExceedsCap = nMinAnalytical > searchCap;
+  const searchBounds = resolveSearchBounds({
+    nMinFloorEnabled: sla.nMinFloorEnabled,
+    nMinAnalytical,
+    occupancyFeasibleFloor,
+    searchCap,
+  });
+  const floorEnabled = sla.nMinFloorEnabled !== false;
+  const baselineExceedsCap = searchBounds.capInfeasible;
 
   if (hasImpossibleCategory) {
     isInfeasible = true;
@@ -2599,10 +3151,8 @@ export async function searchOptimalHCAsync(params: {
     // (placementFeasibleFloor) is deliberately excluded here (Gap A, fixed 2026-08-28).
     // N_min stays the frozen hard floor unconditionally; N_occ only ever raises the
     // starting point (a proven, DES-verified bound — N_sla is not).
-    const startN = Math.min(
-      searchCap,
-      Math.max(1, nMinAnalytical, occupancyFeasibleFloor)
-    );
+    // startN / floorN come from resolveSearchBounds (shared with searchOptimalHC).
+    const { startN, floorN } = searchBounds;
     searchStartN = startN;
     const startEval = await evaluateAsync(
       startN,
@@ -2610,22 +3160,24 @@ export async function searchOptimalHCAsync(params: {
       `Evaluating analytical baseline N = ${startN} across ${replications} stochastic replications...`
     );
 
-    if (startEval.passesAllConstraints) {
+    if (startEval.passesAllConstraints && floorN >= startN) {
       primaryDrivenHC = startN;
       primaryPassedResult = startEval;
       recommendedHC = startN;
       evalN = startN;
       isInfeasible = false;
     } else {
-      primaryFailedResult = startEval;
+      // Start passed but the floor is OFF: skip the leap and feed startN straight into the
+      // Phase-2 walk-down as the ceiling.
+      if (!startEval.passesAllConstraints) primaryFailedResult = startEval;
       let lastFail = startN;
       let step = 1;
-      let ceilingHigh: number | null = null;
+      let ceilingHigh: number | null = startEval.passesAllConstraints ? startN : null;
       let leapIndex = 1;
 
       // Phase 1 — LEAP UP (speed, find first passing candidate)
       let n = lastFail;
-      while (n < searchCap) {
+      while (ceilingHigh === null && n < searchCap) {
         if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
 
         n = Math.min(searchCap, n + step);
@@ -2666,7 +3218,6 @@ export async function searchOptimalHCAsync(params: {
         // Phase 2 — WALK DOWN BY EXACTLY −1
         let lastPass = ceilingHigh;
         let currN = ceilingHigh - 1;
-        const floorN = startN;
         const totalDownSteps = Math.max(1, ceilingHigh - floorN);
         let downStepIndex = 0;
 
@@ -2710,6 +3261,43 @@ export async function searchOptimalHCAsync(params: {
         evalN = searchCap;
       }
     }
+  }
+
+  // Stage 3b — roster polish at the FIXED recommendedHC (see searchOptimalHC's identical block).
+  let rosterPolish: RosterPolishResult | undefined;
+  if (labor.shiftPlacementEnabled && recommendedHC !== null && !isInfeasible && representativeCases && primaryPassedResult) {
+    if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
+    const plan = planRosterPolish({
+      n: recommendedHC, cases: representativeCases, calendar, labor, sla, queueArchitecture,
+      currentDistribution: winningDistributionByN.get(recommendedHC),
+    });
+    let search: ReturnType<ReturnType<typeof createRosterKSearch>['result']> | undefined;
+    if (plan.applicable && plan.improves) {
+      const ks = createRosterKSearch(plan.totalMoves);
+      for (let k = ks.next(); k !== null; k = ks.next()) {
+        if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
+        onProgress?.({
+          status: 'verifying_boundary',
+          phase: 'Phase 3: Roster Coverage Polish',
+          currentN: recommendedHC,
+          nMin: nMinAnalytical,
+          maxN: searchCap,
+          percent: 93,
+          evaluatedHistory: buildHistorySnapshot(),
+          currentMessage: `Polishing roster coverage at N = ${recommendedHC} (moving ${k} of ${plan.totalMoves} agents toward the coverage roster; same headcount, adopted only if every gate still passes)...`,
+        });
+        const r = await evaluateCandidateStatisticalAsync({
+          operationalHC: recommendedHC, intervals, openingWIP, categories, calendar, labor, sla,
+          baseSeed: seed, replications: R, queueArchitecture, precomputedCaseSets,
+          shouldCancel, shiftDistribution: plan.rosterAt(k), dispatchFairness,
+        });
+        ks.record(k, { passes: r.passesAllConstraints, reasons: r.failingReasons, slaPct: r.primaryStats.achievedPctMedian });
+      }
+      search = ks.result();
+    }
+    const fin = finalizeRosterPolish({ plan, search, currentSlaPct: primaryPassedResult.primaryStats.achievedPctMedian });
+    rosterPolish = fin.rosterPolish;
+    if (fin.adoptedDistribution) winningDistributionByN.set(recommendedHC, fin.adoptedDistribution);
   }
 
   // 4. Run final DES audit pass at evalN
@@ -2791,7 +3379,7 @@ export async function searchOptimalHCAsync(params: {
   } else if (isInfeasible) {
     bindingConstraintType = 'analytical_baseline';
     bindingConstraintDescription = `Infeasible at User Cap (N = ${searchCap})`;
-  } else if (recommendedHC !== null && searchStartN !== null && recommendedHC === searchStartN) {
+  } else if (floorEnabled && recommendedHC !== null && searchStartN !== null && recommendedHC === searchStartN) {
     // The search passed at its very first candidate, so it never had to climb above the
     // analytic capacity floor — that floor, not any DES gate, is what set this number.
     //
@@ -2919,6 +3507,8 @@ export async function searchOptimalHCAsync(params: {
     staffing,
     boundaryEvidence,
     occupancyFeasibleFloor,
+    belowWorkloadFloor:
+      !floorEnabled && recommendedHC !== null && recommendedHC < Math.max(nMinAnalytical, occupancyFeasibleFloor ?? 0),
     shiftPlacement: labor.shiftPlacementEnabled
       ? {
           enabledForRun: true,
@@ -2927,6 +3517,7 @@ export async function searchOptimalHCAsync(params: {
           winningDistribution: recommendedHC !== null ? winningDistributionByN.get(recommendedHC) : undefined,
         }
       : undefined,
+    ...(rosterPolish ? { rosterPolish } : {}),
   };
 }
 

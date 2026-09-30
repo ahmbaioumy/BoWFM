@@ -44,6 +44,8 @@ import {
   runBackofficeDES,
   verifyAgentTimelineInvariants,
 } from '../src/utils/des-engine';
+import * as hcNs from '../src/utils/hc-search';
+import * as desNs from '../src/utils/des-engine';
 import { discoverAndSyncCategories, mapRawRecordsToIntervals, validateDataQuality } from '../src/utils/csv-parser';
 import { buildSampleDataset } from '../src/utils/sample-data';
 import { DEFAULT_CALENDAR, DEFAULT_CATEGORIES, DEFAULT_LABOR, DEFAULT_SIM_PARAMS, DEFAULT_SLA } from '../src/utils/default-config';
@@ -3440,6 +3442,324 @@ console.log('\n--- Suite D46: coverage presence = own shift window ---');
     assert(r.minCoverageObserved === 0 && !r.passesCoverage, 'D46.5 gap between two 6h shifts (14:00-16:00) is a coverage failure even though both agents have unused budget', `minCoverageObserved=${r.minCoverageObserved}`);
     const ok = run46(3, 6, 1.0, 0.2, dist46([[0, 1], [360, 1], [480, 1]]));
     assert(ok.minCoverageObserved >= 1 && ok.passesCoverage, 'D46.5b control: 6h shifts at 08:00, 14:00 and 16:00 tile 08:00-22:00 without a gap', `minCoverageObserved=${ok.minCoverageObserved}`);
+  }
+}
+
+// =================================================================
+// Suite D47 — N_min workload-floor toggle (frozen decision #4 amended 2026-09-30)
+//
+// nMinFloorEnabled undefined/true (default) = today's behavior byte-for-byte: N_min and N_occ are
+// the hard search floor. false = the search may walk below both when every gate still passes;
+// belowWorkloadFloor flags the result. resolveSearchBounds is the ONE helper both searches use.
+// Pre-fix: resolveSearchBounds / belowWorkloadFloor / the OFF walk-down do not exist.
+// =================================================================
+console.log('\n--- Suite D47: N_min floor toggle ---');
+{
+  const rsb47 = (hcNs as any).resolveSearchBounds as ((p: any) => { startN: number; floorN: number; capInfeasible: boolean }) | undefined;
+  assert(typeof rsb47 === 'function', 'D47.0 resolveSearchBounds is exported from hc-search', '');
+  if (typeof rsb47 === 'function') {
+    const on = rsb47({ nMinFloorEnabled: true, nMinAnalytical: 10, occupancyFeasibleFloor: 11, searchCap: 50 });
+    assert(on.startN === 11 && on.floorN === 11 && on.capInfeasible === false, 'D47.0a ON: startN=max(nMin,nOcc), floorN=startN, cap ok', JSON.stringify(on));
+    const onCap = rsb47({ nMinFloorEnabled: true, nMinAnalytical: 10, occupancyFeasibleFloor: 11, searchCap: 6 });
+    assert(onCap.startN === 6 && onCap.floorN === 6 && onCap.capInfeasible === true, 'D47.0b ON: nMin > cap -> capInfeasible, startN clamped to cap', JSON.stringify(onCap));
+    const offB = rsb47({ nMinFloorEnabled: false, nMinAnalytical: 10, occupancyFeasibleFloor: 11, searchCap: 6 });
+    assert(offB.startN === 6 && offB.floorN === 1 && offB.capInfeasible === false, 'D47.0c OFF: same startN, floorN=1, never capInfeasible', JSON.stringify(offB));
+    const undef = rsb47({ nMinFloorEnabled: undefined, nMinAnalytical: 3, occupancyFeasibleFloor: 0, searchCap: 50 });
+    assert(undef.startN === 3 && undef.floorN === 3, 'D47.0d undefined behaves as ON', JSON.stringify(undef));
+  }
+
+  // T1_A5 fixture (trusted-source scenario_T1_A5_search_floor_binding): 5 days x 160 cases x 30min,
+  // 8h window, 80% target, N_min = 10 and HC=10 already gives 100%.
+  const iv47 = (perDay: number): StandardInterval[] => [0, 1, 2, 3, 4].map((d) => ({ intervalIndex: d, start: new Date(2026, 9, 5 + d, 9, 0), end: new Date(2026, 9, 5 + d, 9, 30), volume: perDay, category: 'General' }));
+  const cat47: CategoryConfig[] = [{ id: 'c1', name: 'General', ahtMinutes: 30, shrinkagePct: 0.2, priority: 1 }];
+  const sla47: SLAPolicyConfig = {
+    primaryPct: 80, primaryWindow: 8, primaryUnit: 'hours', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes',
+    asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'arrival',
+    occupancyCapEnabled: false, occupancyCapPct: 85, confidenceLevelPct: 95,
+  };
+  const p47 = (perDay: number, sla: SLAPolicyConfig, extra: Record<string, unknown> = {}) => ({
+    intervals: iv47(perDay), openingWIP: [], categories: cat47, calendar: BIZ_CAL, labor: LABOR, sla, seed: 777, userMaxHC: 50, replications: 1, ...extra,
+  });
+  const slaOff47 = { ...sla47, nMinFloorEnabled: false } as SLAPolicyConfig;
+
+  // (a) omitted vs explicit true
+  const omitted = searchOptimalHC(p47(160, sla47));
+  const explicitOn = searchOptimalHC(p47(160, { ...sla47, nMinFloorEnabled: true } as SLAPolicyConfig));
+  assert(
+    omitted.recommendedHC === explicitOn.recommendedHC && omitted.nMinAnalytical === explicitOn.nMinAnalytical &&
+      omitted.bindingConstraintType === explicitOn.bindingConstraintType && omitted.bindingConstraintDescription === explicitOn.bindingConstraintDescription,
+    'D47.1a nMinFloorEnabled omitted vs true: identical recommendedHC / nMin / binding', `omitted=${omitted.recommendedHC}/${omitted.bindingConstraintType} on=${explicitOn.recommendedHC}/${explicitOn.bindingConstraintType}`
+  );
+  assert(omitted.recommendedHC === 10 && omitted.nMinAnalytical === 10 && omitted.bindingConstraintType === 'analytical_baseline', 'D47.1b default ON pins T1_A5: HC=10, N_min=10, analytical_baseline', `rec=${omitted.recommendedHC} type=${omitted.bindingConstraintType}`);
+  assert(!(omitted as any).belowWorkloadFloor && !(explicitOn as any).belowWorkloadFloor, 'D47.1c floor ON: belowWorkloadFloor is falsy', '');
+
+  // (b) OFF walks below N_min. On the plain T1_A5 fixture it cannot: occupancy is demand / planned
+  // capacity (frozen decision #3), so N=9 sits at 111% and fails the always-on 100% ceiling, and
+  // N_min = N_occ = 10 coincide. A floor only bites when N_min > N_occ, e.g. a contractual-hours
+  // override smaller than the hours the DES delivers (30h vs 40h): N_min = floor(400/30) = 13
+  // while the occupancy-feasible floor stays 10.
+  const offPlain = searchOptimalHC(p47(160, slaOff47));
+  assert(offPlain.recommendedHC === 10 && !offPlain.belowWorkloadFloor, 'D47.2p control: plain T1_A5 OFF stays at 10 (occupancy fails at 9) and is not flagged', `rec=${offPlain.recommendedHC} flag=${offPlain.belowWorkloadFloor}`);
+  const LAB47: LaborConfig = { ...LABOR, contractualHoursSource: 'override', contractualProductiveHoursOverride: 30 };
+  const onOv = searchOptimalHC(p47(160, sla47, { labor: LAB47 }));
+  assert(onOv.nMinAnalytical === 13 && onOv.recommendedHC === 13 && onOv.bindingConstraintType === 'analytical_baseline' && !onOv.belowWorkloadFloor, 'D47.2 control: override fixture, floor ON: N_min = 13, recommendedHC = 13 (analytical_baseline), not flagged', `nMin=${onOv.nMinAnalytical} rec=${onOv.recommendedHC} type=${onOv.bindingConstraintType}`);
+  const off = searchOptimalHC(p47(160, slaOff47, { labor: LAB47 }));
+  assert(off.recommendedHC !== null && off.recommendedHC < off.nMinAnalytical, 'D47.2a floor OFF: recommendedHC < N_min on the override fixture', `rec=${off.recommendedHC} nMin=${off.nMinAnalytical}`);
+  {
+    const below = off.searchHistory.find((h) => h.hc === (off.recommendedHC ?? 0) - 1);
+    assert(!!below && below.passed === false, 'D47.2b floor OFF: recommendedHC-1 was evaluated at full R and failed', `entry=${JSON.stringify(below)}`);
+    assert(off.belowWorkloadFloor === true, 'D47.2c floor OFF: belowWorkloadFloor === true', `got ${off.belowWorkloadFloor}`);
+    assert(off.bindingConstraintType !== 'analytical_baseline', 'D47.2d floor OFF: binding label is not the N_min floor label', `type=${off.bindingConstraintType}`);
+    assert((off.recommendedHC ?? 99) < (onOv.recommendedHC ?? 0), 'D47.2e OFF recommends fewer agents than ON (13)', `off=${off.recommendedHC} on=${onOv.recommendedHC}`);
+  }
+
+  // (c) sync === async under OFF
+  {
+    const asyncOff = await searchOptimalHCAsync(p47(160, slaOff47, { labor: LAB47 }));
+    assert(
+      asyncOff.recommendedHC === off.recommendedHC && asyncOff.bindingConstraintType === off.bindingConstraintType &&
+        asyncOff.bindingConstraintDescription === off.bindingConstraintDescription && (asyncOff as any).belowWorkloadFloor === (off as any).belowWorkloadFloor &&
+        asyncOff.searchHistory.map((h) => `${h.hc}:${h.passed}`).join(',') === off.searchHistory.map((h) => `${h.hc}:${h.passed}`).join(','),
+      'D47.3a sync === async under floor OFF (recommendedHC, binding, flag, evaluated history)', `sync=${off.recommendedHC} async=${asyncOff.recommendedHC}`
+    );
+    const asyncOn = await searchOptimalHCAsync(p47(160, sla47, { labor: LAB47 }));
+    assert(asyncOn.recommendedHC === onOv.recommendedHC && asyncOn.bindingConstraintType === onOv.bindingConstraintType, 'D47.3b sync === async under floor ON (default)', `sync=${onOv.recommendedHC} async=${asyncOn.recommendedHC}`);
+  }
+
+  // (d) OFF <= ON across a volume sweep
+  {
+    const bad: string[] = [];
+    for (const v of [40, 80, 120, 160, 200]) {
+      const o = searchOptimalHC(p47(v, sla47, { labor: LAB47 }));
+      const f = searchOptimalHC(p47(v, slaOff47, { labor: LAB47 }));
+      if ((f.recommendedHC ?? Infinity) > (o.recommendedHC ?? Infinity)) bad.push(`v=${v} on=${o.recommendedHC} off=${f.recommendedHC}`);
+    }
+    assert(bad.length === 0, 'D47.4 volume sweep: OFF recommendedHC <= ON recommendedHC', bad.join('; '));
+  }
+
+  // (e) OFF with a user cap below N_min is not rejected on the baseline alone
+  {
+    const on = searchOptimalHC(p47(160, sla47, { userMaxHC: 6, labor: LAB47 }));
+    const offCap = searchOptimalHC(p47(160, slaOff47, { userMaxHC: 6, labor: LAB47 }));
+    assert(on.isInfeasible && /strictly exceeds/.test(on.infeasibleReason ?? ''), 'D47.5a control: ON with cap < N_min is infeasible via the baseline check', `reason=${on.infeasibleReason}`);
+    assert(!/strictly exceeds/.test(offCap.infeasibleReason ?? ''), 'D47.5b OFF with cap < N_min is not infeasible via the baselineExceedsCap path', `reason=${offCap.infeasibleReason}`);
+    const offCapAsync = await searchOptimalHCAsync(p47(160, slaOff47, { userMaxHC: 6, labor: LAB47 }));
+    assert(offCapAsync.recommendedHC === offCap.recommendedHC && offCapAsync.isInfeasible === offCap.isInfeasible, 'D47.5c async agrees with sync for OFF + cap < N_min', `sync=${offCap.recommendedHC} async=${offCapAsync.recommendedHC}`);
+  }
+}
+
+// =================================================================
+// Suite D48 — SLA clock start derived from the clock basis (approved 2026-09-30)
+//
+// business_time => clock always starts at the next open business moment (stored value ignored;
+// addWorkingTime already starts at nextOpen, so this is HC-neutral). wall_clock => the stored
+// policy, default 'arrival'. resolveClockStartPolicy is the single read site in
+// generateCaseEntities.
+// Pre-fix: resolveClockStartPolicy does not exist; DEFAULT_SLA.clockStartPolicy is 'arrival'.
+// =================================================================
+console.log('\n--- Suite D48: clock start derived from clock basis ---');
+{
+  const resolve48 = (desNs as any).resolveClockStartPolicy as ((s: SLAPolicyConfig) => string) | undefined;
+  const base48: SLAPolicyConfig = { ...DEFAULT_SLA, primaryPct: 80, primaryWindow: 6, primaryUnit: 'hours', occupancyCapEnabled: false, minCoverageEnabled: false };
+  const mk48 = (basis: 'business_time' | 'wall_clock', pol: any): SLAPolicyConfig => ({ ...base48, clockBasis: basis, clockStartPolicy: pol });
+
+  assert(typeof resolve48 === 'function', 'D48.0 resolveClockStartPolicy is exported from des-engine', '');
+  if (typeof resolve48 === 'function') {
+    assert(resolve48(mk48('business_time', 'arrival')) === 'next_open', 'D48.1a business + stored arrival -> next_open (stored value ignored)', '');
+    assert(resolve48(mk48('business_time', 'next_open')) === 'next_open', 'D48.1b business + stored next_open -> next_open', '');
+    assert(resolve48(mk48('wall_clock', 'arrival')) === 'arrival', 'D48.1c wall + arrival -> arrival', '');
+    assert(resolve48(mk48('wall_clock', 'next_open')) === 'next_open', 'D48.1d wall + next_open -> next_open', '');
+    assert(resolve48(mk48('wall_clock', undefined)) === 'arrival', 'D48.1e wall + undefined -> arrival', '');
+  }
+  assert(DEFAULT_SLA.clockStartPolicy === 'next_open', 'D48.1f DEFAULT_SLA.clockStartPolicy is next_open (matches default business basis)', `got ${DEFAULT_SLA.clockStartPolicy}`);
+
+  // Off-hours arrival: Saturday 10:00-10:30 (calendar closed weekends).
+  const offIv: StandardInterval[] = [{ intervalIndex: 0, start: new Date(2026, 9, 10, 10, 0), end: new Date(2026, 9, 10, 10, 30), volume: 4, category: 'General' }];
+  const cat48: CategoryConfig[] = [{ id: 'g', name: 'General', ahtMinutes: 20, shrinkagePct: 0.2, priority: 1 }];
+  const wip48 = [{ id: 'W1', category: 'General', arrival: new Date(2026, 9, 10, 11, 0), priority: 1 }] as any;
+  const deadlines = (sla: SLAPolicyConfig) => {
+    const g = generateCaseEntities({ intervals: offIv, openingWIP: wip48, categories: cat48, calendar: BIZ_CAL, sla, seed: 42 });
+    return g.cases.map((c) => `${c.id}:${c.clockStart.getTime()}:${c.primaryDeadline.getTime()}`).join('|');
+  };
+  {
+    const a = deadlines(mk48('business_time', 'arrival'));
+    const n = deadlines(mk48('business_time', 'next_open'));
+    assert(a === n, 'D48.2a business_time: stored arrival vs next_open give identical clockStart + primaryDeadline (demand + opening WIP)', `arrival=${a.slice(0, 120)} next_open=${n.slice(0, 120)}`);
+    const first = generateCaseEntities({ intervals: offIv, openingWIP: [], categories: cat48, calendar: BIZ_CAL, sla: mk48('business_time', 'arrival'), seed: 42 }).cases[0];
+    assert(first.clockStart.getDay() === 1 && first.clockStart.getHours() === 9, 'D48.2b business_time + stored arrival: Saturday arrival clock starts Monday 09:00', `clockStart=${first.clockStart.toString()}`);
+  }
+  {
+    const a = deadlines(mk48('wall_clock', 'arrival'));
+    const n = deadlines(mk48('wall_clock', 'next_open'));
+    assert(a !== n, 'D48.3 wall_clock: arrival vs next_open deadlines differ for an off-hours arrival', '');
+  }
+  // Search parity under business_time (arrivals spread across all 24h incl. weekends).
+  {
+    const ivs: StandardInterval[] = [];
+    let idx = 0;
+    for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h += 6) ivs.push({ intervalIndex: idx++, start: new Date(2026, 9, 5 + d, h, 0), end: new Date(2026, 9, 5 + d, h + 6, 0), volume: 6, category: 'General' });
+    const run = (pol: any) => searchOptimalHC({ intervals: ivs, openingWIP: [], categories: cat48, calendar: BIZ_CAL, labor: LABOR, sla: mk48('business_time', pol), seed: 42, userMaxHC: 60, replications: 3 });
+    const a = run('arrival');
+    const n = run('next_open');
+    assert(a.recommendedHC !== null && a.recommendedHC === n.recommendedHC && a.nMinAnalytical === n.nMinAnalytical, 'D48.4 business_time: searchOptimalHC recommendedHC identical for stored arrival vs next_open', `arrival=${a.recommendedHC} next_open=${n.recommendedHC}`);
+  }
+}
+
+// =================================================================
+// Suite D50 — Stage 3b roster polish at fixed HC (placement ON only)
+//
+// After recommendedHC is decided the roster is re-spread across business hours (coverage floor
+// cover seeded into the deficit greedy) and adopted ONLY if every CI gate still passes at the SAME
+// HC and coverage strictly improves. HC never moves. Pre-fix: rosterPolish / initialCounts /
+// buildPolishedRoster do not exist, so every behavioural assert below fails.
+// =================================================================
+console.log('\n--- Suite D50: roster polish at fixed HC ---');
+{
+  const cal50: CalendarConfig = { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 20 };
+  const labor50Off: LaborConfig = { ...LABOR, dailyProductiveHours: 8 };
+  const labor50On: LaborConfig = { ...labor50Off, shiftPlacementEnabled: true, shiftSlapMinutes: 30 };
+  const cat50: CategoryConfig[] = [{ id: 'c1', name: 'General', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 }];
+  const mkIv50 = (volAt: (h: number) => number): StandardInterval[] => {
+    const out: StandardInterval[] = [];
+    for (let day = 0; day < 5; day++) {
+      for (let h = 8; h < 20; h++) {
+        for (let m = 0; m < 60; m += 30) {
+          out.push({ intervalIndex: out.length, start: new Date(2026, 2, 2 + day, h, m), end: new Date(2026, 2, 2 + day, h, m + 30), volume: volAt(h), category: 'General' });
+        }
+      }
+    }
+    return out;
+  };
+  const mkSla50 = (pct: number, windowH: number): SLAPolicyConfig => ({
+    primaryPct: pct, primaryWindow: windowH, primaryUnit: 'hours', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes',
+    asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'next_open',
+    occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 90,
+  });
+  const run50 = (labor: LaborConfig, ivs: StandardInterval[], sla: SLAPolicyConfig, seed = 42) => ({
+    intervals: ivs, openingWIP: [] as any[], categories: cat50, calendar: cal50, labor, sla, seed, userMaxHC: 40, replications: 6,
+  });
+  const slotsOf = (d: ShiftDistributionByCategory | undefined) => JSON.stringify(d?.__POOLED__?.slaps ?? null);
+
+  // Mid-day peak (12:00-16:00 heavy, light elsewhere): the uniform/repair roster leaves the
+  // morning under-covered while the deficit greedy shifts depth to where the work is released.
+  const iv50 = mkIv50((h) => (h >= 12 && h < 16 ? 14 : 3));
+  const sla50 = mkSla50(85, 3);
+  const off50 = searchOptimalHC(run50(labor50Off, iv50, sla50));
+  const on50 = searchOptimalHC(run50(labor50On, iv50, sla50));
+  const rp = (on50 as any).rosterPolish;
+
+  // D50.1
+  assert(rp !== undefined && rp.status === 'adopted', 'D50.1a placement ON, uniform/repair passes: polish adopted', `status=${rp?.status} reason=${rp?.reason}`);
+  assert(!!rp?.polished && (rp.polished.minOnShift > rp.current.minOnShift || (rp.polished.minOnShift === rp.current.minOnShift && rp.polished.gapAgentHours < rp.current.gapAgentHours - 1e-9)), 'D50.1b adopted roster improves coverage (higher minOnShift, tie -> lower gap)', `cur=${JSON.stringify(rp?.current)} pol=${JSON.stringify(rp?.polished)}`);
+  assert(!!rp?.polished && rp.polished.minOnShift >= 1, 'D50.1c polished roster keeps at least one agent on shift in every bucket', `min=${rp?.polished?.minOnShift}`);
+
+  // D50.2
+  assert(on50.recommendedHC === off50.recommendedHC && on50.staffing?.grossHCTotal === off50.staffing?.grossHCTotal, 'D50.2a recommendedHC and grossHCTotal equal the placement-OFF run (sync)', `off=${off50.recommendedHC}/${off50.staffing?.grossHCTotal} on=${on50.recommendedHC}/${on50.staffing?.grossHCTotal}`);
+  const on50Async = await searchOptimalHCAsync(run50(labor50On, iv50, sla50));
+  assert(on50Async.recommendedHC === off50.recommendedHC && on50Async.staffing?.grossHCTotal === off50.staffing?.grossHCTotal, 'D50.2b recommendedHC and grossHCTotal equal the placement-OFF run (async)', `async=${on50Async.recommendedHC}`);
+
+  // D50.3
+  const rpA = (on50Async as any).rosterPolish;
+  assert(rpA !== undefined && rpA.status === rp?.status && slotsOf(on50Async.shiftPlacement?.winningDistribution) === slotsOf(on50.shiftPlacement?.winningDistribution), 'D50.3 sync === async: rosterPolish status + adopted distribution', `sync=${rp?.status}/${slotsOf(on50.shiftPlacement?.winningDistribution)} async=${rpA?.status}/${slotsOf(on50Async.shiftPlacement?.winningDistribution)}`);
+
+  // D50.5
+  const minCov = on50.finalDESResult?.minCoverageObserved ?? -1;
+  assert(rp?.status === 'adopted' && minCov >= 1, 'D50.5 adopted roster satisfies the coverage floor in the audit DES', `status=${rp?.status} minCoverageObserved=${minCov}`);
+
+  // D50.6
+  const on50b = searchOptimalHC(run50(labor50On, iv50, sla50));
+  assert(rp !== undefined && JSON.stringify((on50b as any).rosterPolish) === JSON.stringify(rp), 'D50.6 same seed twice: identical rosterPolish', '');
+
+  // D50.8
+  assert((off50 as any).rosterPolish === undefined, 'D50.8 placement OFF: rosterPolish undefined', '');
+
+  // D50.4 — even the first move toward the coverage roster breaks a gate (tight 97% / 2h target
+  // right after a 60-case opening spike): current roster is kept, HC unchanged.
+  {
+    const ivC = mkIv50((h) => (h === 8 ? 60 : 5));
+    const slaC = mkSla50(97, 2);
+    const onC = searchOptimalHC(run50(labor50On, ivC, slaC));
+    const rpC = (onC as any).rosterPolish;
+    const offC = searchOptimalHC(run50(labor50Off, ivC, slaC));
+    assert(rpC !== undefined && rpC.status === 'kept_current_failed_gate' && typeof rpC.reason === 'string' && rpC.reason.length > 0 && rpC.movesApplied === 0, 'D50.4a first move fails the gate: status kept_current_failed_gate with reason', `status=${rpC?.status} reason=${rpC?.reason}`);
+    // Here the current roster is a placement RESCUE (uniform/repair cannot pass at all: OFF is infeasible),
+    // so HC is compared against that existing behaviour by construction, not against OFF.
+    assert(offC.recommendedHC === null && onC.recommendedHC !== null, 'D50.4b control: HC still comes from the unchanged search (placement rescue), polish only re-spreads', `off=${offC.recommendedHC} on=${onC.recommendedHC}`);
+    const winC = onC.shiftPlacement?.winningDistribution?.__POOLED__?.slaps ?? [];
+    const onShiftC = (rpC.profile.bucketStartMinutes as number[]).map((st) => winC.reduce((acc, sl) => (sl.startMinutesFromOpen <= st && st < sl.startMinutesFromOpen + 8 * 60 ? acc + sl.agentCount : acc), 0));
+    assert(JSON.stringify(onShiftC) === JSON.stringify(rpC.profile.onShiftCurrent) && slotsOf(onC.finalDESResult?.shiftDistributionUsed) === slotsOf(onC.shiftPlacement?.winningDistribution), 'D50.4c kept-current: final roster (and audit DES roster) is exactly the pre-polish current roster', `final=${JSON.stringify(onShiftC)} current=${JSON.stringify(rpC.profile.onShiftCurrent)}`);
+  }
+
+  // D50.9 — the target fails but a partial move passes: adopted_partial with better coverage.
+  {
+    const ivP = mkIv50((h) => (h === 8 ? 60 : 4));
+    const slaP = mkSla50(95, 4);
+    const onP = searchOptimalHC(run50(labor50On, ivP, slaP));
+    const offP = searchOptimalHC(run50(labor50Off, ivP, slaP));
+    const rpP = (onP as any).rosterPolish;
+    assert(rpP?.status === 'adopted_partial' && rpP.movesApplied > 0 && rpP.movesApplied < rpP.movesTotal && typeof rpP.reason === 'string' && rpP.reason.length > 0, 'D50.9a partial: 0 < k* < K with the failing reason of the next step', `status=${rpP?.status} ${rpP?.movesApplied}/${rpP?.movesTotal} reason=${rpP?.reason}`);
+    assert(!!rpP?.polished && rpP.polished.minOnShift > rpP.current.minOnShift, 'D50.9b partial roster has a strictly higher minOnShift than current', `cur=${rpP?.current?.minOnShift} pol=${rpP?.polished?.minOnShift}`);
+    assert(onP.recommendedHC === offP.recommendedHC && onP.staffing?.grossHCTotal === offP.staffing?.grossHCTotal, 'D50.9c partial: HC and gross HC equal placement-OFF', `off=${offP.recommendedHC} on=${onP.recommendedHC}`);
+    const onPA = await searchOptimalHCAsync(run50(labor50On, ivP, slaP));
+    assert(JSON.stringify((onPA as any).rosterPolish) === JSON.stringify(rpP) && slotsOf(onPA.shiftPlacement?.winningDistribution) === slotsOf(onP.shiftPlacement?.winningDistribution), 'D50.9d partial: sync === async (rosterPolish + adopted roster)', '');
+    const onP2 = searchOptimalHC(run50(labor50On, ivP, slaP));
+    assert(JSON.stringify((onP2 as any).rosterPolish) === JSON.stringify(rpP), 'D50.9e partial: deterministic across runs', '');
+  }
+
+  // D50.10 — the interpolation path and the k-search control (pure helpers).
+  {
+    const bri = (hcNs as any).buildRosterInterpolation as (p: any) => { moves: Array<{ key: string; from: number; to: number }>; totalMoves: number; rosterAt: (k: number) => any };
+    const mkD = (c: Record<number, number>): ShiftDistributionByCategory => ({ __POOLED__: { slapMinutes: 30, slaps: Object.entries(c).map(([o, n]) => ({ startMinutesFromOpen: Number(o), agentCount: n })) } });
+    const cur = mkD({ 0: 4, 240: 1 });
+    const tgt = mkD({ 0: 1, 30: 1, 240: 3 });
+    const it = bri({ current: cur, target: tgt, seats: new Map([['__POOLED__', 5]]), slapMinutes: 30 });
+    assert(it.totalMoves === 3 && JSON.stringify(it.moves.map((m) => [m.from, m.to])) === JSON.stringify([[0, 240], [0, 240], [0, 30]]), 'D50.10a move order: largest surplus -> largest deficit (ties: earliest from, latest to)', JSON.stringify(it.moves));
+    assert(it.rosterAt(0) === cur, 'D50.10b Roster(0) is the current roster', '');
+    const cnt = (d: any) => { const m = new Map<number, number>(); for (const sl of d.__POOLED__.slaps) m.set(sl.startMinutesFromOpen, sl.agentCount); return m; };
+    const eqCounts = (x: Map<number, number>, y: Map<number, number>) => { const ks = new Set([...x.keys(), ...y.keys()]); for (const k of ks) if ((x.get(k) || 0) !== (y.get(k) || 0)) return false; return true; };
+    assert(eqCounts(cnt(it.rosterAt(3)), cnt(tgt)), 'D50.10c Roster(K) has the target counts', JSON.stringify(it.rosterAt(3)));
+    let stepsOk = true;
+    for (let k = 1; k <= it.totalMoves; k++) {
+      const a = cnt(k === 1 ? cur : it.rosterAt(k - 1));
+      const b = cnt(it.rosterAt(k));
+      let moved = 0; let total = 0;
+      for (const key of new Set([...a.keys(), ...b.keys()])) { const d = (b.get(key) || 0) - (a.get(key) || 0); if (d > 0) moved += d; total += b.get(key) || 0; }
+      if (moved !== 1 || total !== 5) stepsOk = false;
+    }
+    assert(stepsOk, 'D50.10d each step moves exactly one agent and headcount stays 5', '');
+
+    const cks = (hcNs as any).createRosterKSearch as (K: number) => { next: () => number | null; record: (k: number, e: any) => void; result: () => { bestK: number; evals: Map<number, any> } };
+    const drive = (K: number, passesAt: (k: number) => boolean) => {
+      const ks = cks(K); const order: number[] = [];
+      for (let k = ks.next(); k !== null; k = ks.next()) { order.push(k); ks.record(k, { passes: passesAt(k), reasons: [], slaPct: 0 }); }
+      return { order, bestK: ks.result().bestK };
+    };
+    const r1 = drive(7, (k) => k <= 4);
+    assert(r1.bestK === 4 && r1.order[0] === 7 && r1.order.length <= Math.ceil(Math.log2(7)) + 1, 'D50.10e k-search: evaluates K first, finds largest passing k within ceil(log2 K)+1 evaluations', JSON.stringify(r1));
+    const r2 = drive(7, () => true);
+    assert(r2.bestK === 7 && r2.order.length === 1, 'D50.10f k-search: target passing ends after one evaluation', JSON.stringify(r2));
+    const r3 = drive(7, () => false);
+    assert(r3.bestK === 0 && r3.order.length <= Math.ceil(Math.log2(7)) + 1 && r3.order.includes(1), 'D50.10g k-search: nothing passes -> k*=0 and step 1 was tried', JSON.stringify(r3));
+  }
+
+  // D50.7 — no seed === today's placement (explicit no-regression); a seed is honoured.
+  {
+    const windowLen = 12 * 60;
+    const shiftLen = 8 * 60;
+    const starts = getValidSlapStarts(cal50, shiftLen, 30);
+    const size = Math.ceil(windowLen / 30);
+    const matrix = new Float64Array(size * size);
+    matrix[0 * size + 7] = 600;
+    matrix[12 * size + 23] = 500;
+    matrix[6 * size + 15] = 300;
+    const g = { gridMinutes: 30, windowLengthMinutes: windowLen, size, matrix, totalWorkMinutes: 1400 };
+    const plain = computeShiftPlacement({ grid: g, validStarts: starts, shiftLengthMinutes: shiftLen, n: 6, slapMinutes: 30 });
+    const emptySeed = computeShiftPlacement({ grid: g, validStarts: starts, shiftLengthMinutes: shiftLen, n: 6, slapMinutes: 30, initialCounts: new Map() } as any);
+    assert(JSON.stringify(plain) === JSON.stringify(emptySeed), 'D50.7a empty seed is byte-identical to no seed', '');
+    const seeded = computeShiftPlacement({ grid: g, validStarts: starts, shiftLengthMinutes: shiftLen, n: 6, slapMinutes: 30, initialCounts: new Map([[240, 2]]) } as any);
+    const tot = seeded.slaps.reduce((a, s) => a + s.agentCount, 0);
+    const at240 = seeded.slaps.find((s) => s.startMinutesFromOpen === 240)?.agentCount ?? 0;
+    assert(tot === 6 && at240 >= 2, 'D50.7b seeded run places exactly n agents in total and keeps the seed', JSON.stringify(seeded.slaps));
   }
 }
 
