@@ -65,7 +65,10 @@ recommendation coincide.
 
 **Why a floor at all?** The simulation grants a drain window past the horizon end. Without
 the floor, a headcount below the steady-state line could appear to pass by exploiting that
-finite-horizon edge effect while being unsustainable in a repeating period.
+finite-horizon edge effect while being unsustainable in a repeating period. The floor is ON
+by default; an explicit opt-out ("Workload Floor", `sla.nMinFloorEnabled: false`, approved
+2026-09-30) lets the search walk below `max(N_min, N_occ)` and flags such results as optimistic
+(`belowWorkloadFloor`).
 
 ## Stage 3 — Simulation search
 

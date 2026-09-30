@@ -8,11 +8,13 @@ import {
   CalendarConfig,
   CaseEntity,
   CategoryConfig,
+  CoverageSummary,
   DESResult,
   HCSearchOutput,
   LaborConfig,
   OpeningWIPCase,
   PrimarySLAStatisticalResult,
+  RosterPolishResult,
   SearchProgressState,
   ShiftDistributionByCategory,
   ShiftSlap,
@@ -422,8 +424,15 @@ export function computeShiftPlacement(params: {
   shiftLengthMinutes: number;
   n: number;
   slapMinutes: number;
+  /**
+   * Optional pre-placed agents (start offset in minutes-from-open -> count), used by the roster
+   * polish (Stage 3b) to seed the coverage-floor cover. The greedy is incremental, so only the
+   * remaining n - seeded agents are placed. Ignored (treated as no seed) if it holds more than n
+   * agents or an offset that is not a valid start. Absent/empty = byte-identical to no seed.
+   */
+  initialCounts?: Map<number, number>;
 }): ShiftSlapDistribution {
-  const { grid, validStarts, shiftLengthMinutes, n, slapMinutes } = params;
+  const { grid, validStarts, shiftLengthMinutes, n, slapMinutes, initialCounts } = params;
   if (validStarts.length === 0 || n <= 0 || grid.totalWorkMinutes <= 0) {
     return { slapMinutes, slaps: [] };
   }
@@ -432,8 +441,24 @@ export function computeShiftPlacement(params: {
   const prefix = build2DPrefixSum(matrix, size);
   const discriminates = computeWindowDiscrimination(validStarts, shiftLengthMinutes, windowLengthMinutes, gridMinutes, size);
   const counts = new Map<number, number>(validStarts.map((s) => [s, 0]));
+  let seeded = 0;
+  if (initialCounts && initialCounts.size > 0) {
+    let total = 0;
+    let valid = true;
+    for (const [off, cnt] of initialCounts.entries()) {
+      if (cnt <= 0) continue;
+      if (!counts.has(off)) valid = false;
+      total += cnt;
+    }
+    if (valid && total <= n) {
+      for (const [off, cnt] of initialCounts.entries()) {
+        if (cnt > 0) counts.set(off, (counts.get(off) || 0) + cnt);
+      }
+      seeded = total;
+    }
+  }
 
-  for (let agent = 0; agent < n; agent++) {
+  for (let agent = seeded; agent < n; agent++) {
     let bestOffset = validStarts[0];
     let bestResultingDeficit = Infinity;
     // Ties broken toward the EARLIEST candidate offset (ascending iteration, only switching on
@@ -587,6 +612,25 @@ export function computeCandidatePlacementDistribution(params: {
 }
 
 /**
+ * Greedy minimal interval cover of the business window by equal-length shifts: the sorted set of
+ * start offsets (always including 0) such that every point of the window is inside some chosen
+ * shift. Shared by buildCoverageRepairDistribution and the roster polish seed so the two can never
+ * drift on what "minimal cover" means.
+ */
+function computeMinimalCoverStarts(validStarts: number[], shiftLengthMinutes: number, windowLengthMinutes: number): number[] {
+  const sortedDesc = [...validStarts].sort((a, b) => b - a);
+  const chosen = new Set<number>([0]);
+  let frontier = 0;
+  while (frontier < windowLengthMinutes - 1e-9) {
+    const pick = sortedDesc.find((s) => s <= frontier + 1e-9);
+    if (pick === undefined) break; // unreachable: offset 0 is always a valid start
+    chosen.add(pick);
+    frontier = pick + shiftLengthMinutes;
+  }
+  return Array.from(chosen).sort((a, b) => a - b);
+}
+
+/**
  * Builds the minimal shift-start distribution needed to satisfy the coverage floor (at least
  * minAgentsPerInterval on shift at every point in the business window) — independent of SLA/
  * deadline objectives, and independent of shiftPlacementEnabled: G1 ("the queue may never be
@@ -621,16 +665,7 @@ export function buildCoverageRepairDistribution(params: {
   if (shiftLengthMinutes >= windowLengthMinutes) return null; // offset 0 alone already covers
 
   const buildForSeats = (seats: number): ShiftSlapDistribution | null => {
-    const sortedDesc = [...validStarts].sort((a, b) => b - a);
-    const chosen = new Set<number>([0]);
-    let frontier = 0;
-    while (frontier < windowLengthMinutes - 1e-9) {
-      const pick = sortedDesc.find((s) => s <= frontier + 1e-9);
-      if (pick === undefined) break; // unreachable: offset 0 is always a valid start
-      chosen.add(pick);
-      frontier = pick + shiftLengthMinutes;
-    }
-    const nonZero = Array.from(chosen).filter((o) => o > 0).sort((a, b) => a - b);
+    const nonZero = computeMinimalCoverStarts(validStarts, shiftLengthMinutes, windowLengthMinutes).filter((o) => o > 0);
     // Offset 0 must ALSO independently satisfy the floor for its own portion of the window —
     // it is not merely "whatever's left over" after the other offsets are seeded. Missing
     // this left offset 0 with zero agents whenever seats exactly matched the non-zero
@@ -733,6 +768,268 @@ export function resolveCoverageBinding(
   return {
     type: 'min_coverage',
     description: `Minimum Coverage Floor (≥ ${minAgents} agent${minAgents === 1 ? '' : 's'} on shift at every open interval) — SLA and occupancy already pass one agent lower`,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Stage 3b — roster polish at fixed HC (only when labor.shiftPlacementEnabled). ONE implementation
+// of the pure parts, shared by searchOptimalHC and searchOptimalHCAsync (D11: never duplicate).
+// The HC search is untouched; after recommendedHC is decided the roster is re-spread across the
+// business day and adopted iff the SAME CI gates still pass and business-hour coverage is better.
+// ---------------------------------------------------------------------------------------------
+
+/** Per-bucket business-hours coverage of one roster: agents on shift vs agents the released work needs. */
+export interface CoverageProfile extends CoverageSummary {
+  bucketMinutes: number;
+  /** Minutes after business open at which each bucket starts. */
+  bucketStartMinutes: number[];
+  /** Agents whose OWN fixed shift window covers the bucket start (same presence rule as countAgentsOnShiftNow, frozen decision #11). */
+  onShift: number[];
+  /** Work released in the bucket per working day / (bucket minutes x effective adherence). Full precision. */
+  requiredAgents: number[];
+}
+
+/** Seat count per distribution key: the whole pool, or the frozen Webster split for siloed. */
+function seatsByDistributionKey(cases: CaseEntity[], n: number, queueArchitecture: 'pooled' | 'siloed'): Map<string, number> {
+  if (queueArchitecture === 'pooled') return new Map<string, number>([['__POOLED__', n]]);
+  const catWorkloadMinutes = new Map<string, number>();
+  for (const c of cases) catWorkloadMinutes.set(c.category, (catWorkloadMinutes.get(c.category) || 0) + c.totalAhtMinutes);
+  return allocateAgentsToCategories(catWorkloadMinutes, n);
+}
+
+/** Every agent's start offset, expanded the way runBackofficeDES assigns slaps (ascending, remainder at offset 0). */
+function expandAgentStartOffsets(distribution: ShiftDistributionByCategory | undefined, seats: Map<string, number>): number[] {
+  const offsets: number[] = [];
+  for (const [key, seatCount] of seats.entries()) {
+    let placed = 0;
+    const dist = distribution?.[key];
+    if (dist) {
+      const sorted = [...dist.slaps].sort((a, b) => a.startMinutesFromOpen - b.startMinutesFromOpen);
+      for (const slap of sorted) {
+        for (let k = 0; k < slap.agentCount && placed < seatCount; k++, placed++) offsets.push(slap.startMinutesFromOpen);
+      }
+    }
+    while (placed < seatCount) {
+      offsets.push(0);
+      placed++;
+    }
+  }
+  return offsets;
+}
+
+/**
+ * Coverage of `distribution` (undefined = uniform: every agent at open) at headcount `n` against the
+ * one-representative-day demand. null when not measurable (24x7 calendar or no demand).
+ */
+export function computeCoverageProfile(params: {
+  distribution: ShiftDistributionByCategory | undefined;
+  n: number;
+  cases: CaseEntity[];
+  calendar: CalendarConfig;
+  labor: LaborConfig;
+  queueArchitecture: 'pooled' | 'siloed';
+}): CoverageProfile | null {
+  const { distribution, n, cases, calendar, labor, queueArchitecture } = params;
+  if (calendar.is24x7 || n <= 0) return null;
+  const grid = buildOneDayDemandGrid(cases, calendar, resolveShiftSlapMinutes(labor));
+  if (grid.totalWorkMinutes <= 0) return null;
+  const adherence = resolveEffectiveAdherence(labor);
+  const shiftLengthMinutes = labor.dailyProductiveHours * 60;
+  const offsets = expandAgentStartOffsets(distribution, seatsByDistributionKey(cases, n, queueArchitecture));
+
+  const bucketStartMinutes: number[] = [];
+  const onShift: number[] = [];
+  const requiredAgents: number[] = [];
+  let met = 0;
+  let gapAgentHours = 0;
+  let minOnShift = Infinity;
+  for (let i = 0; i < grid.size; i++) {
+    const start = i * grid.gridMinutes;
+    const len = Math.min(grid.gridMinutes, grid.windowLengthMinutes - start);
+    if (len <= 1e-9) break;
+    let released = 0;
+    for (let j = 0; j < grid.size; j++) released += grid.matrix[i * grid.size + j];
+    const required = released / (len * adherence);
+    let present = 0;
+    for (const off of offsets) if (off <= start + 1e-9 && start < off + shiftLengthMinutes - 1e-9) present++;
+    bucketStartMinutes.push(start);
+    onShift.push(present);
+    requiredAgents.push(required);
+    if (present >= required - 1e-9) met++;
+    else gapAgentHours += ((required - present) * len) / 60;
+    if (present < minOnShift) minOnShift = present;
+  }
+  const buckets = onShift.length;
+  if (buckets === 0) return null;
+  return {
+    bucketMinutes: grid.gridMinutes,
+    bucketStartMinutes,
+    onShift,
+    requiredAgents,
+    minOnShift,
+    bucketsMeetingNeedPct: (100 * met) / buckets,
+    gapAgentHours,
+  };
+}
+
+/**
+ * Builds the floor-aware coverage roster at headcount n: the minimal coverage-floor cover (the
+ * minAgentsPerInterval agents at each start of the minimal interval cover, offset 0 included) is
+ * the seed, and the Hall-deficit greedy places every remaining agent by demand. Pooled = one grid
+ * keyed '__POOLED__'; siloed = one grid per category on the frozen Webster split, seeded per
+ * category only when that category's seats can hold the cover. distribution null => not applicable.
+ */
+export function buildPolishedRoster(params: {
+  n: number;
+  cases: CaseEntity[];
+  calendar: CalendarConfig;
+  labor: LaborConfig;
+  sla: SLAPolicyConfig;
+  queueArchitecture: 'pooled' | 'siloed';
+}): { distribution: ShiftDistributionByCategory | null; reason?: string } {
+  const { n, cases, calendar, labor, sla, queueArchitecture } = params;
+  if (n <= 0) return { distribution: null, reason: 'no headcount to place' };
+  if (calendar.is24x7) return { distribution: null, reason: '24x7 calendar: every hour is open, so there is no business-hours window to stagger across' };
+  const shiftLengthMinutes = labor.dailyProductiveHours * 60;
+  const windowLengthMinutes = getDailyWindowLengthHours(calendar) * 60;
+  if (shiftLengthMinutes >= windowLengthMinutes - 1e-9) {
+    return { distribution: null, reason: 'the shift is as long as the open window, so every agent already covers all business hours' };
+  }
+  const slapMinutes = resolveShiftSlapMinutes(labor);
+  const validStarts = getValidSlapStarts(calendar, shiftLengthMinutes, slapMinutes);
+  if (validStarts.length === 0) return { distribution: null, reason: 'no valid shift start fits inside the open window' };
+
+  const capacityMinutes = shiftLengthMinutes * resolveEffectiveAdherence(labor);
+  const minAgents = resolveMinAgentsPerInterval(sla, n);
+  const cover = computeMinimalCoverStarts(validStarts, shiftLengthMinutes, windowLengthMinutes);
+  const placeSeats = (grid: DemandGrid, seats: number): ShiftSlapDistribution => {
+    const seed =
+      minAgents > 0 && cover.length * minAgents <= seats
+        ? new Map<number, number>(cover.map((o) => [o, minAgents]))
+        : undefined;
+    return computeShiftPlacement({ grid, validStarts, shiftLengthMinutes: capacityMinutes, n: seats, slapMinutes, initialCounts: seed });
+  };
+
+  if (queueArchitecture === 'pooled') {
+    const grid = buildOneDayDemandGrid(cases, calendar, slapMinutes);
+    if (grid.totalWorkMinutes <= 0) return { distribution: null, reason: 'no demand to shape a roster around' };
+    const dist = placeSeats(grid, n);
+    return dist.slaps.length > 0 ? { distribution: { __POOLED__: dist } } : { distribution: null, reason: 'no roster could be placed' };
+  }
+
+  const casesByCategory = new Map<string, CaseEntity[]>();
+  for (const c of cases) {
+    if (!casesByCategory.has(c.category)) casesByCategory.set(c.category, []);
+    casesByCategory.get(c.category)!.push(c);
+  }
+  const result: ShiftDistributionByCategory = {};
+  let any = false;
+  for (const [catName, seatCount] of seatsByDistributionKey(cases, n, 'siloed').entries()) {
+    if (seatCount <= 0) continue;
+    const grid = buildOneDayDemandGrid(casesByCategory.get(catName) || [], calendar, slapMinutes);
+    if (grid.totalWorkMinutes <= 0) continue; // its agents stay at open, as in the DES
+    const dist = placeSeats(grid, seatCount);
+    if (dist.slaps.length > 0) {
+      result[catName] = dist;
+      any = true;
+    }
+  }
+  return any ? { distribution: result } : { distribution: null, reason: 'no demand to shape a roster around' };
+}
+
+/** Plan for the polish step: whether it applies, and whether the polished roster covers better (else no DES run is needed). */
+export type RosterPolishPlan =
+  | { applicable: false; reason: string; current?: CoverageProfile }
+  | { applicable: true; polished: ShiftDistributionByCategory; current: CoverageProfile; polishedProfile: CoverageProfile; improves: boolean };
+
+/** Strictly better coverage: more buckets meeting need, or equal with strictly lower gap (float tolerance). */
+function coverageIsBetter(candidate: CoverageSummary, baseline: CoverageSummary): boolean {
+  if (candidate.bucketsMeetingNeedPct > baseline.bucketsMeetingNeedPct + 1e-9) return true;
+  return Math.abs(candidate.bucketsMeetingNeedPct - baseline.bucketsMeetingNeedPct) <= 1e-9 && candidate.gapAgentHours < baseline.gapAgentHours - 1e-9;
+}
+
+export function planRosterPolish(params: {
+  n: number;
+  cases: CaseEntity[];
+  calendar: CalendarConfig;
+  labor: LaborConfig;
+  sla: SLAPolicyConfig;
+  queueArchitecture: 'pooled' | 'siloed';
+  /** The roster the search actually won with at n (undefined = uniform). */
+  currentDistribution: ShiftDistributionByCategory | undefined;
+}): RosterPolishPlan {
+  const { n, cases, calendar, labor, sla, queueArchitecture, currentDistribution } = params;
+  const current = computeCoverageProfile({ distribution: currentDistribution, n, cases, calendar, labor, queueArchitecture });
+  const built = buildPolishedRoster({ n, cases, calendar, labor, sla, queueArchitecture });
+  if (!built.distribution || !current) {
+    return { applicable: false, reason: built.reason ?? 'no demand grid to measure coverage against', current: current ?? undefined };
+  }
+  const polishedProfile = computeCoverageProfile({ distribution: built.distribution, n, cases, calendar, labor, queueArchitecture });
+  if (!polishedProfile) return { applicable: false, reason: 'no demand grid to measure coverage against', current };
+  return { applicable: true, polished: built.distribution, current, polishedProfile, improves: coverageIsBetter(polishedProfile, current) };
+}
+
+const summarizeCoverage = (p: CoverageProfile): CoverageSummary => ({
+  minOnShift: p.minOnShift,
+  bucketsMeetingNeedPct: p.bucketsMeetingNeedPct,
+  gapAgentHours: p.gapAgentHours,
+});
+
+/**
+ * Decision: adopt the polished roster iff it passed every CI gate at n (polishedEval) AND its
+ * coverage is better (plan.improves). polishedEval is only supplied when the plan improves.
+ */
+export function finalizeRosterPolish(params: {
+  plan: RosterPolishPlan;
+  polishedEval?: { passesAllConstraints: boolean; failingReasons: string[]; primaryStats: { achievedPctMedian: number } };
+  currentSlaPct?: number;
+}): { rosterPolish: RosterPolishResult; adoptedDistribution?: ShiftDistributionByCategory } {
+  const { plan, polishedEval, currentSlaPct } = params;
+  if (plan.applicable === false) {
+    const cur = plan.current;
+    return {
+      rosterPolish: {
+        status: 'not_applicable',
+        reason: plan.reason,
+        current: cur ? summarizeCoverage(cur) : { minOnShift: 0, bucketsMeetingNeedPct: 0, gapAgentHours: 0 },
+        currentSlaPct,
+        profile: {
+          bucketMinutes: cur?.bucketMinutes ?? 0,
+          bucketStartMinutes: cur?.bucketStartMinutes ?? [],
+          requiredAgents: cur?.requiredAgents ?? [],
+          onShiftCurrent: cur?.onShift ?? [],
+        },
+      },
+    };
+  }
+  const base = {
+    current: summarizeCoverage(plan.current),
+    polished: summarizeCoverage(plan.polishedProfile),
+    currentSlaPct,
+    profile: {
+      bucketMinutes: plan.current.bucketMinutes,
+      bucketStartMinutes: plan.current.bucketStartMinutes,
+      requiredAgents: plan.current.requiredAgents,
+      onShiftCurrent: plan.current.onShift,
+      onShiftPolished: plan.polishedProfile.onShift,
+    },
+  };
+  if (!plan.improves || !polishedEval) {
+    return { rosterPolish: { status: 'no_improvement', reason: 'the polished layout does not cover business hours better than the current roster', ...base } };
+  }
+  if (!polishedEval.passesAllConstraints) {
+    return {
+      rosterPolish: {
+        status: 'kept_current_failed_gate',
+        reason: polishedEval.failingReasons.join('; ') || 'a CI gate failed',
+        ...base,
+        polishedSlaPct: polishedEval.primaryStats.achievedPctMedian,
+      },
+    };
+  }
+  return {
+    rosterPolish: { status: 'adopted', ...base, polishedSlaPct: polishedEval.primaryStats.achievedPctMedian },
+    adoptedDistribution: plan.polished,
   };
 }
 
@@ -2017,6 +2314,27 @@ export function searchOptimalHC(params: {
     }
   }
 
+  // Stage 3b — roster polish at the FIXED recommendedHC (placement ON only). Pure parts live in
+  // planRosterPolish / finalizeRosterPolish, shared with the async twin; only the evaluator differs.
+  let rosterPolish: RosterPolishResult | undefined;
+  if (labor.shiftPlacementEnabled && recommendedHC !== null && !isInfeasible && representativeCases && primaryPassedResult) {
+    const plan = planRosterPolish({
+      n: recommendedHC, cases: representativeCases, calendar, labor, sla, queueArchitecture,
+      currentDistribution: winningDistributionByN.get(recommendedHC),
+    });
+    const polishedEval =
+      plan.applicable && plan.improves
+        ? evaluateCandidateStatistical({
+            operationalHC: recommendedHC, intervals, openingWIP, categories, calendar, labor, sla,
+            baseSeed: seed, replications: R, queueArchitecture, precomputedCaseSets,
+            shiftDistribution: plan.polished, dispatchFairness,
+          })
+        : undefined;
+    const fin = finalizeRosterPolish({ plan, polishedEval, currentSlaPct: primaryPassedResult.primaryStats.achievedPctMedian });
+    rosterPolish = fin.rosterPolish;
+    if (fin.adoptedDistribution) winningDistributionByN.set(recommendedHC, fin.adoptedDistribution);
+  }
+
   // 4. Run final DES audit pass at evalN
   const repIdx =
     primaryPassedResult?.representativeRepIndex ??
@@ -2203,6 +2521,7 @@ export function searchOptimalHC(params: {
           winningDistribution: recommendedHC !== null ? winningDistributionByN.get(recommendedHC) : undefined,
         }
       : undefined,
+    ...(rosterPolish ? { rosterPolish } : {}),
   };
 }
 
@@ -2751,6 +3070,37 @@ export async function searchOptimalHCAsync(params: {
     }
   }
 
+  // Stage 3b — roster polish at the FIXED recommendedHC (see searchOptimalHC's identical block).
+  let rosterPolish: RosterPolishResult | undefined;
+  if (labor.shiftPlacementEnabled && recommendedHC !== null && !isInfeasible && representativeCases && primaryPassedResult) {
+    if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
+    const plan = planRosterPolish({
+      n: recommendedHC, cases: representativeCases, calendar, labor, sla, queueArchitecture,
+      currentDistribution: winningDistributionByN.get(recommendedHC),
+    });
+    let polishedEval: Awaited<ReturnType<typeof evaluateCandidateStatisticalAsync>> | undefined;
+    if (plan.applicable && plan.improves) {
+      onProgress?.({
+        status: 'verifying_boundary',
+        phase: 'Phase 3: Roster Coverage Polish',
+        currentN: recommendedHC,
+        nMin: nMinAnalytical,
+        maxN: searchCap,
+        percent: 93,
+        evaluatedHistory: buildHistorySnapshot(),
+        currentMessage: `Polishing roster coverage at N = ${recommendedHC} (same headcount; adopted only if every gate still passes)...`,
+      });
+      polishedEval = await evaluateCandidateStatisticalAsync({
+        operationalHC: recommendedHC, intervals, openingWIP, categories, calendar, labor, sla,
+        baseSeed: seed, replications: R, queueArchitecture, precomputedCaseSets,
+        shouldCancel, shiftDistribution: plan.polished, dispatchFairness,
+      });
+    }
+    const fin = finalizeRosterPolish({ plan, polishedEval, currentSlaPct: primaryPassedResult.primaryStats.achievedPctMedian });
+    rosterPolish = fin.rosterPolish;
+    if (fin.adoptedDistribution) winningDistributionByN.set(recommendedHC, fin.adoptedDistribution);
+  }
+
   // 4. Run final DES audit pass at evalN
   onProgress?.({
     status: isInfeasible ? 'infeasible' : 'verifying_boundary',
@@ -2968,6 +3318,7 @@ export async function searchOptimalHCAsync(params: {
           winningDistribution: recommendedHC !== null ? winningDistributionByN.get(recommendedHC) : undefined,
         }
       : undefined,
+    ...(rosterPolish ? { rosterPolish } : {}),
   };
 }
 

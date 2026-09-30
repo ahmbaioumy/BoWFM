@@ -48,6 +48,73 @@ import {
   XCircle,
 } from 'lucide-react';
 
+const pctText = (v: number | undefined): string => (v === undefined || !Number.isFinite(v) ? 'n/a' : `${Math.round(v * 10) / 10}%`);
+const clockLabel = (calendar: CalendarConfig, minutesAfterOpen: number): string => {
+  const total = (calendar.dailyOpenHour ?? 8) * 60 + (calendar.dailyOpenMinute ?? 0) + minutesAfterOpen;
+  const h = Math.floor(total / 60) % 24;
+  const m = Math.round(total % 60);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+};
+
+/** Stage 3b roster polish: status line + per-bucket bars (required vs on-shift current vs polished). */
+const RosterCoverageCard: React.FC<{
+  polish: NonNullable<HCSearchOutput['rosterPolish']>;
+  hc: number;
+  calendar: CalendarConfig;
+  targetLabel: string;
+}> = ({ polish, hc, calendar, targetLabel }) => {
+  const { profile, current, polished } = polish;
+  const gap = (v: number) => `${Math.round(v * 10) / 10}`;
+  let status: string;
+  if (polish.status === 'adopted' && polished) {
+    status = `Polished roster adopted: business-hour buckets meeting need ${pctText(current.bucketsMeetingNeedPct)} → ${pctText(polished.bucketsMeetingNeedPct)}, coverage gap ${gap(current.gapAgentHours)} → ${gap(polished.gapAgentHours)} agent-hours, SLA ${pctText(polish.currentSlaPct)} → ${pctText(polish.polishedSlaPct)} (≥ target ${targetLabel}), HC unchanged.`;
+  } else if (polish.status === 'kept_current_failed_gate') {
+    status = `Kept current roster: polished layout failed ${polish.reason ?? 'a CI gate'} at N = ${hc}.`;
+  } else if (polish.status === 'no_improvement') {
+    status = 'Kept current roster: a re-spread roster does not cover business hours better at this headcount.';
+  } else {
+    status = `Roster polish not applicable: ${polish.reason ?? 'no staggering possible'}.`;
+  }
+  const buckets = profile.bucketStartMinutes.length;
+  const peak = Math.max(1, ...profile.requiredAgents, ...profile.onShiftCurrent, ...(profile.onShiftPolished ?? []));
+  const barH = (v: number) => `${Math.max(1, (v / peak) * 100)}%`;
+  return (
+    <div className="mt-2 text-[11px] text-slate-700 bg-blue-50/50 border border-blue-200 rounded-lg px-2.5 py-2 leading-relaxed space-y-2">
+      <div>
+        <strong>Roster coverage by hour.</strong> {status}
+      </div>
+      {buckets > 0 && (
+        <>
+          <div className="flex items-end gap-px h-24 border-b border-slate-300" role="img" aria-label="Agents required versus on shift per bucket">
+            {profile.bucketStartMinutes.map((start, i) => (
+              <div
+                key={start}
+                className="flex-1 flex items-end justify-center gap-px h-full"
+                title={`${clockLabel(calendar, start)}  need ${profile.requiredAgents[i].toFixed(1)}  current ${profile.onShiftCurrent[i]}${profile.onShiftPolished ? `  polished ${profile.onShiftPolished[i]}` : ''}`}
+              >
+                <div className="w-1/3 bg-amber-400" style={{ height: barH(profile.requiredAgents[i]) }} />
+                <div className="w-1/3 bg-slate-500" style={{ height: barH(profile.onShiftCurrent[i]) }} />
+                {profile.onShiftPolished && <div className="w-1/3 bg-blue-600" style={{ height: barH(profile.onShiftPolished[i]) }} />}
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-between font-mono text-[10px] text-slate-500">
+            <span>{clockLabel(calendar, profile.bucketStartMinutes[0])}</span>
+            <span>{clockLabel(calendar, profile.bucketStartMinutes[Math.floor(buckets / 2)])}</span>
+            <span>{clockLabel(calendar, profile.bucketStartMinutes[buckets - 1] + profile.bucketMinutes)}</span>
+          </div>
+          <div className="flex gap-3 flex-wrap text-[10px]">
+            <span><span className="inline-block w-2 h-2 bg-amber-400 mr-1" />Agents needed</span>
+            <span><span className="inline-block w-2 h-2 bg-slate-500 mr-1" />On shift, current roster</span>
+            {profile.onShiftPolished && <span><span className="inline-block w-2 h-2 bg-blue-600 mr-1" />On shift, polished roster</span>}
+            <span className="text-slate-500">Scale peak = {Math.round(peak * 10) / 10} agents; one bar group per {profile.bucketMinutes}-minute bucket, clock times.</span>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
+
 interface ResultsFlowProps {
   currentTab: string;
   searchOutput: HCSearchOutput | null;
@@ -845,10 +912,18 @@ function ResultsFlowBody({
                         : ''}
                       {searchOutput.shiftPlacement.winningDistribution
                         ? ' — the recommended headcount uses a staggered shift-start distribution, not a uniform business-open start.'
-                        : ' — the recommendation used a uniform business-open start; placement did not find a better distribution.'}
+                        : ' — the recommendation used the uniform business-open start (plus the minimal coverage-repair stagger); no staggered distribution was needed to pass.'}
                     </>
                   )}
                 </div>
+              )}
+              {searchOutput.rosterPolish && (
+                <RosterCoverageCard
+                  polish={searchOutput.rosterPolish}
+                  hc={primaryHC}
+                  calendar={calendar}
+                  targetLabel={primaryTargetLabel}
+                />
               )}
             </div>
           </div>

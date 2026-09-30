@@ -333,11 +333,13 @@ export function ConfigFlow({
                   Deadline-Coverage Shift Placement
                 </h4>
                 <p className="text-xs text-slate-500">
-                  Experimental, opt-in. When a candidate headcount fails the SLA under a uniform
-                  business-open start, also try a staggered shift-start distribution before rejecting it —
-                  used only when it verifiably passes, so it can never recommend a worse headcount than
-                  today. It has not been shown to reliably find a better one on realistic demand. Off by
-                  default — leaves every existing result byte-for-byte unchanged.
+                  Experimental, opt-in. When enabled: (1) a candidate headcount that fails the SLA under
+                  a uniform business-open start may be rescued by a staggered shift-start distribution,
+                  used only when it verifiably passes; (2) once Req HC is fixed, the roster is re-spread
+                  across business hours for the best coverage and adopted only if every SLA, occupancy
+                  and coverage gate still passes at the same headcount. Headcount never changes; the SLA
+                  margin may shrink but stays at or above target. Off by default — leaves every result
+                  byte-for-byte unchanged.
                 </p>
               </div>
 
@@ -400,7 +402,9 @@ export function ConfigFlow({
               </div>
             ) : (
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-600">
-                Every agent starts one uniform shift at business open, exactly as today.
+                Every agent starts one uniform shift at business open (plus the minimal coverage-repair
+                stagger), exactly as today. Enabling placement also re-spreads the roster across business
+                hours after Req HC is fixed — headcount is never changed by it.
               </div>
             )}
           </div>

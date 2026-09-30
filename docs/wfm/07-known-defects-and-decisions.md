@@ -21,7 +21,8 @@ Confirmed sound against contact-centre WFM/COPC practice. Also listed in
 | Harmonic effective-shrinkage blend | Gross-up divides by `(1−shr)`, so `1/(1−shr)` is what adds linearly (see `04`) |
 | Per-category gross-up → sum → single `round` | Avoids systematic drift (corrected 2026-08-28: was documented as `ceil`, code/UI have always used `round`) |
 | Occupancy cap in the `N_min` denominator | Expresses "size so utilisation stays ≤ cap" |
-| `N_min` as a hard search floor | Prevents a headcount that only passes via the finite-horizon drain edge effect |
+| `N_min` as a hard search floor (default ON; opt-out approved 2026-09-30, `resolveSearchBounds`) | Prevents a headcount that only passes via the finite-horizon drain edge effect |
+| Clock start derived from clock basis (2026-09-30, `resolveClockStartPolicy`) | Business Time always starts at next open (Arrival vs Next Open is provably HC-neutral there); Wall Clock keeps the planner's choice, default Arrival |
 | Opening-WIP carry-in | Mandatory for deferred work; uses remaining minutes, not full AHT |
 | CRN + CI-gated acceptance | Correct variance reduction; Bessel-corrected variance, correct bound directions |
 | `fteNet == operationalHC` under derived hours | A genuine algebraic identity, not a bug (test `D7.5`) |

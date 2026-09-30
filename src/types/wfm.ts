@@ -553,6 +553,42 @@ export interface SearchProgressState {
   currentMessage: string;
 }
 
+/** Business-hours coverage of one roster against the workload it must absorb (Stage 3b). */
+export interface CoverageSummary {
+  /** Fewest agents on shift at the start of any open bucket. */
+  minOnShift: number;
+  /** % of open buckets where agents on shift >= agents the released work needs. */
+  bucketsMeetingNeedPct: number;
+  /** Sum over open buckets of max(0, required - onShift) x bucket hours. */
+  gapAgentHours: number;
+}
+
+/** Stage 3b roster polish outcome: the roster is re-spread at the SAME headcount. */
+export interface RosterPolishResult {
+  /**
+   * adopted: polished roster passed every CI gate and covers business hours better.
+   * kept_current_failed_gate: polished roster was better but failed a gate; current roster kept.
+   * no_improvement: polished roster does not cover business hours better; current roster kept.
+   * not_applicable: no staggering possible (24x7, shift >= open window, no valid starts, no demand).
+   */
+  status: 'adopted' | 'kept_current_failed_gate' | 'no_improvement' | 'not_applicable';
+  /** Failing constraint(s) for kept_current_failed_gate; explanation for not_applicable. */
+  reason?: string;
+  current: CoverageSummary;
+  polished?: CoverageSummary;
+  /** Median primary SLA % across replications at the recommended HC, current / polished roster. */
+  currentSlaPct?: number;
+  polishedSlaPct?: number;
+  /** Per open bucket (bucketStartMinutes = minutes after business open). Full precision. */
+  profile: {
+    bucketMinutes: number;
+    bucketStartMinutes: number[];
+    requiredAgents: number[];
+    onShiftCurrent: number[];
+    onShiftPolished?: number[];
+  };
+}
+
 export interface HCSearchOutput {
   nMinAnalytical: number;
   nMinBeforeReduction?: number; // N_min as it would have been WITHOUT the reduction — display/audit only, never a search input.
@@ -601,6 +637,8 @@ export interface HCSearchOutput {
     /** The distribution actually used for the returned recommendedHC, if placement won. */
     winningDistribution?: ShiftDistributionByCategory;
   };
+  /** Stage 3b roster polish. Present only when shift placement is ON and a HC was recommended. */
+  rosterPolish?: RosterPolishResult;
 }
 
 export interface SensitivityScenario {

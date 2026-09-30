@@ -3605,6 +3605,110 @@ console.log('\n--- Suite D48: clock start derived from clock basis ---');
   }
 }
 
+// =================================================================
+// Suite D50 — Stage 3b roster polish at fixed HC (placement ON only)
+//
+// After recommendedHC is decided the roster is re-spread across business hours (coverage floor
+// cover seeded into the deficit greedy) and adopted ONLY if every CI gate still passes at the SAME
+// HC and coverage strictly improves. HC never moves. Pre-fix: rosterPolish / initialCounts /
+// buildPolishedRoster do not exist, so every behavioural assert below fails.
+// =================================================================
+console.log('\n--- Suite D50: roster polish at fixed HC ---');
+{
+  const cal50: CalendarConfig = { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 20 };
+  const labor50Off: LaborConfig = { ...LABOR, dailyProductiveHours: 8 };
+  const labor50On: LaborConfig = { ...labor50Off, shiftPlacementEnabled: true, shiftSlapMinutes: 30 };
+  const cat50: CategoryConfig[] = [{ id: 'c1', name: 'General', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 }];
+  const mkIv50 = (volAt: (h: number) => number): StandardInterval[] => {
+    const out: StandardInterval[] = [];
+    for (let day = 0; day < 5; day++) {
+      for (let h = 8; h < 20; h++) {
+        for (let m = 0; m < 60; m += 30) {
+          out.push({ intervalIndex: out.length, start: new Date(2026, 2, 2 + day, h, m), end: new Date(2026, 2, 2 + day, h, m + 30), volume: volAt(h), category: 'General' });
+        }
+      }
+    }
+    return out;
+  };
+  const mkSla50 = (pct: number, windowH: number): SLAPolicyConfig => ({
+    primaryPct: pct, primaryWindow: windowH, primaryUnit: 'hours', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes',
+    asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'next_open',
+    occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 90,
+  });
+  const run50 = (labor: LaborConfig, ivs: StandardInterval[], sla: SLAPolicyConfig, seed = 42) => ({
+    intervals: ivs, openingWIP: [] as any[], categories: cat50, calendar: cal50, labor, sla, seed, userMaxHC: 40, replications: 6,
+  });
+  const slotsOf = (d: ShiftDistributionByCategory | undefined) => JSON.stringify(d?.__POOLED__?.slaps ?? null);
+
+  // Mid-day peak (12:00-16:00 heavy, light elsewhere): the uniform/repair roster leaves the
+  // morning under-covered while the deficit greedy shifts depth to where the work is released.
+  const iv50 = mkIv50((h) => (h >= 12 && h < 16 ? 14 : 3));
+  const sla50 = mkSla50(85, 3);
+  const off50 = searchOptimalHC(run50(labor50Off, iv50, sla50));
+  const on50 = searchOptimalHC(run50(labor50On, iv50, sla50));
+  const rp = (on50 as any).rosterPolish;
+
+  // D50.1
+  assert(rp !== undefined && rp.status === 'adopted', 'D50.1a placement ON, uniform/repair passes: polish adopted', `status=${rp?.status} reason=${rp?.reason}`);
+  assert(!!rp?.polished && rp.polished.bucketsMeetingNeedPct > rp.current.bucketsMeetingNeedPct, 'D50.1b polished roster meets need in strictly more business-hour buckets', `cur=${rp?.current?.bucketsMeetingNeedPct} pol=${rp?.polished?.bucketsMeetingNeedPct}`);
+  assert(!!rp?.polished && rp.polished.minOnShift >= 1, 'D50.1c polished roster keeps at least one agent on shift in every bucket', `min=${rp?.polished?.minOnShift}`);
+
+  // D50.2
+  assert(on50.recommendedHC === off50.recommendedHC && on50.staffing?.grossHCTotal === off50.staffing?.grossHCTotal, 'D50.2a recommendedHC and grossHCTotal equal the placement-OFF run (sync)', `off=${off50.recommendedHC}/${off50.staffing?.grossHCTotal} on=${on50.recommendedHC}/${on50.staffing?.grossHCTotal}`);
+  const on50Async = await searchOptimalHCAsync(run50(labor50On, iv50, sla50));
+  assert(on50Async.recommendedHC === off50.recommendedHC && on50Async.staffing?.grossHCTotal === off50.staffing?.grossHCTotal, 'D50.2b recommendedHC and grossHCTotal equal the placement-OFF run (async)', `async=${on50Async.recommendedHC}`);
+
+  // D50.3
+  const rpA = (on50Async as any).rosterPolish;
+  assert(rpA !== undefined && rpA.status === rp?.status && slotsOf(on50Async.shiftPlacement?.winningDistribution) === slotsOf(on50.shiftPlacement?.winningDistribution), 'D50.3 sync === async: rosterPolish status + adopted distribution', `sync=${rp?.status}/${slotsOf(on50.shiftPlacement?.winningDistribution)} async=${rpA?.status}/${slotsOf(on50Async.shiftPlacement?.winningDistribution)}`);
+
+  // D50.5
+  const minCov = on50.finalDESResult?.minCoverageObserved ?? -1;
+  assert(rp?.status === 'adopted' && minCov >= 1, 'D50.5 adopted roster satisfies the coverage floor in the audit DES', `status=${rp?.status} minCoverageObserved=${minCov}`);
+
+  // D50.6
+  const on50b = searchOptimalHC(run50(labor50On, iv50, sla50));
+  assert(rp !== undefined && JSON.stringify((on50b as any).rosterPolish) === JSON.stringify(rp), 'D50.6 same seed twice: identical rosterPolish', '');
+
+  // D50.8
+  assert((off50 as any).rosterPolish === undefined, 'D50.8 placement OFF: rosterPolish undefined', '');
+
+  // D50.4 — a polished layout that fails the gate keeps the current roster. Demand concentrated
+  // in the first hours with a tight window and a high target: the polished layout covers more
+  // buckets but shifts depth away from the morning peak, so its SLA CI drops below target.
+  {
+    const ivC = mkIv50((h) => (h < 10 ? 14 : 2));
+    const slaC = mkSla50(95, 2);
+    const onC = searchOptimalHC(run50(labor50On, ivC, slaC));
+    const rpC = (onC as any).rosterPolish;
+    const offC = searchOptimalHC(run50(labor50Off, ivC, slaC));
+    assert(rpC !== undefined && rpC.status === 'kept_current_failed_gate' && typeof rpC.reason === 'string' && rpC.reason.length > 0, 'D50.4a polished layout fails the gate: status kept_current_failed_gate with reason', `status=${rpC?.status} reason=${rpC?.reason}`);
+    assert(onC.recommendedHC === offC.recommendedHC, 'D50.4b HC unchanged in the kept-current case', `off=${offC.recommendedHC} on=${onC.recommendedHC}`);
+    const covRepairC = buildCoverageRepairDistribution({ n: onC.recommendedHC!, calendar: cal50, labor: labor50On, minAgentsPerInterval: 1, queueArchitecture: 'pooled' });
+    assert(!!covRepairC && slotsOf(onC.shiftPlacement?.winningDistribution) === slotsOf(covRepairC), 'D50.4c kept-current: final roster is the pre-polish winning (coverage-repair) distribution', `final=${slotsOf(onC.shiftPlacement?.winningDistribution)} repair=${slotsOf(covRepairC ?? undefined)}`);
+  }
+
+  // D50.7 — no seed === today's placement (explicit no-regression); a seed is honoured.
+  {
+    const windowLen = 12 * 60;
+    const shiftLen = 8 * 60;
+    const starts = getValidSlapStarts(cal50, shiftLen, 30);
+    const size = Math.ceil(windowLen / 30);
+    const matrix = new Float64Array(size * size);
+    matrix[0 * size + 7] = 600;
+    matrix[12 * size + 23] = 500;
+    matrix[6 * size + 15] = 300;
+    const g = { gridMinutes: 30, windowLengthMinutes: windowLen, size, matrix, totalWorkMinutes: 1400 };
+    const plain = computeShiftPlacement({ grid: g, validStarts: starts, shiftLengthMinutes: shiftLen, n: 6, slapMinutes: 30 });
+    const emptySeed = computeShiftPlacement({ grid: g, validStarts: starts, shiftLengthMinutes: shiftLen, n: 6, slapMinutes: 30, initialCounts: new Map() } as any);
+    assert(JSON.stringify(plain) === JSON.stringify(emptySeed), 'D50.7a empty seed is byte-identical to no seed', '');
+    const seeded = computeShiftPlacement({ grid: g, validStarts: starts, shiftLengthMinutes: shiftLen, n: 6, slapMinutes: 30, initialCounts: new Map([[240, 2]]) } as any);
+    const tot = seeded.slaps.reduce((a, s) => a + s.agentCount, 0);
+    const at240 = seeded.slaps.find((s) => s.startMinutesFromOpen === 240)?.agentCount ?? 0;
+    assert(tot === 6 && at240 >= 2, 'D50.7b seeded run places exactly n agents in total and keeps the seed', JSON.stringify(seeded.slaps));
+  }
+}
+
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');

@@ -631,6 +631,17 @@ effect while being unsustainable in a repeating period.
 > against a 30-min AHT). Expect workload, occupancy cap, adherence and productive hours to be
 > the real levers. See PRD §10 `L16`.
 
+> **Fifth Update — Workload Floor opt-out (explicit human approval, 2026-09-30).**
+> `sla.nMinFloorEnabled` (UI "Workload Floor (N_min)", SLA Defaults). Omitted/true = everything
+> above, unchanged. `false` = the search keeps the same start point `max(N_min, N_occ)` but, if it
+> passes, walks down by −1 (full R, CRN, all CI gates) to N = 1, stopping at the first failure;
+> the `N_min > cap` infeasible verdict is dropped. `resolveSearchBounds` (`hc-search.ts`) is the
+> single source of `startN` / `floorN` / cap verdict for both search entry points (D11 guard).
+> The `analytical_baseline` binding label only fires with the floor ON; `belowWorkloadFloor`
+> flags a result under `max(N_min, N_occ)` and Results show a red warning. Practical reach is
+> small: the always-on occupancy ceiling rejects any N below `N_occ` on the DES hours basis, so
+> Off only lowers HC when `N_min > N_occ` (agent-hours override). Tests: `D47.*`.
+
 ### 6.4a Extra OFF is a coverage ratio, not a calendar-week fraction
 *Looks like:* `(1 + extraOffDays/7)` — off days as a share of the 7-day week, symmetric with
 how `offPct` is displayed.
@@ -926,6 +937,7 @@ Work down the chain in order — the fault is almost always upstream of where it
 
 | Defect | Impact when broken |
 |---|---|
+| **Clock Start Policy looked like a sizing lever under Business Time** (`resolveClockStartPolicy`, `des-engine.ts`; D48; 2026-09-30) | Planners flipped Arrival ↔ Next Open and saw no HC change — correct, because `addWorkingTime` already starts business-time deadlines at `nextOpen`. Measured on the four `test_files/` samples: identical HC/SLA/occupancy. Now derived and locked (Business → Next Open); Wall Clock keeps the choice, where it matters (Arrival + 6h window infeasible on all four samples, Next Open sizes 22/178/140/111) |
 | **Unconfigured categories** dropped from the staffing gross-up | Hiring requirement understated **46%** (`grossHCTotal` 7 vs 13; `fteNet` 5 vs 10) |
 | **Case/slice CSV exports in UTC** (`toISOString`) vs local time on screen | Excel showed times shifted by the planner's UTC offset (08:18 on screen, 04:18Z in file at UTC+4); fixed 2026-09-29, pinned by `EX.*` |
 | **ResultsFlow hook-order crash** (early return before hooks) | Reset All -> reload sample -> Run -> View Results gave a blank page ("Rendered more hooks than during the previous render"); fixed 2026-09-29 by a guard wrapper (`ResultsFlow`) that mounts the hook-heavy `ResultsFlowBody` only when results exist |
@@ -986,7 +998,9 @@ mitigation, absent from `searchOptimalHCAsync` (the path the UI actually calls),
 `sla.clockStartPolicy` when >15% of volume arrived outside business hours — measured to flip a
 recommendation from `HC=24` to fully infeasible depending on which entry point ran. Fixed
 2026-08-28 by deleting the mitigation from sync (see `docs/wfm/07`, D8) rather than porting it
-into async: `clockStartPolicy` is a deliberate planner toggle, the DQ layer
+into async: `clockStartPolicy` was then a deliberate planner toggle (since 2026-09-30 it is
+derived from `clockBasis` — Business Time → Next Open, locked; Wall Clock → selectable,
+default Arrival — via `resolveClockStartPolicy` in `des-engine.ts`, D48), the DQ layer
 (`csv-parser.ts:838`) already warns at the same 15% threshold with the same recommended fix,
 and there was no output field to report the override if it had been ported. ~500 lines of the
 two functions remain near-identical; any future fix must still be applied twice, and nothing

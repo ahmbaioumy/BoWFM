@@ -159,7 +159,9 @@ state (opening WIP), rather than to statistical equilibrium. Two consequences:
 
 The drain window creates an edge effect: a headcount below the steady-state line could
 "pass" by using drain-window time that would not exist in a repeating period. **`N_min` as a
-hard floor is the guard against this** — which is why that floor must not be removed.
+hard floor is the guard against this** — which is why that floor is ON by default. The
+planner opt-out added 2026-09-30 (`sla.nMinFloorEnabled: false`) re-exposes exactly this risk,
+so any result below the floor carries a red "below the workload floor" warning.
 
 Relatedly, occupancy uses the **planned horizon** as its denominator, not the drained span.
 Widening it to include drain days would make an undersized team look adequately utilised
