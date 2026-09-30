@@ -1018,13 +1018,23 @@ export function buildRosterInterpolation(params: {
   target: ShiftDistributionByCategory;
   seats: Map<string, number>;
   slapMinutes: number;
-}): { moves: RosterMove[]; totalMoves: number; rosterAt: (k: number) => ShiftDistributionByCategory | undefined } {
+}): {
+  moves: RosterMove[];
+  totalMoves: number;
+  rosterAt: (k: number) => ShiftDistributionByCategory | undefined;
+  /** The same moves split into one path per key (within-key rule identical); moves of different keys never interact. */
+  movesByKey: Record<string, RosterMove[]>;
+  /** Roster after applying the first k[key] moves of each key's own path (missing key = 0; all zero = the current roster as passed). */
+  rosterAtVector: (k: Record<string, number>) => ShiftDistributionByCategory | undefined;
+} {
   const { current, target, seats, slapMinutes } = params;
   const curCounts = countsByKey(current, seats);
   const tgtCounts = countsByKey(target, seats);
   const moves: RosterMove[] = [];
+  const movesByKey: Record<string, RosterMove[]> = {};
   const work = new Map<string, Map<number, number>>();
   for (const [key, cur] of curCounts.entries()) {
+    movesByKey[key] = [];
     const c = new Map(cur);
     const t = tgtCounts.get(key)!;
     const offsets = Array.from(new Set([...c.keys(), ...t.keys()])).sort((a, b) => a - b);
@@ -1041,16 +1051,16 @@ export function buildRosterInterpolation(params: {
       if (from === null || to === null) break;
       c.set(from, (c.get(from) || 0) - 1);
       c.set(to, (c.get(to) || 0) + 1);
-      moves.push({ key, from, to });
+      const mv: RosterMove = { key, from, to };
+      moves.push(mv);
+      movesByKey[key].push(mv);
     }
     work.set(key, new Map(cur));
   }
-  const rosterAt = (k: number): ShiftDistributionByCategory | undefined => {
-    if (k <= 0) return current;
+  const materialize = (applied: RosterMove[]): ShiftDistributionByCategory => {
     const counts = new Map<string, Map<number, number>>();
     for (const [key, m] of work.entries()) counts.set(key, new Map(m));
-    for (let i = 0; i < Math.min(k, moves.length); i++) {
-      const mv = moves[i];
+    for (const mv of applied) {
       const m = counts.get(mv.key)!;
       m.set(mv.from, (m.get(mv.from) || 0) - 1);
       m.set(mv.to, (m.get(mv.to) || 0) + 1);
@@ -1065,7 +1075,19 @@ export function buildRosterInterpolation(params: {
     }
     return result;
   };
-  return { moves, totalMoves: moves.length, rosterAt };
+  const rosterAt = (k: number): ShiftDistributionByCategory | undefined => {
+    if (k <= 0) return current;
+    return materialize(moves.slice(0, Math.min(k, moves.length)));
+  };
+  const rosterAtVector = (k: Record<string, number>): ShiftDistributionByCategory | undefined => {
+    const applied: RosterMove[] = [];
+    for (const key of Object.keys(movesByKey).sort()) {
+      const n = Math.max(0, Math.min(Math.floor(k[key] ?? 0), movesByKey[key].length));
+      for (let i = 0; i < n; i++) applied.push(movesByKey[key][i]);
+    }
+    return applied.length === 0 ? current : materialize(applied);
+  };
+  return { moves, totalMoves: moves.length, rosterAt, movesByKey, rosterAtVector };
 }
 
 /** One evaluated step of the k-search. */
@@ -1111,6 +1133,143 @@ export function createRosterKSearch(totalMoves: number) {
   };
 }
 
+/** One evaluated k-vector of the siloed parallel search, as the caller's DES evaluator reports it. */
+export interface RosterParallelEval {
+  /** Every gate passed (org-wide and every category). */
+  passes: boolean;
+  /** The org-wide gates alone: overall Primary SLA CI, BO ASA, occupancy cap, coverage floor. */
+  passesOrgGates: boolean;
+  /** Per-category verdict (computeStatisticalEvaluation.categoryPasses). */
+  categoryPasses: Record<string, boolean>;
+  reasons: string[];
+  slaPct: number;
+}
+
+export interface RosterParallelResult {
+  /** Moves adopted per key (all keys of `totals`; the fully-passing vector to adopt, all zero = keep the current roster). */
+  bestVector: Record<string, number>;
+  /** The combined vector the per-key ranges converged on (before the confirm verdict). */
+  chosenVector: Record<string, number>;
+  /** Every key reached its full target. */
+  allReached: boolean;
+  /** Number of distinct vectors the caller evaluated (each is one full-R DES evaluation). */
+  evaluations: number;
+  /** Failing gate(s) of the evaluated vector that blocked further moves (undefined when allReached). */
+  blockReason?: string;
+  blockSlaPct?: number;
+  bestSlaPct?: number;
+}
+
+/**
+ * Deterministic search control for the SILOED polish: "largest passing k per key", all keys in parallel.
+ * Siloed queues are independent in the DES, so each key's own verdict (categoryPasses[key]) narrows its
+ * own [lo, hi] (lo = 0 passes by construction) while ONE evaluation per round serves every key. Round 1
+ * tries every key at its full target K_c; each later round tries every unresolved key at its midpoint
+ * and resolved keys at their best passing k. An org-wide gate failure (passesOrgGates false) is charged
+ * to every key that moved above its best passing k in that round (conservative). At most
+ * ceil(log2 maxK)+1 rounds; the combined chosen vector is then confirmed with one more evaluation unless
+ * it was already evaluated, and a failing confirm falls back to the best fully-passing evaluated vector
+ * (worst case all zeros = the current roster). Cached by k-vector. Sync and async drive the same machine.
+ */
+export function createParallelRosterKSearch(totals: Record<string, number>) {
+  const allKeys = Object.keys(totals).sort();
+  const keys = allKeys.filter((k) => totals[k] > 0);
+  const lo: Record<string, number> = {};
+  const hi: Record<string, number> = {};
+  for (const k of keys) { lo[k] = 0; hi[k] = totals[k]; }
+  const evals = new Map<string, { vector: Record<string, number>; ev: RosterParallelEval }>();
+  const idOf = (v: Record<string, number>) => keys.map((k) => v[k] ?? 0).join(',');
+  const sumOf = (v: Record<string, number>) => keys.reduce((a, k) => a + (v[k] ?? 0), 0);
+  const chosen = (): Record<string, number> => Object.fromEntries(allKeys.map((k) => [k, lo[k] ?? 0]));
+  let round = 0;
+  let phase: 'search' | 'confirm' | 'done' = keys.length === 0 ? 'done' : 'search';
+  let pendingPhase: 'search' | 'confirm' = 'search';
+  const resolved = () => keys.every((k) => hi[k] - lo[k] <= 1);
+  const applyRound = (v: Record<string, number>, ev: RosterParallelEval) => {
+    for (const k of keys) {
+      if (round > 0 && hi[k] - lo[k] <= 1) continue; // resolved: held at its best passing k
+      const kk = v[k] ?? 0;
+      const failed = ev.categoryPasses[k] === false || (!ev.passesOrgGates && kk > lo[k]);
+      if (failed) hi[k] = kk;
+      else lo[k] = kk;
+    }
+    round++;
+  };
+  return {
+    /** Next k-vector to evaluate, or null when finished. */
+    next(): Record<string, number> | null {
+      for (;;) {
+        if (phase === 'done') return null;
+        if (phase === 'search') {
+          if (round > 0 && resolved()) { phase = 'confirm'; continue; }
+          const v: Record<string, number> = Object.fromEntries(allKeys.map((k) => [k, 0]));
+          for (const k of keys) v[k] = round === 0 ? totals[k] : hi[k] - lo[k] > 1 ? Math.floor((lo[k] + hi[k]) / 2) : lo[k];
+          const cached = evals.get(idOf(v));
+          if (cached) { applyRound(v, cached.ev); continue; }
+          pendingPhase = 'search';
+          return v;
+        }
+        const c = chosen();
+        if (sumOf(c) === 0 || evals.has(idOf(c))) { phase = 'done'; return null; }
+        pendingPhase = 'confirm';
+        return c;
+      }
+    },
+    record(v: Record<string, number>, ev: RosterParallelEval): void {
+      evals.set(idOf(v), { vector: { ...v }, ev });
+      if (pendingPhase === 'search') applyRound(v, ev);
+      else phase = 'done';
+    },
+    result(): RosterParallelResult {
+      const c = chosen();
+      const zeros: Record<string, number> = Object.fromEntries(allKeys.map((k) => [k, 0]));
+      let best = zeros;
+      if (sumOf(c) > 0) {
+        if (evals.get(idOf(c))?.ev.passes) best = c;
+        else {
+          let bestSum = 0;
+          for (const { vector, ev } of evals.values()) {
+            if (ev.passes && sumOf(vector) > bestSum) { best = Object.fromEntries(allKeys.map((k) => [k, vector[k] ?? 0])); bestSum = sumOf(vector); }
+          }
+        }
+      }
+      const allReached = keys.every((k) => (best[k] ?? 0) === totals[k]);
+      let blockReason: string | undefined;
+      let blockSlaPct: number | undefined;
+      if (!allReached) {
+        // The failing evaluation closest above the adopted vector explains what stopped further moves.
+        let bestGap = Infinity;
+        for (const { vector, ev } of evals.values()) {
+          if (ev.passes) continue;
+          const gap = keys.reduce((a, k) => a + Math.max(0, (vector[k] ?? 0) - (best[k] ?? 0)), 0);
+          if (gap < bestGap) { bestGap = gap; blockReason = ev.reasons.join('; ') || 'a CI gate failed'; blockSlaPct = ev.slaPct; }
+        }
+        blockReason ??= 'a CI gate failed';
+      }
+      return {
+        bestVector: best,
+        chosenVector: c,
+        allReached,
+        evaluations: evals.size,
+        blockReason,
+        blockSlaPct,
+        bestSlaPct: sumOf(best) > 0 ? evals.get(idOf(best))?.ev.slaPct : undefined,
+      };
+    },
+  };
+}
+
+/** Adapts an evaluateCandidateStatistical(Async) result to the parallel search's evaluation record. */
+export function toRosterParallelEval(r: {
+  passesAllConstraints: boolean;
+  passesOrgGates: boolean;
+  categoryPasses: Record<string, boolean>;
+  failingReasons: string[];
+  primaryStats: { achievedPctMedian: number };
+}): RosterParallelEval {
+  return { passes: r.passesAllConstraints, passesOrgGates: r.passesOrgGates, categoryPasses: r.categoryPasses, reasons: r.failingReasons, slaPct: r.primaryStats.achievedPctMedian };
+}
+
 /** Plan for the polish step: whether it applies, and whether the target roster covers better (else no DES run is needed). */
 export type RosterPolishPlan =
   | { applicable: false; reason: string; current?: CoverageProfile }
@@ -1126,6 +1285,11 @@ export type RosterPolishPlan =
       labor: LaborConfig;
       queueArchitecture: 'pooled' | 'siloed';
       improves: boolean;
+      /** Siloed only: one move path per key (K_c moves each) searched in parallel by createParallelRosterKSearch. */
+      perKey?: {
+        totals: Record<string, number>;
+        rosterAtVector: (k: Record<string, number>) => ShiftDistributionByCategory | undefined;
+      };
     };
 
 /**
@@ -1176,6 +1340,9 @@ export function planRosterPolish(params: {
     rosterAt: interp.rosterAt,
     cases, n, calendar, labor, queueArchitecture,
     improves: interp.totalMoves > 0 && coverageIsBetter(targetProfile, current),
+    ...(queueArchitecture === 'siloed'
+      ? { perKey: { totals: Object.fromEntries(Object.keys(interp.movesByKey).sort().map((k) => [k, interp.movesByKey[k].length])), rosterAtVector: interp.rosterAtVector } }
+      : {}),
   };
 }
 
@@ -1188,14 +1355,17 @@ const summarizeCoverage = (p: CoverageProfile): CoverageSummary => ({
 /**
  * Decision. Adopt Roster(k*) — k* = largest evaluated-passing k — iff it improves coverage
  * (higher minOnShift, tie -> lower gap). adopted = k* is the full target; adopted_partial = 0 < k* < K;
- * kept_current_failed_gate = no k >= 1 passed. `search` is only supplied when plan.improves.
+ * kept_current_failed_gate = no k >= 1 passed. `search` (pooled) / `parallelSearch` (siloed, plan.perKey)
+ * is only supplied when plan.improves. Siloed: adopted = every key reached its own K_c; adopted_partial =
+ * some keys stopped earlier (byCategory carries each key's movesApplied / movesTotal).
  */
 export function finalizeRosterPolish(params: {
   plan: RosterPolishPlan;
   search?: { bestK: number; evals: Map<number, RosterStepEval> };
+  parallelSearch?: RosterParallelResult;
   currentSlaPct?: number;
 }): { rosterPolish: RosterPolishResult; adoptedDistribution?: ShiftDistributionByCategory } {
-  const { plan, search, currentSlaPct } = params;
+  const { plan, search, parallelSearch, currentSlaPct } = params;
   if (plan.applicable === false) {
     const cur = plan.current;
     return {
@@ -1214,18 +1384,22 @@ export function finalizeRosterPolish(params: {
     };
   }
   const K = plan.totalMoves;
-  const mkByCategory = (polishedProfile: CoverageProfile): Pick<RosterPolishResult, 'byCategory'> => {
+  const mkByCategory = (polishedProfile: CoverageProfile, applied?: Record<string, number>): Pick<RosterPolishResult, 'byCategory'> => {
     if (!plan.current.byKey) return {};
     const byCategory: NonNullable<RosterPolishResult['byCategory']> = {};
     for (const key of Object.keys(plan.current.byKey).sort()) {
-      byCategory[key] = { current: plan.current.byKey[key], ...(polishedProfile.byKey?.[key] ? { polished: polishedProfile.byKey[key] } : {}) };
+      byCategory[key] = {
+        current: plan.current.byKey[key],
+        ...(polishedProfile.byKey?.[key] ? { polished: polishedProfile.byKey[key] } : {}),
+        ...(plan.perKey ? { ...(applied ? { movesApplied: applied[key] ?? 0 } : {}), movesTotal: plan.perKey.totals[key] ?? 0 } : {}),
+      };
     }
     return { byCategory };
   };
-  const mkProfile = (polishedProfile: CoverageProfile) => ({
+  const mkProfile = (polishedProfile: CoverageProfile, applied?: Record<string, number>) => ({
     current: summarizeCoverage(plan.current),
     polished: summarizeCoverage(polishedProfile),
-    ...mkByCategory(polishedProfile),
+    ...mkByCategory(polishedProfile, applied),
     currentSlaPct,
     movesTotal: K,
     profile: {
@@ -1243,7 +1417,40 @@ export function finalizeRosterPolish(params: {
       ...mkProfile(plan.targetProfile),
     },
   });
-  if (!plan.improves || !search) return noImprovement();
+  if (!plan.improves || (plan.perKey ? !parallelSearch : !search)) return noImprovement();
+
+  if (plan.perKey && parallelSearch) {
+    // Siloed: every key searched its own k in parallel; adopt the confirmed / fallback vector.
+    const applied = parallelSearch.bestVector;
+    const movesApplied = Object.values(applied).reduce((a, b) => a + b, 0);
+    if (movesApplied <= 0) {
+      return {
+        rosterPolish: {
+          status: 'kept_current_failed_gate',
+          reason: parallelSearch.blockReason ?? 'a CI gate failed',
+          ...mkProfile(plan.targetProfile, applied),
+          movesApplied: 0,
+          polishedSlaPct: parallelSearch.blockSlaPct,
+        },
+      };
+    }
+    const roster = plan.perKey.rosterAtVector(applied);
+    const profile = parallelSearch.allReached
+      ? plan.targetProfile
+      : computeCoverageProfile({ distribution: roster, n: plan.n, cases: plan.cases, calendar: plan.calendar, labor: plan.labor, queueArchitecture: plan.queueArchitecture });
+    if (!profile || !coverageIsBetter(profile, plan.current)) return noImprovement();
+    return {
+      rosterPolish: {
+        status: parallelSearch.allReached ? 'adopted' : 'adopted_partial',
+        reason: parallelSearch.allReached ? undefined : parallelSearch.blockReason,
+        ...mkProfile(profile, applied),
+        movesApplied,
+        polishedSlaPct: parallelSearch.bestSlaPct,
+      },
+      adoptedDistribution: roster,
+    };
+  }
+  if (!search) return noImprovement();
 
   const { bestK, evals } = search;
   const firstFail = evals.get(bestK + 1); // smallest failing k above the best passing one
@@ -2582,19 +2789,27 @@ export function searchOptimalHC(params: {
       currentDistribution: winningDistributionByN.get(recommendedHC),
     });
     let search: ReturnType<ReturnType<typeof createRosterKSearch>['result']> | undefined;
+    let parallelSearch: RosterParallelResult | undefined;
     if (plan.applicable && plan.improves) {
-      const ks = createRosterKSearch(plan.totalMoves);
-      for (let k = ks.next(); k !== null; k = ks.next()) {
-        const r = evaluateCandidateStatistical({
-          operationalHC: recommendedHC, intervals, openingWIP, categories, calendar, labor, sla,
-          baseSeed: seed, replications: R, queueArchitecture, precomputedCaseSets,
-          shiftDistribution: plan.rosterAt(k), dispatchFairness,
-        });
-        ks.record(k, { passes: r.passesAllConstraints, reasons: r.failingReasons, slaPct: r.primaryStats.achievedPctMedian });
+      const evalRoster = (roster: ShiftDistributionByCategory | undefined) => evaluateCandidateStatistical({
+        operationalHC: recommendedHC, intervals, openingWIP, categories, calendar, labor, sla,
+        baseSeed: seed, replications: R, queueArchitecture, precomputedCaseSets,
+        shiftDistribution: roster, dispatchFairness,
+      });
+      if (plan.perKey) {
+        const ps = createParallelRosterKSearch(plan.perKey.totals);
+        for (let v = ps.next(); v !== null; v = ps.next()) ps.record(v, toRosterParallelEval(evalRoster(plan.perKey.rosterAtVector(v))));
+        parallelSearch = ps.result();
+      } else {
+        const ks = createRosterKSearch(plan.totalMoves);
+        for (let k = ks.next(); k !== null; k = ks.next()) {
+          const r = evalRoster(plan.rosterAt(k));
+          ks.record(k, { passes: r.passesAllConstraints, reasons: r.failingReasons, slaPct: r.primaryStats.achievedPctMedian });
+        }
+        search = ks.result();
       }
-      search = ks.result();
     }
-    const fin = finalizeRosterPolish({ plan, search, currentSlaPct: primaryPassedResult.primaryStats.achievedPctMedian });
+    const fin = finalizeRosterPolish({ plan, search, parallelSearch, currentSlaPct: primaryPassedResult.primaryStats.achievedPctMedian });
     rosterPolish = fin.rosterPolish;
     if (fin.adoptedDistribution) winningDistributionByN.set(recommendedHC, fin.adoptedDistribution);
   }
@@ -3350,9 +3565,9 @@ export async function searchOptimalHCAsync(params: {
       currentDistribution: winningDistributionByN.get(recommendedHC),
     });
     let search: ReturnType<ReturnType<typeof createRosterKSearch>['result']> | undefined;
+    let parallelSearch: RosterParallelResult | undefined;
     if (plan.applicable && plan.improves) {
-      const ks = createRosterKSearch(plan.totalMoves);
-      for (let k = ks.next(); k !== null; k = ks.next()) {
+      const evalRoster = async (roster: ShiftDistributionByCategory | undefined, movesNow: number) => {
         if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
         onProgress?.({
           status: 'verifying_boundary',
@@ -3362,18 +3577,31 @@ export async function searchOptimalHCAsync(params: {
           maxN: searchCap,
           percent: 93,
           evaluatedHistory: buildHistorySnapshot(),
-          currentMessage: `Polishing roster coverage at N = ${recommendedHC} (moving ${k} of ${plan.totalMoves} agents toward the coverage roster; same headcount, adopted only if every gate still passes)...`,
+          currentMessage: `Polishing roster coverage at N = ${recommendedHC} (moving ${movesNow} of ${plan.totalMoves} agents toward the coverage roster${plan.perKey ? ', each queue searched separately' : ''}; same headcount, adopted only if every gate still passes)...`,
         });
-        const r = await evaluateCandidateStatisticalAsync({
+        return evaluateCandidateStatisticalAsync({
           operationalHC: recommendedHC, intervals, openingWIP, categories, calendar, labor, sla,
           baseSeed: seed, replications: R, queueArchitecture, precomputedCaseSets,
-          shouldCancel, shiftDistribution: plan.rosterAt(k), dispatchFairness,
+          shouldCancel, shiftDistribution: roster, dispatchFairness,
         });
-        ks.record(k, { passes: r.passesAllConstraints, reasons: r.failingReasons, slaPct: r.primaryStats.achievedPctMedian });
+      };
+      if (plan.perKey) {
+        const ps = createParallelRosterKSearch(plan.perKey.totals);
+        for (let v = ps.next(); v !== null; v = ps.next()) {
+          const r = await evalRoster(plan.perKey.rosterAtVector(v), Object.values(v).reduce((a, b) => a + b, 0));
+          ps.record(v, toRosterParallelEval(r));
+        }
+        parallelSearch = ps.result();
+      } else {
+        const ks = createRosterKSearch(plan.totalMoves);
+        for (let k = ks.next(); k !== null; k = ks.next()) {
+          const r = await evalRoster(plan.rosterAt(k), k);
+          ks.record(k, { passes: r.passesAllConstraints, reasons: r.failingReasons, slaPct: r.primaryStats.achievedPctMedian });
+        }
+        search = ks.result();
       }
-      search = ks.result();
     }
-    const fin = finalizeRosterPolish({ plan, search, currentSlaPct: primaryPassedResult.primaryStats.achievedPctMedian });
+    const fin = finalizeRosterPolish({ plan, search, parallelSearch, currentSlaPct: primaryPassedResult.primaryStats.achievedPctMedian });
     rosterPolish = fin.rosterPolish;
     if (fin.adoptedDistribution) winningDistributionByN.set(recommendedHC, fin.adoptedDistribution);
   }

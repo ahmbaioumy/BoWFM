@@ -3928,9 +3928,9 @@ console.log('\n--- Suite D52: roster polish, siloed per-queue parallel search --
   const cal52: CalendarConfig = { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 20 };
   const labor52Off: LaborConfig = { ...LABOR, dailyProductiveHours: 8 };
   const labor52On: LaborConfig = { ...labor52Off, shiftPlacementEnabled: true, shiftSlapMinutes: 30 };
-  // A: strict own SLA (95%) + an 08:00 spike -> saturates after a couple of moves. B: no own target, mid-day peak -> can spread further.
+  // Same 95% / 4h target for both. A: an 08:00 spike -> hits its own SLA limit after a couple of moves (first by name). B: mid-day peak -> can spread further.
   const cats52: CategoryConfig[] = [
-    { id: 'A', name: 'A', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1, primaryPct: 95 },
+    { id: 'A', name: 'A', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 },
     { id: 'B', name: 'B', ahtMinutes: 25, shrinkagePct: 0.1, priority: 2 },
   ];
   const mkIv52 = (): StandardInterval[] => {
@@ -3947,7 +3947,7 @@ console.log('\n--- Suite D52: roster polish, siloed per-queue parallel search --
     return out;
   };
   const sla52: SLAPolicyConfig = {
-    primaryPct: 85, primaryWindow: 4, primaryUnit: 'hours', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes',
+    primaryPct: 95, primaryWindow: 4, primaryUnit: 'hours', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes',
     asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'next_open',
     occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 90,
   };
@@ -4033,13 +4033,12 @@ console.log('\n--- Suite D52: roster polish, siloed per-queue parallel search --
       const d = drive(totO, limitsEv({ A: 8, B: 8 }, 10));
       const dv = d.res.bestVector as Record<string, number>;
       assert(dv.A + dv.B <= 10 && dv.A + dv.B > 0 && d.seen.length <= bound(totO) && typeof d.res.blockReason === 'string' && d.res.blockReason.includes('org gate'), 'D52.4e org-gate failure is charged to the keys that moved: result respects the org cap, within the evaluation bound, blockReason names the gate', JSON.stringify({ n: d.seen.length, best: dv, why: d.res.blockReason }));
-      // D52.4f — the combined vector was never evaluated and FAILS the confirm: fall back to the best passing evaluated vector.
-      const coupled = (v: Record<string, number>) => ({ cat: { A: v.A <= 6 - (v.B >= 5 ? 2 : 0), B: v.B <= 8 }, org: true });
-      const f = drive({ A: 8, B: 8 }, coupled);
+      // D52.4f — the combined vector was never evaluated during the rounds and FAILS the confirm (an org gate that only bites at that exact
+      // vector): fall back to the best fully-passing evaluated vector, never adopt the unverified/failing one.
+      const exactFail = (v: Record<string, number>) => ({ cat: { A: v.A <= 3, B: v.B <= 2 }, org: !(v.A === 3 && v.B === 2) });
+      const f = drive({ A: 6, B: 3 }, exactFail);
       const fb = f.res.bestVector as Record<string, number>;
-      const fbEval = coupled(fb);
-      const confirmedFail = f.seen.some((v) => !Object.values(coupled(v).cat).every(Boolean) && JSON.stringify(v) === JSON.stringify(f.res.chosenVector));
-      assert(fbEval.cat.A && fbEval.cat.B && f.seen.length <= bound({ A: 8, B: 8 }) && confirmedFail && f.res.allReached === false && typeof f.res.blockReason === 'string' && f.res.blockReason.length > 0, 'D52.4f confirm fails -> falls back to the best fully-passing evaluated vector (never adopts an unverified or failing one)', JSON.stringify({ seen: f.seen, best: fb, chosen: f.res.chosenVector, why: f.res.blockReason }));
+      assert(JSON.stringify(f.res.chosenVector) === JSON.stringify({ A: 3, B: 2 }) && JSON.stringify(f.seen[f.seen.length - 1]) === JSON.stringify({ A: 3, B: 2 }) && JSON.stringify(fb) === JSON.stringify({ A: 3, B: 1 }) && f.res.allReached === false && f.seen.length <= bound({ A: 6, B: 3 }) && typeof f.res.blockReason === 'string' && f.res.blockReason.includes('org gate'), 'D52.4f confirm fails -> falls back to the best fully-passing evaluated vector and records the blocking gate', JSON.stringify({ seen: f.seen, best: fb, chosen: f.res.chosenVector, why: f.res.blockReason }));
       // D52.4g — property sweep: whatever the fake does, the adopted vector is all-zero or was evaluated fully passing, and the bound holds.
       let propOk = true; let firstBad = '';
       for (let ka = 1; ka <= 12; ka++) for (let kb = 1; kb <= 12; kb += 2) for (let la = 0; la <= ka; la += 2) for (let cap = 4; cap <= 24; cap += 5) {

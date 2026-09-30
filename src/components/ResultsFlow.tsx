@@ -87,6 +87,19 @@ const RosterCoverageCard: React.FC<{
       <div>
         <strong>Roster coverage by hour.</strong> {status}
       </div>
+      {polish.byCategory && Object.keys(polish.byCategory).length > 0 && (
+        <ul className="space-y-0.5" aria-label="Roster coverage per queue">
+          {Object.keys(polish.byCategory).sort().map((name) => {
+            const c = polish.byCategory![name];
+            const moves = c.movesTotal !== undefined ? ` · moves ${c.movesApplied ?? 0}/${c.movesTotal}` : '';
+            return (
+              <li key={name}>
+                <strong>{name}</strong>: fewest agents on shift in any business hour {c.current.minOnShift} → {(polish.status === 'adopted' || polish.status === 'adopted_partial') && c.polished ? c.polished.minOnShift : c.current.minOnShift}{moves}
+              </li>
+            );
+          })}
+        </ul>
+      )}
       {buckets > 0 && (
         <>
           <div className="flex items-end gap-px h-24 border-b border-slate-300" role="img" aria-label="Agents required versus on shift per bucket">

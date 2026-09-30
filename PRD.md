@@ -853,10 +853,14 @@ queue's minimum agents on shift would drop — an org-wide gain cannot hide one 
 worse. The polish and the DES seat agents per category through the same function
 (`allocateSiloedSeats`), so they can never disagree on who sits in which queue. The minimum-coverage
 floor stays org-wide, matching the DES gate. Tests: D50 (pooled), D51 (siloed).
-Known limit (measured 2026-09-30, AJM_Simu siloed, HC 93 unchanged): the one-agent-at-a-time path
-re-spreads categories in name order, and the search stops at the first move that breaks any gate —
-so once the first queue (Billing HVC, late tail 1 → 3) hits its SLA limit, the later queues stay
-as they were (5 of 61 moves). A per-category search would reach them at extra simulation cost.
+Each queue is searched on its own path, all in the same simulation rounds (queues are independent
+in siloed mode, so one evaluation answers every queue's own SLA gate): a queue that hits its SLA
+limit stops, the others keep spreading. An org-wide gate failure (overall SLA, ASA, occupancy,
+coverage) is charged to every queue that moved that round, and the combined roster is confirmed
+once before adoption. Measured on AJM_Simu siloed (HC 93 / gross 116 unchanged, overall SLA
+82.4 → 80.3%, 42 of 61 moves): least agents on shift per queue Billing HVC 1 → 4, OS Billing Gold
+1 → 5, OS Billing Others 1 → 24, OS Tech-Gold 1 → 7, Tech HVC 1 → 1 (already at its SLA limit).
+Previously a name-ordered single path stopped after Billing HVC (5 of 61 moves). Tests: D52.
 
 ### Stage 4 — Operational HC → Extra OFF Roster Uplift → Gross HC / FTE
 
@@ -1098,12 +1102,12 @@ comment. Nothing else.
 
 ## 9. Validation and quality
 
-### 9.1 Automated test suites — 819 checks (174 + 481 + 164 trusted-source)
+### 9.1 Automated test suites — 837 checks (174 + 499 + 164 trusted-source)
 
 | Suite | Tests | Covers |
 |---|---|---|
 | `scripts/verify-fixes.mts` | 174 | Legacy regression: CSV parsing, date handling, calendar arithmetic, CRN consistency, occupancy semantics, standalone artifact integrity, analytical infeasibility diagnosis, 24x7 midnight budget accounting |
-| `scripts/verify-sizing-fixes.mts` | 481 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement, fair agent assignment (D43: spread bounds, determinism, EDF order pinned to the pre-change engine, OFF = original HC, HC pins on pooled/siloed/staggered/24x7; D44: no double-booking in gated 24x7 runs; D45: availability accrual and pinned HC of the three built-in samples; D47: Workload Floor toggle; D48: clock-start derivation; D49: pinned HC of `test_files/AJM_Only.csv`; D50/D51: roster polish at fixed HC, pooled/siloed) |
+| `scripts/verify-sizing-fixes.mts` | 499 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement, fair agent assignment (D43: spread bounds, determinism, EDF order pinned to the pre-change engine, OFF = original HC, HC pins on pooled/siloed/staggered/24x7; D44: no double-booking in gated 24x7 runs; D45: availability accrual and pinned HC of the three built-in samples; D47: Workload Floor toggle; D48: clock-start derivation; D49: pinned HC of `test_files/AJM_Only.csv`; D50/D51/D52: roster polish at fixed HC — pooled, siloed guard, per-queue search) |
 | `scripts/audit-compare.mts` (`npm run test:audit`, opt-in, ~30 min) | 24 cells | Re-runs all four `test_files/` samples × 6 settings and fails on any difference from `docs/audit/sample-hc-after-2026-09-30.jsonl` |
 | `scripts/check-artifact-freshness.mts` | gate | Fails if `BoWFM.html` is missing or older than shippable sources (`npm run check:artifact`) |
 
