@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | **Status** | Draft — as-built specification |
-| **Version** | 1.13.0 |
-| **Date** | 2026-09-29 |
+| **Version** | 1.14.0 |
+| **Date** | 2026-09-30 |
 | **Owner** | _(unassigned)_ |
 | **Product** | Backoffice WFM Sizing Engine |
 | **Artifact** | `BoWFM.html` — single self-contained offline HTML file (~585 KB) |
@@ -822,6 +822,34 @@ turnaround targets of a few hours); a deadline on a later calendar day is treate
 conservatively as "due by end of the release day," which never under-constrains but is not
 perfectly tight for genuinely multi-day windows.
 
+### Stage 3b — Roster polish at fixed headcount (placement ON only; added 2026-09-30)
+
+Problem it closes: Stage 3a only runs placement when a candidate **fails**. Once uniform start or
+the coverage repair passes, the shipped roster stayed as it was. On all four `test_files/` samples
+that meant every agent but one starting at open and **one agent covering the last 2.5 business
+hours** (on-shift per half-hour 15…16 then 1,1,1,1,1 on AJM_Only; same shape on the others).
+
+After `recommendedHC` is final (the search itself is untouched, so HC cannot change):
+1. Build a **target** roster at that N: the coverage-floor cover as a seed, the remaining agents
+   placed by the Hall-deficit greedy (`buildPolishedRoster`; `computeShiftPlacement` now accepts
+   an `initialCounts` seed — no seed = unchanged output).
+2. Build a one-agent-at-a-time path from the current roster to the target
+   (`buildRosterInterpolation`).
+3. Evaluate the target, then binary-search the largest step `k` that still passes **every CI
+   gate** at the same N on the same CRN case sets (`createRosterKSearch`, at most
+   `ceil(log2 K)+1` extra full-R evaluations).
+4. Adopt it only if it improves coverage: higher minimum agents on shift across open hours,
+   tie → lower coverage gap (agent-hours). Statuses: `adopted`, `adopted_partial` (k of K),
+   `kept_current_failed_gate` (with the gate that failed), `no_improvement`, `not_applicable`
+   (24×7, shift ≥ window, no valid starts).
+
+Results show a "Roster coverage by hour" card (needed vs current vs polished agents per half-hour)
+and the status line. Placement OFF: no polish, output byte-identical. Measured 2026-09-30 (default
+config, R=30): EGS_Only 100 HC → `adopted_partial` 13/72, late-tail coverage **1 → 14 agents**,
+SLA 92.7→92.5%; AJM_Only 16 HC → `kept_current_failed_gate` — moving even one agent later drops
+category Tech HVC's CI lower bound to 79.7% (< 80%), so at this HC better coverage costs SLA.
+Tests: D50.
+
 ### Stage 4 — Operational HC → Extra OFF Roster Uplift → Gross HC / FTE
 
 DES returns on-duty **seats** for calendar-open days only (closed weekdays are already
@@ -1062,12 +1090,12 @@ comment. Nothing else.
 
 ## 9. Validation and quality
 
-### 9.1 Automated test suites — 717 checks (174 + 379 + 164 trusted-source)
+### 9.1 Automated test suites — 789 checks (174 + 451 + 164 trusted-source)
 
 | Suite | Tests | Covers |
 |---|---|---|
 | `scripts/verify-fixes.mts` | 174 | Legacy regression: CSV parsing, date handling, calendar arithmetic, CRN consistency, occupancy semantics, standalone artifact integrity, analytical infeasibility diagnosis, 24x7 midnight budget accounting |
-| `scripts/verify-sizing-fixes.mts` | 379 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement, fair agent assignment (D43: spread bounds, determinism, EDF order pinned to the pre-change engine, OFF = original HC, HC pins on pooled/siloed/staggered/24x7; D44: no double-booking in gated 24x7 runs; D45: availability accrual and pinned HC of the three built-in samples) |
+| `scripts/verify-sizing-fixes.mts` | 451 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement, fair agent assignment (D43: spread bounds, determinism, EDF order pinned to the pre-change engine, OFF = original HC, HC pins on pooled/siloed/staggered/24x7; D44: no double-booking in gated 24x7 runs; D45: availability accrual and pinned HC of the three built-in samples; D47: Workload Floor toggle; D48: clock-start derivation; D50: roster polish at fixed HC) |
 | `scripts/check-artifact-freshness.mts` | gate | Fails if `BoWFM.html` is missing or older than shippable sources (`npm run check:artifact`) |
 
 Run with `npm test` (suites + freshness gate). No test framework is used — that would breach NFR-2.1; both suites use a
@@ -1128,7 +1156,7 @@ Behaviours a user must understand to interpret results correctly.
 | **L10** | **Blended/filler work is not modelled.** Backoffice work done between calls, where capacity is a residual of voice demand, has no representation. | Reduce effective productive hours to approximate. |
 | **L11** | **SLA Acceptance Slack is a planner band, not a rewritten ops commitment.** When ON, the search accepts CI ≥ sizing floor while the stated Primary % remains the policy target. | Treat the official COPC/ops SLA as the Primary % on the config; use slack only with planner/MGT agreement. Stacking slack + tight CI + occupancy cap still oversizes if all are enabled. |
 | **L12** | **Workload Reduction discounts modelled handling time across the whole chain.** Fixed 2026-08-31 (`WLR-DEAD`): it is applied once, to category AHT, so Stage 2 `N_min`, the occupancy floor `N_occ`, the Stage 3 DES simulation and Stage 4 Gross HC all size against the same reduced workload. Previously it was applied only inside `computeAnalyticalNMin`, which made it a guaranteed **no-op** on the recommendation — the search starts at `max(N_min, N_occ)` and `N_occ` ignored the reduction, so a measured 50% reduction moved neither Recommended HC nor Gross HC. Integer rounding can still absorb a small % (a 5% cut may change nothing). Opening WIP carrying an explicit remaining-work value is **not** discounted — that is measured work in flight, not a forecast assumption. Categories present in the data but absent from config keep the un-reduced 30-minute parser default. | Use for an assumed efficiency or deflection gain. Results show both the reduced and un-reduced `N_min`. Tests: `D42.1`–`D42.9` in `scripts/verify-sizing-fixes.mts`. |
-| **L13** | **Deadline-coverage shift placement (Stage 3a) has not been shown to reliably improve the recommendation on realistic demand.** It is opt-in, off by default. Its *safety* is solid and, as of 2026-08-28, unconditional — the search never recommends a higher headcount with the flag on than with it off (the prior narrow exception via N_sla is fixed; see above), because a placement result only ever replaces the uniform-start one when it verifiably passes the same CI-gated check. Its *value* is unproven beyond a controlled instance built to need it: across many tested realistic continuous-demand shapes, the analytic distribution was no better than, and sometimes worse than, uniform-start — root-caused to the DES's shift-end enforcement gap, now fixed for non-24×7 calendars, but the greedy's objective itself has not been reworked to exploit it. Treat it as an experimental lever that can only help or do nothing, not as a dependable fix for a specific dead-zone symptom. | Enable it and compare the recommendation with the flag on vs off on your own data before relying on any improvement. Compare `occupancyFeasibleFloor` (N_occ) against the recommendation either way to see the theoretical best case. |
+| **L13** | **Deadline-coverage shift placement (Stage 3a) has not been shown to reliably improve the recommendation on realistic demand.** It is opt-in, off by default. Its *safety* is solid and, as of 2026-08-28, unconditional — the search never recommends a higher headcount with the flag on than with it off (the prior narrow exception via N_sla is fixed; see above), because a placement result only ever replaces the uniform-start one when it verifiably passes the same CI-gated check. Its *value* is unproven beyond a controlled instance built to need it: across many tested realistic continuous-demand shapes, the analytic distribution was no better than, and sometimes worse than, uniform-start — root-caused to the DES's shift-end enforcement gap, now fixed for non-24×7 calendars, but the greedy's objective itself has not been reworked to exploit it. Treat it as an experimental lever that can only help or do nothing, not as a dependable fix for a specific dead-zone symptom. **Since 2026-09-30 (Stage 3b)** placement ON also re-spreads the roster at the final HC for coverage, adopted only as far as every gate still passes; HC is unchanged, but when the SLA is tight at that HC the tail may stay thin (AJM_Only). | Enable it and compare the recommendation with the flag on vs off on your own data before relying on any improvement. Compare `occupancyFeasibleFloor` (N_occ) against the recommendation either way to see the theoretical best case. |
 | **L14** | **Extra OFF roster uplift (Stage 4) is a flat weekly ratio, not a per-agent rest-day rotation.** It answers "how many total heads are needed," not "which specific head works which specific day" — that is a rostering decision made downstream, outside this tool's scope (see `docs/wfm/05-scheduling.md`: "Sizing number ≠ roster"). The ratio assumes off days are staggered evenly across the team; a small headcount (e.g. 3 heads, 2 off days/week each) cannot actually stagger evenly, so the flat multiplier is an approximation at low N. Separately, a labor policy where off days meet or exceed open days makes coverage arithmetically infeasible (`coverageDays <= 0`) — the engine flags this rather than silently applying no uplift. | For small teams, sanity-check the rounded Net Operational HC against what a real weekly roster can actually stagger. Treat a flagged infeasible-roster result as a labor-policy configuration error, not a sizing answer. |
 | **L15** | **The binding-constraint label distinguishes a capacity floor from an SLA gate.** Fixed 2026-08-31 (`BIND-LABEL`): when the search passes at its first candidate (`startN = max(N_min, N_occ)`) the result is attributed to the capacity floor, naming `N_occ` when the occupancy floor is the higher of the two. Previously the label tested `recommendedHC === nMinAnalytical`, but `N_occ = N_min + 1` in 533 of 540 swept workloads, so that test almost never fired and the label defaulted to "Primary SLA … Target" — telling planners SLA was binding in exactly the runs where sweeping the SLA target across 50–99% provably moved nothing. | If the label reads as a capacity floor, SLA settings will not move the number; change occupancy cap, adherence, productive hours, or workload instead. Tests: `D42.10`–`D42.15` in `scripts/verify-sizing-fixes.mts`. |
 | **L16** | **SLA targets are inelastic across most of their range.** Not a defect — a property of deferrable work. Once headcount clears the workload, EDF dispatch finishes cases far inside any multi-hour window, so attainment snaps to 100% and the target % has nothing to bite on. Measured: with a 30-minute AHT, sweeping Primary % from 50→99 or the turnaround window from 2h→48h changed the recommendation by **zero** agents; the SLA gate only bound once the window approached the AHT itself (30–60 min). | Expect the recommendation to be driven by workload, occupancy cap, adherence and productive hours — not by the SLA block — unless your turnaround target is close to your handling time. Read the binding-constraint label (L15) to see which regime you are in. |

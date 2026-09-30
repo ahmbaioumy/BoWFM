@@ -566,15 +566,20 @@ export interface CoverageSummary {
 /** Stage 3b roster polish outcome: the roster is re-spread at the SAME headcount. */
 export interface RosterPolishResult {
   /**
-   * adopted: polished roster passed every CI gate and covers business hours better.
-   * kept_current_failed_gate: polished roster was better but failed a gate; current roster kept.
-   * no_improvement: polished roster does not cover business hours better; current roster kept.
+   * adopted: the full target coverage roster passed every CI gate and covers business hours better.
+   * adopted_partial: only k of K one-agent moves toward the target pass every gate (movesApplied / movesTotal).
+   * kept_current_failed_gate: even the first move broke a gate; current roster kept.
+   * no_improvement: no re-spread covers business hours better (higher minOnShift, tie lower gap).
    * not_applicable: no staggering possible (24x7, shift >= open window, no valid starts, no demand).
    */
-  status: 'adopted' | 'kept_current_failed_gate' | 'no_improvement' | 'not_applicable';
-  /** Failing constraint(s) for kept_current_failed_gate; explanation for not_applicable. */
+  status: 'adopted' | 'adopted_partial' | 'kept_current_failed_gate' | 'no_improvement' | 'not_applicable';
+  /** Failing constraint(s) of the smallest failing step (partial / kept_current); explanation for not_applicable. */
   reason?: string;
+  /** Moves of one agent from the current roster toward the target that were adopted / are needed to reach it. */
+  movesApplied?: number;
+  movesTotal?: number;
   current: CoverageSummary;
+  /** Coverage of the adopted roster (or of the target roster when nothing was adopted). */
   polished?: CoverageSummary;
   /** Median primary SLA % across replications at the recommended HC, current / polished roster. */
   currentSlaPct?: number;

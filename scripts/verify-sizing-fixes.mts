@@ -3650,7 +3650,7 @@ console.log('\n--- Suite D50: roster polish at fixed HC ---');
 
   // D50.1
   assert(rp !== undefined && rp.status === 'adopted', 'D50.1a placement ON, uniform/repair passes: polish adopted', `status=${rp?.status} reason=${rp?.reason}`);
-  assert(!!rp?.polished && rp.polished.bucketsMeetingNeedPct > rp.current.bucketsMeetingNeedPct, 'D50.1b polished roster meets need in strictly more business-hour buckets', `cur=${rp?.current?.bucketsMeetingNeedPct} pol=${rp?.polished?.bucketsMeetingNeedPct}`);
+  assert(!!rp?.polished && (rp.polished.minOnShift > rp.current.minOnShift || (rp.polished.minOnShift === rp.current.minOnShift && rp.polished.gapAgentHours < rp.current.gapAgentHours - 1e-9)), 'D50.1b adopted roster improves coverage (higher minOnShift, tie -> lower gap)', `cur=${JSON.stringify(rp?.current)} pol=${JSON.stringify(rp?.polished)}`);
   assert(!!rp?.polished && rp.polished.minOnShift >= 1, 'D50.1c polished roster keeps at least one agent on shift in every bucket', `min=${rp?.polished?.minOnShift}`);
 
   // D50.2
@@ -3673,19 +3673,73 @@ console.log('\n--- Suite D50: roster polish at fixed HC ---');
   // D50.8
   assert((off50 as any).rosterPolish === undefined, 'D50.8 placement OFF: rosterPolish undefined', '');
 
-  // D50.4 — a polished layout that fails the gate keeps the current roster. Demand concentrated
-  // in the first hours with a tight window and a high target: the polished layout covers more
-  // buckets but shifts depth away from the morning peak, so its SLA CI drops below target.
+  // D50.4 — even the first move toward the coverage roster breaks a gate (tight 97% / 2h target
+  // right after a 60-case opening spike): current roster is kept, HC unchanged.
   {
-    const ivC = mkIv50((h) => (h < 10 ? 14 : 2));
-    const slaC = mkSla50(95, 2);
+    const ivC = mkIv50((h) => (h === 8 ? 60 : 5));
+    const slaC = mkSla50(97, 2);
     const onC = searchOptimalHC(run50(labor50On, ivC, slaC));
     const rpC = (onC as any).rosterPolish;
     const offC = searchOptimalHC(run50(labor50Off, ivC, slaC));
-    assert(rpC !== undefined && rpC.status === 'kept_current_failed_gate' && typeof rpC.reason === 'string' && rpC.reason.length > 0, 'D50.4a polished layout fails the gate: status kept_current_failed_gate with reason', `status=${rpC?.status} reason=${rpC?.reason}`);
-    assert(onC.recommendedHC === offC.recommendedHC, 'D50.4b HC unchanged in the kept-current case', `off=${offC.recommendedHC} on=${onC.recommendedHC}`);
-    const covRepairC = buildCoverageRepairDistribution({ n: onC.recommendedHC!, calendar: cal50, labor: labor50On, minAgentsPerInterval: 1, queueArchitecture: 'pooled' });
-    assert(!!covRepairC && slotsOf(onC.shiftPlacement?.winningDistribution) === slotsOf(covRepairC), 'D50.4c kept-current: final roster is the pre-polish winning (coverage-repair) distribution', `final=${slotsOf(onC.shiftPlacement?.winningDistribution)} repair=${slotsOf(covRepairC ?? undefined)}`);
+    assert(rpC !== undefined && rpC.status === 'kept_current_failed_gate' && typeof rpC.reason === 'string' && rpC.reason.length > 0 && rpC.movesApplied === 0, 'D50.4a first move fails the gate: status kept_current_failed_gate with reason', `status=${rpC?.status} reason=${rpC?.reason}`);
+    // Here the current roster is a placement RESCUE (uniform/repair cannot pass at all: OFF is infeasible),
+    // so HC is compared against that existing behaviour by construction, not against OFF.
+    assert(offC.recommendedHC === null && onC.recommendedHC !== null, 'D50.4b control: HC still comes from the unchanged search (placement rescue), polish only re-spreads', `off=${offC.recommendedHC} on=${onC.recommendedHC}`);
+    const winC = onC.shiftPlacement?.winningDistribution?.__POOLED__?.slaps ?? [];
+    const onShiftC = (rpC.profile.bucketStartMinutes as number[]).map((st) => winC.reduce((acc, sl) => (sl.startMinutesFromOpen <= st && st < sl.startMinutesFromOpen + 8 * 60 ? acc + sl.agentCount : acc), 0));
+    assert(JSON.stringify(onShiftC) === JSON.stringify(rpC.profile.onShiftCurrent) && slotsOf(onC.finalDESResult?.shiftDistributionUsed) === slotsOf(onC.shiftPlacement?.winningDistribution), 'D50.4c kept-current: final roster (and audit DES roster) is exactly the pre-polish current roster', `final=${JSON.stringify(onShiftC)} current=${JSON.stringify(rpC.profile.onShiftCurrent)}`);
+  }
+
+  // D50.9 — the target fails but a partial move passes: adopted_partial with better coverage.
+  {
+    const ivP = mkIv50((h) => (h === 8 ? 60 : 4));
+    const slaP = mkSla50(95, 4);
+    const onP = searchOptimalHC(run50(labor50On, ivP, slaP));
+    const offP = searchOptimalHC(run50(labor50Off, ivP, slaP));
+    const rpP = (onP as any).rosterPolish;
+    assert(rpP?.status === 'adopted_partial' && rpP.movesApplied > 0 && rpP.movesApplied < rpP.movesTotal && typeof rpP.reason === 'string' && rpP.reason.length > 0, 'D50.9a partial: 0 < k* < K with the failing reason of the next step', `status=${rpP?.status} ${rpP?.movesApplied}/${rpP?.movesTotal} reason=${rpP?.reason}`);
+    assert(!!rpP?.polished && rpP.polished.minOnShift > rpP.current.minOnShift, 'D50.9b partial roster has a strictly higher minOnShift than current', `cur=${rpP?.current?.minOnShift} pol=${rpP?.polished?.minOnShift}`);
+    assert(onP.recommendedHC === offP.recommendedHC && onP.staffing?.grossHCTotal === offP.staffing?.grossHCTotal, 'D50.9c partial: HC and gross HC equal placement-OFF', `off=${offP.recommendedHC} on=${onP.recommendedHC}`);
+    const onPA = await searchOptimalHCAsync(run50(labor50On, ivP, slaP));
+    assert(JSON.stringify((onPA as any).rosterPolish) === JSON.stringify(rpP) && slotsOf(onPA.shiftPlacement?.winningDistribution) === slotsOf(onP.shiftPlacement?.winningDistribution), 'D50.9d partial: sync === async (rosterPolish + adopted roster)', '');
+    const onP2 = searchOptimalHC(run50(labor50On, ivP, slaP));
+    assert(JSON.stringify((onP2 as any).rosterPolish) === JSON.stringify(rpP), 'D50.9e partial: deterministic across runs', '');
+  }
+
+  // D50.10 — the interpolation path and the k-search control (pure helpers).
+  {
+    const bri = (hcNs as any).buildRosterInterpolation as (p: any) => { moves: Array<{ key: string; from: number; to: number }>; totalMoves: number; rosterAt: (k: number) => any };
+    const mkD = (c: Record<number, number>): ShiftDistributionByCategory => ({ __POOLED__: { slapMinutes: 30, slaps: Object.entries(c).map(([o, n]) => ({ startMinutesFromOpen: Number(o), agentCount: n })) } });
+    const cur = mkD({ 0: 4, 240: 1 });
+    const tgt = mkD({ 0: 1, 30: 1, 240: 3 });
+    const it = bri({ current: cur, target: tgt, seats: new Map([['__POOLED__', 5]]), slapMinutes: 30 });
+    assert(it.totalMoves === 3 && JSON.stringify(it.moves.map((m) => [m.from, m.to])) === JSON.stringify([[0, 240], [0, 240], [0, 30]]), 'D50.10a move order: largest surplus -> largest deficit (ties: earliest from, latest to)', JSON.stringify(it.moves));
+    assert(it.rosterAt(0) === cur, 'D50.10b Roster(0) is the current roster', '');
+    const cnt = (d: any) => { const m = new Map<number, number>(); for (const sl of d.__POOLED__.slaps) m.set(sl.startMinutesFromOpen, sl.agentCount); return m; };
+    const eqCounts = (x: Map<number, number>, y: Map<number, number>) => { const ks = new Set([...x.keys(), ...y.keys()]); for (const k of ks) if ((x.get(k) || 0) !== (y.get(k) || 0)) return false; return true; };
+    assert(eqCounts(cnt(it.rosterAt(3)), cnt(tgt)), 'D50.10c Roster(K) has the target counts', JSON.stringify(it.rosterAt(3)));
+    let stepsOk = true;
+    for (let k = 1; k <= it.totalMoves; k++) {
+      const a = cnt(k === 1 ? cur : it.rosterAt(k - 1));
+      const b = cnt(it.rosterAt(k));
+      let moved = 0; let total = 0;
+      for (const key of new Set([...a.keys(), ...b.keys()])) { const d = (b.get(key) || 0) - (a.get(key) || 0); if (d > 0) moved += d; total += b.get(key) || 0; }
+      if (moved !== 1 || total !== 5) stepsOk = false;
+    }
+    assert(stepsOk, 'D50.10d each step moves exactly one agent and headcount stays 5', '');
+
+    const cks = (hcNs as any).createRosterKSearch as (K: number) => { next: () => number | null; record: (k: number, e: any) => void; result: () => { bestK: number; evals: Map<number, any> } };
+    const drive = (K: number, passesAt: (k: number) => boolean) => {
+      const ks = cks(K); const order: number[] = [];
+      for (let k = ks.next(); k !== null; k = ks.next()) { order.push(k); ks.record(k, { passes: passesAt(k), reasons: [], slaPct: 0 }); }
+      return { order, bestK: ks.result().bestK };
+    };
+    const r1 = drive(7, (k) => k <= 4);
+    assert(r1.bestK === 4 && r1.order[0] === 7 && r1.order.length <= Math.ceil(Math.log2(7)) + 1, 'D50.10e k-search: evaluates K first, finds largest passing k within ceil(log2 K)+1 evaluations', JSON.stringify(r1));
+    const r2 = drive(7, () => true);
+    assert(r2.bestK === 7 && r2.order.length === 1, 'D50.10f k-search: target passing ends after one evaluation', JSON.stringify(r2));
+    const r3 = drive(7, () => false);
+    assert(r3.bestK === 0 && r3.order.length <= Math.ceil(Math.log2(7)) + 1 && r3.order.includes(1), 'D50.10g k-search: nothing passes -> k*=0 and step 1 was tried', JSON.stringify(r3));
   }
 
   // D50.7 — no seed === today's placement (explicit no-regression); a seed is honoured.

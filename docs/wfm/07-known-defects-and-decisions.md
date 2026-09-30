@@ -22,6 +22,7 @@ Confirmed sound against contact-centre WFM/COPC practice. Also listed in
 | Per-category gross-up → sum → single `round` | Avoids systematic drift (corrected 2026-08-28: was documented as `ceil`, code/UI have always used `round`) |
 | Occupancy cap in the `N_min` denominator | Expresses "size so utilisation stays ≤ cap" |
 | `N_min` as a hard search floor (default ON; opt-out approved 2026-09-30, `resolveSearchBounds`) | Prevents a headcount that only passes via the finite-horizon drain edge effect |
+| Roster polish at fixed HC (2026-09-30, Stage 3b) | Coverage re-spread only after HC is final and only as far as every CI gate still passes — coverage never buys or costs headcount |
 | Clock start derived from clock basis (2026-09-30, `resolveClockStartPolicy`) | Business Time always starts at next open (Arrival vs Next Open is provably HC-neutral there); Wall Clock keeps the planner's choice, default Arrival |
 | Opening-WIP carry-in | Mandatory for deferred work; uses remaining minutes, not full AHT |
 | CRN + CI-gated acceptance | Correct variance reduction; Bessel-corrected variance, correct bound directions |

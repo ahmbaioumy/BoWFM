@@ -66,12 +66,16 @@ const RosterCoverageCard: React.FC<{
   const { profile, current, polished } = polish;
   const gap = (v: number) => `${Math.round(v * 10) / 10}`;
   let status: string;
+  const cover = (pol: NonNullable<typeof polished>) =>
+    `fewest agents on shift ${current.minOnShift} → ${pol.minOnShift}, coverage gap ${gap(current.gapAgentHours)} → ${gap(pol.gapAgentHours)} agent-hours, business-hour buckets meeting need ${pctText(current.bucketsMeetingNeedPct)} → ${pctText(pol.bucketsMeetingNeedPct)}, SLA ${pctText(polish.currentSlaPct)} → ${pctText(polish.polishedSlaPct)} (≥ target ${targetLabel}), HC unchanged`;
   if (polish.status === 'adopted' && polished) {
-    status = `Polished roster adopted: business-hour buckets meeting need ${pctText(current.bucketsMeetingNeedPct)} → ${pctText(polished.bucketsMeetingNeedPct)}, coverage gap ${gap(current.gapAgentHours)} → ${gap(polished.gapAgentHours)} agent-hours, SLA ${pctText(polish.currentSlaPct)} → ${pctText(polish.polishedSlaPct)} (≥ target ${targetLabel}), HC unchanged.`;
+    status = `Polished roster adopted: ${cover(polished)}.`;
+  } else if (polish.status === 'adopted_partial' && polished) {
+    status = `Partially spread: moved ${polish.movesApplied ?? 0} of ${polish.movesTotal ?? 0} agents toward the coverage roster — the rest would break ${polish.reason ?? 'a CI gate'}. ${cover(polished)}.`;
   } else if (polish.status === 'kept_current_failed_gate') {
-    status = `Kept current roster: polished layout failed ${polish.reason ?? 'a CI gate'} at N = ${hc}.`;
+    status = `Kept current roster: even the first move toward the coverage roster failed ${polish.reason ?? 'a CI gate'} at N = ${hc}.`;
   } else if (polish.status === 'no_improvement') {
-    status = 'Kept current roster: a re-spread roster does not cover business hours better at this headcount.';
+    status = 'Kept current roster: no re-spread covers business hours better at this headcount.';
   } else {
     status = `Roster polish not applicable: ${polish.reason ?? 'no staggering possible'}.`;
   }
@@ -106,7 +110,7 @@ const RosterCoverageCard: React.FC<{
           <div className="flex gap-3 flex-wrap text-[10px]">
             <span><span className="inline-block w-2 h-2 bg-amber-400 mr-1" />Agents needed</span>
             <span><span className="inline-block w-2 h-2 bg-slate-500 mr-1" />On shift, current roster</span>
-            {profile.onShiftPolished && <span><span className="inline-block w-2 h-2 bg-blue-600 mr-1" />On shift, polished roster</span>}
+            {profile.onShiftPolished && <span><span className="inline-block w-2 h-2 bg-blue-600 mr-1" />On shift, adopted / target roster</span>}
             <span className="text-slate-500">Scale peak = {Math.round(peak * 10) / 10} agents; one bar group per {profile.bucketMinutes}-minute bucket, clock times.</span>
           </div>
         </>

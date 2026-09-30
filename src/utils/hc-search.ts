@@ -937,15 +937,164 @@ export function buildPolishedRoster(params: {
   return any ? { distribution: result } : { distribution: null, reason: 'no demand to shape a roster around' };
 }
 
-/** Plan for the polish step: whether it applies, and whether the polished roster covers better (else no DES run is needed). */
+/**
+ * Agent counts per start offset for each distribution key, expanded exactly the way
+ * runBackofficeDES assigns slaps (ascending offsets, remainder at offset 0). undefined = uniform.
+ */
+function countsByKey(distribution: ShiftDistributionByCategory | undefined, seats: Map<string, number>): Map<string, Map<number, number>> {
+  const out = new Map<string, Map<number, number>>();
+  for (const key of Array.from(seats.keys()).sort()) {
+    const seatCount = seats.get(key)!;
+    const counts = new Map<number, number>();
+    let placed = 0;
+    const dist = distribution?.[key];
+    if (dist) {
+      const sorted = [...dist.slaps].sort((a, b) => a.startMinutesFromOpen - b.startMinutesFromOpen);
+      for (const slap of sorted) {
+        for (let k = 0; k < slap.agentCount && placed < seatCount; k++, placed++) {
+          counts.set(slap.startMinutesFromOpen, (counts.get(slap.startMinutesFromOpen) || 0) + 1);
+        }
+      }
+    }
+    if (placed < seatCount) counts.set(0, (counts.get(0) || 0) + (seatCount - placed));
+    out.set(key, counts);
+  }
+  return out;
+}
+
+/** One agent moved from one start offset to another, within one distribution key. */
+export interface RosterMove {
+  key: string;
+  from: number;
+  to: number;
+}
+
+/**
+ * Deterministic one-agent-at-a-time path from the CURRENT roster to the TARGET roster. Each move
+ * takes one agent from the offset with the largest surplus (current - target; ties -> earliest
+ * offset) to the offset with the largest deficit (target - current; ties -> latest offset). Keys
+ * are processed in sorted order (siloed: per category). rosterAt(0) is the current roster exactly
+ * as passed (so it passes by construction); rosterAt(K) has the target's per-offset counts.
+ */
+export function buildRosterInterpolation(params: {
+  current: ShiftDistributionByCategory | undefined;
+  target: ShiftDistributionByCategory;
+  seats: Map<string, number>;
+  slapMinutes: number;
+}): { moves: RosterMove[]; totalMoves: number; rosterAt: (k: number) => ShiftDistributionByCategory | undefined } {
+  const { current, target, seats, slapMinutes } = params;
+  const curCounts = countsByKey(current, seats);
+  const tgtCounts = countsByKey(target, seats);
+  const moves: RosterMove[] = [];
+  const work = new Map<string, Map<number, number>>();
+  for (const [key, cur] of curCounts.entries()) {
+    const c = new Map(cur);
+    const t = tgtCounts.get(key)!;
+    const offsets = Array.from(new Set([...c.keys(), ...t.keys()])).sort((a, b) => a - b);
+    for (;;) {
+      let from: number | null = null;
+      let fromSurplus = 0;
+      let to: number | null = null;
+      let toDeficit = 0;
+      for (const o of offsets) {
+        const diff = (c.get(o) || 0) - (t.get(o) || 0);
+        if (diff > fromSurplus) { from = o; fromSurplus = diff; } // strict: ties keep the earliest
+        if (-diff >= toDeficit && -diff > 0) { to = o; toDeficit = -diff; } // non-strict: ties keep the latest
+      }
+      if (from === null || to === null) break;
+      c.set(from, (c.get(from) || 0) - 1);
+      c.set(to, (c.get(to) || 0) + 1);
+      moves.push({ key, from, to });
+    }
+    work.set(key, new Map(cur));
+  }
+  const rosterAt = (k: number): ShiftDistributionByCategory | undefined => {
+    if (k <= 0) return current;
+    const counts = new Map<string, Map<number, number>>();
+    for (const [key, m] of work.entries()) counts.set(key, new Map(m));
+    for (let i = 0; i < Math.min(k, moves.length); i++) {
+      const mv = moves[i];
+      const m = counts.get(mv.key)!;
+      m.set(mv.from, (m.get(mv.from) || 0) - 1);
+      m.set(mv.to, (m.get(mv.to) || 0) + 1);
+    }
+    const result: ShiftDistributionByCategory = {};
+    for (const [key, m] of counts.entries()) {
+      const slaps: ShiftSlap[] = Array.from(m.entries())
+        .filter(([, agentCount]) => agentCount > 0)
+        .map(([startMinutesFromOpen, agentCount]) => ({ startMinutesFromOpen, agentCount }))
+        .sort((a, b) => a.startMinutesFromOpen - b.startMinutesFromOpen);
+      if (slaps.length > 0) result[key] = { slapMinutes, slaps };
+    }
+    return result;
+  };
+  return { moves, totalMoves: moves.length, rosterAt };
+}
+
+/** One evaluated step of the k-search. */
+export interface RosterStepEval {
+  passes: boolean;
+  reasons: string[];
+  slaPct: number;
+}
+
+/**
+ * Deterministic search control for "largest passing k in [0, K]": evaluate K first (pass -> done);
+ * otherwise binary search between lo = 0 (current, passes by construction) and hi = K. At most
+ * ceil(log2(K)) + 1 evaluations, cached by k; only evaluated-passing rosters are ever accepted.
+ * Sync and async searches drive the SAME state machine and differ only in the evaluator call.
+ */
+export function createRosterKSearch(totalMoves: number) {
+  const evals = new Map<number, RosterStepEval>();
+  let lo = 0;
+  let hi = totalMoves;
+  let started = false;
+  let done = totalMoves <= 0;
+  return {
+    /** Next k to evaluate, or null when finished. */
+    next(): number | null {
+      if (done) return null;
+      if (!started) return totalMoves;
+      if (hi - lo <= 1) { done = true; return null; }
+      return Math.floor((lo + hi) / 2);
+    },
+    record(k: number, ev: RosterStepEval): void {
+      evals.set(k, ev);
+      if (!started) {
+        started = true;
+        if (ev.passes) { lo = totalMoves; done = true; }
+        return;
+      }
+      if (ev.passes) lo = k;
+      else hi = k;
+    },
+    result(): { bestK: number; evals: Map<number, RosterStepEval> } {
+      return { bestK: lo, evals };
+    },
+  };
+}
+
+/** Plan for the polish step: whether it applies, and whether the target roster covers better (else no DES run is needed). */
 export type RosterPolishPlan =
   | { applicable: false; reason: string; current?: CoverageProfile }
-  | { applicable: true; polished: ShiftDistributionByCategory; current: CoverageProfile; polishedProfile: CoverageProfile; improves: boolean };
+  | {
+      applicable: true;
+      current: CoverageProfile;
+      targetProfile: CoverageProfile;
+      totalMoves: number;
+      rosterAt: (k: number) => ShiftDistributionByCategory | undefined;
+      cases: CaseEntity[];
+      n: number;
+      calendar: CalendarConfig;
+      labor: LaborConfig;
+      queueArchitecture: 'pooled' | 'siloed';
+      improves: boolean;
+    };
 
-/** Strictly better coverage: more buckets meeting need, or equal with strictly lower gap (float tolerance). */
+/** Strictly better coverage: higher minimum on shift across open buckets; tie -> strictly lower gap (agent-hours). */
 function coverageIsBetter(candidate: CoverageSummary, baseline: CoverageSummary): boolean {
-  if (candidate.bucketsMeetingNeedPct > baseline.bucketsMeetingNeedPct + 1e-9) return true;
-  return Math.abs(candidate.bucketsMeetingNeedPct - baseline.bucketsMeetingNeedPct) <= 1e-9 && candidate.gapAgentHours < baseline.gapAgentHours - 1e-9;
+  if (candidate.minOnShift > baseline.minOnShift) return true;
+  return candidate.minOnShift === baseline.minOnShift && candidate.gapAgentHours < baseline.gapAgentHours - 1e-9;
 }
 
 export function planRosterPolish(params: {
@@ -964,9 +1113,23 @@ export function planRosterPolish(params: {
   if (!built.distribution || !current) {
     return { applicable: false, reason: built.reason ?? 'no demand grid to measure coverage against', current: current ?? undefined };
   }
-  const polishedProfile = computeCoverageProfile({ distribution: built.distribution, n, cases, calendar, labor, queueArchitecture });
-  if (!polishedProfile) return { applicable: false, reason: 'no demand grid to measure coverage against', current };
-  return { applicable: true, polished: built.distribution, current, polishedProfile, improves: coverageIsBetter(polishedProfile, current) };
+  const targetProfile = computeCoverageProfile({ distribution: built.distribution, n, cases, calendar, labor, queueArchitecture });
+  if (!targetProfile) return { applicable: false, reason: 'no demand grid to measure coverage against', current };
+  const interp = buildRosterInterpolation({
+    current: currentDistribution,
+    target: built.distribution,
+    seats: seatsByDistributionKey(cases, n, queueArchitecture),
+    slapMinutes: resolveShiftSlapMinutes(labor),
+  });
+  return {
+    applicable: true,
+    current,
+    targetProfile,
+    totalMoves: interp.totalMoves,
+    rosterAt: interp.rosterAt,
+    cases, n, calendar, labor, queueArchitecture,
+    improves: interp.totalMoves > 0 && coverageIsBetter(targetProfile, current),
+  };
 }
 
 const summarizeCoverage = (p: CoverageProfile): CoverageSummary => ({
@@ -976,15 +1139,16 @@ const summarizeCoverage = (p: CoverageProfile): CoverageSummary => ({
 });
 
 /**
- * Decision: adopt the polished roster iff it passed every CI gate at n (polishedEval) AND its
- * coverage is better (plan.improves). polishedEval is only supplied when the plan improves.
+ * Decision. Adopt Roster(k*) — k* = largest evaluated-passing k — iff it improves coverage
+ * (higher minOnShift, tie -> lower gap). adopted = k* is the full target; adopted_partial = 0 < k* < K;
+ * kept_current_failed_gate = no k >= 1 passed. `search` is only supplied when plan.improves.
  */
 export function finalizeRosterPolish(params: {
   plan: RosterPolishPlan;
-  polishedEval?: { passesAllConstraints: boolean; failingReasons: string[]; primaryStats: { achievedPctMedian: number } };
+  search?: { bestK: number; evals: Map<number, RosterStepEval> };
   currentSlaPct?: number;
 }): { rosterPolish: RosterPolishResult; adoptedDistribution?: ShiftDistributionByCategory } {
-  const { plan, polishedEval, currentSlaPct } = params;
+  const { plan, search, currentSlaPct } = params;
   if (plan.applicable === false) {
     const cur = plan.current;
     return {
@@ -1002,34 +1166,58 @@ export function finalizeRosterPolish(params: {
       },
     };
   }
-  const base = {
+  const K = plan.totalMoves;
+  const mkProfile = (polishedProfile: CoverageProfile) => ({
     current: summarizeCoverage(plan.current),
-    polished: summarizeCoverage(plan.polishedProfile),
+    polished: summarizeCoverage(polishedProfile),
     currentSlaPct,
+    movesTotal: K,
     profile: {
       bucketMinutes: plan.current.bucketMinutes,
       bucketStartMinutes: plan.current.bucketStartMinutes,
       requiredAgents: plan.current.requiredAgents,
       onShiftCurrent: plan.current.onShift,
-      onShiftPolished: plan.polishedProfile.onShift,
+      onShiftPolished: polishedProfile.onShift,
     },
-  };
-  if (!plan.improves || !polishedEval) {
-    return { rosterPolish: { status: 'no_improvement', reason: 'the polished layout does not cover business hours better than the current roster', ...base } };
-  }
-  if (!polishedEval.passesAllConstraints) {
+  });
+  const noImprovement = (): { rosterPolish: RosterPolishResult } => ({
+    rosterPolish: {
+      status: 'no_improvement',
+      reason: 'no re-spread of this roster covers business hours better at this headcount',
+      ...mkProfile(plan.targetProfile),
+    },
+  });
+  if (!plan.improves || !search) return noImprovement();
+
+  const { bestK, evals } = search;
+  const firstFail = evals.get(bestK + 1); // smallest failing k above the best passing one
+  const failReason = firstFail ? firstFail.reasons.join('; ') || 'a CI gate failed' : undefined;
+  if (bestK <= 0) {
     return {
       rosterPolish: {
         status: 'kept_current_failed_gate',
-        reason: polishedEval.failingReasons.join('; ') || 'a CI gate failed',
-        ...base,
-        polishedSlaPct: polishedEval.primaryStats.achievedPctMedian,
+        reason: failReason ?? 'a CI gate failed',
+        ...mkProfile(plan.targetProfile),
+        movesApplied: 0,
+        polishedSlaPct: firstFail?.slaPct,
       },
     };
   }
+  const adoptedRoster = bestK >= K ? plan.rosterAt(K) : plan.rosterAt(bestK);
+  const adoptedProfile =
+    bestK >= K
+      ? plan.targetProfile
+      : computeCoverageProfile({ distribution: adoptedRoster, n: plan.n, cases: plan.cases, calendar: plan.calendar, labor: plan.labor, queueArchitecture: plan.queueArchitecture });
+  if (!adoptedProfile || !coverageIsBetter(adoptedProfile, plan.current)) return noImprovement();
   return {
-    rosterPolish: { status: 'adopted', ...base, polishedSlaPct: polishedEval.primaryStats.achievedPctMedian },
-    adoptedDistribution: plan.polished,
+    rosterPolish: {
+      status: bestK >= K ? 'adopted' : 'adopted_partial',
+      reason: bestK >= K ? undefined : failReason,
+      ...mkProfile(adoptedProfile),
+      movesApplied: bestK,
+      polishedSlaPct: evals.get(bestK)?.slaPct,
+    },
+    adoptedDistribution: adoptedRoster,
   };
 }
 
@@ -2322,15 +2510,20 @@ export function searchOptimalHC(params: {
       n: recommendedHC, cases: representativeCases, calendar, labor, sla, queueArchitecture,
       currentDistribution: winningDistributionByN.get(recommendedHC),
     });
-    const polishedEval =
-      plan.applicable && plan.improves
-        ? evaluateCandidateStatistical({
-            operationalHC: recommendedHC, intervals, openingWIP, categories, calendar, labor, sla,
-            baseSeed: seed, replications: R, queueArchitecture, precomputedCaseSets,
-            shiftDistribution: plan.polished, dispatchFairness,
-          })
-        : undefined;
-    const fin = finalizeRosterPolish({ plan, polishedEval, currentSlaPct: primaryPassedResult.primaryStats.achievedPctMedian });
+    let search: ReturnType<ReturnType<typeof createRosterKSearch>['result']> | undefined;
+    if (plan.applicable && plan.improves) {
+      const ks = createRosterKSearch(plan.totalMoves);
+      for (let k = ks.next(); k !== null; k = ks.next()) {
+        const r = evaluateCandidateStatistical({
+          operationalHC: recommendedHC, intervals, openingWIP, categories, calendar, labor, sla,
+          baseSeed: seed, replications: R, queueArchitecture, precomputedCaseSets,
+          shiftDistribution: plan.rosterAt(k), dispatchFairness,
+        });
+        ks.record(k, { passes: r.passesAllConstraints, reasons: r.failingReasons, slaPct: r.primaryStats.achievedPctMedian });
+      }
+      search = ks.result();
+    }
+    const fin = finalizeRosterPolish({ plan, search, currentSlaPct: primaryPassedResult.primaryStats.achievedPctMedian });
     rosterPolish = fin.rosterPolish;
     if (fin.adoptedDistribution) winningDistributionByN.set(recommendedHC, fin.adoptedDistribution);
   }
@@ -3078,25 +3271,31 @@ export async function searchOptimalHCAsync(params: {
       n: recommendedHC, cases: representativeCases, calendar, labor, sla, queueArchitecture,
       currentDistribution: winningDistributionByN.get(recommendedHC),
     });
-    let polishedEval: Awaited<ReturnType<typeof evaluateCandidateStatisticalAsync>> | undefined;
+    let search: ReturnType<ReturnType<typeof createRosterKSearch>['result']> | undefined;
     if (plan.applicable && plan.improves) {
-      onProgress?.({
-        status: 'verifying_boundary',
-        phase: 'Phase 3: Roster Coverage Polish',
-        currentN: recommendedHC,
-        nMin: nMinAnalytical,
-        maxN: searchCap,
-        percent: 93,
-        evaluatedHistory: buildHistorySnapshot(),
-        currentMessage: `Polishing roster coverage at N = ${recommendedHC} (same headcount; adopted only if every gate still passes)...`,
-      });
-      polishedEval = await evaluateCandidateStatisticalAsync({
-        operationalHC: recommendedHC, intervals, openingWIP, categories, calendar, labor, sla,
-        baseSeed: seed, replications: R, queueArchitecture, precomputedCaseSets,
-        shouldCancel, shiftDistribution: plan.polished, dispatchFairness,
-      });
+      const ks = createRosterKSearch(plan.totalMoves);
+      for (let k = ks.next(); k !== null; k = ks.next()) {
+        if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
+        onProgress?.({
+          status: 'verifying_boundary',
+          phase: 'Phase 3: Roster Coverage Polish',
+          currentN: recommendedHC,
+          nMin: nMinAnalytical,
+          maxN: searchCap,
+          percent: 93,
+          evaluatedHistory: buildHistorySnapshot(),
+          currentMessage: `Polishing roster coverage at N = ${recommendedHC} (moving ${k} of ${plan.totalMoves} agents toward the coverage roster; same headcount, adopted only if every gate still passes)...`,
+        });
+        const r = await evaluateCandidateStatisticalAsync({
+          operationalHC: recommendedHC, intervals, openingWIP, categories, calendar, labor, sla,
+          baseSeed: seed, replications: R, queueArchitecture, precomputedCaseSets,
+          shouldCancel, shiftDistribution: plan.rosterAt(k), dispatchFairness,
+        });
+        ks.record(k, { passes: r.passesAllConstraints, reasons: r.failingReasons, slaPct: r.primaryStats.achievedPctMedian });
+      }
+      search = ks.result();
     }
-    const fin = finalizeRosterPolish({ plan, polishedEval, currentSlaPct: primaryPassedResult.primaryStats.achievedPctMedian });
+    const fin = finalizeRosterPolish({ plan, search, currentSlaPct: primaryPassedResult.primaryStats.achievedPctMedian });
     rosterPolish = fin.rosterPolish;
     if (fin.adoptedDistribution) winningDistributionByN.set(recommendedHC, fin.adoptedDistribution);
   }

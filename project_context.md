@@ -642,6 +642,16 @@ effect while being unsustainable in a repeating period.
 > small: the always-on occupancy ceiling rejects any N below `N_occ` on the DES hours basis, so
 > Off only lowers HC when `N_min > N_occ` (agent-hours override). Tests: `D47.*`.
 
+### 6.4b Roster polish never moves HC (Stage 3b, 2026-09-30)
+*Looks like:* placement ON should spread shifts across the day.
+*Actually:* the spread is applied **after** `recommendedHC` is final, and only as far as every CI
+gate still passes at that same N (binary search over a one-agent-at-a-time path toward the
+coverage target; shared helpers `buildPolishedRoster` / `buildRosterInterpolation` /
+`createRosterKSearch` in `hc-search.ts`, both search entry points call them). HC never changes;
+when the SLA is already tight (AJM_Only: Tech HVC CI low 80.x%) the roster stays as it was and
+Results say which gate blocked it. Changing this to "add HC to buy coverage" would be a new
+decision. Tests: D50.
+
 ### 6.4a Extra OFF is a coverage ratio, not a calendar-week fraction
 *Looks like:* `(1 + extraOffDays/7)` — off days as a share of the 7-day week, symmetric with
 how `offPct` is displayed.
@@ -937,6 +947,7 @@ Work down the chain in order — the fault is almost always upstream of where it
 
 | Defect | Impact when broken |
 |---|---|
+| **Shift placement never re-spread a passing roster** (Stage 3b roster polish; `hc-search.ts`; D50; 2026-09-30) | With placement ON, every sample file shipped all-but-one agents at open and **one agent for the last 2.5 business hours**, because placement only ran on failing candidates. Now re-spread at fixed HC as far as the CI gates allow: EGS_Only tail 1 → 14 agents (HC 100 unchanged); AJM_Only unchanged (next move breaks Tech HVC's 80% CI) |
 | **Clock Start Policy looked like a sizing lever under Business Time** (`resolveClockStartPolicy`, `des-engine.ts`; D48; 2026-09-30) | Planners flipped Arrival ↔ Next Open and saw no HC change — correct, because `addWorkingTime` already starts business-time deadlines at `nextOpen`. Measured on the four `test_files/` samples: identical HC/SLA/occupancy. Now derived and locked (Business → Next Open); Wall Clock keeps the choice, where it matters (Arrival + 6h window infeasible on all four samples, Next Open sizes 22/178/140/111) |
 | **Unconfigured categories** dropped from the staffing gross-up | Hiring requirement understated **46%** (`grossHCTotal` 7 vs 13; `fteNet` 5 vs 10) |
 | **Case/slice CSV exports in UTC** (`toISOString`) vs local time on screen | Excel showed times shifted by the planner's UTC offset (08:18 on screen, 04:18Z in file at UTC+4); fixed 2026-09-29, pinned by `EX.*` |

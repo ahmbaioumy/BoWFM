@@ -16,6 +16,11 @@ before concluding a candidate headcount fails. It is a targeted fix for one stru
 failure mode, not a rostering engine — everything below about shift structures, contractual
 limits, skills, fairness, and statutory rules remains genuinely unmodelled.
 
+Since 2026-09-30 placement ON also **polishes the roster at the final headcount** (PRD Stage 3b):
+it spreads agents toward later starts one at a time and keeps the furthest step that still
+passes every SLA/occupancy/coverage gate. Headcount never changes; when the SLA is already
+tight, better coverage is not free and the roster stays as it was.
+
 ---
 
 ## Sizing number ≠ roster
