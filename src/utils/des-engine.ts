@@ -30,6 +30,7 @@ import {
   addWorkingTime,
   computeIntervalHorizon,
   convertSlaDurationToMinutes,
+  formatDateTime24,
   formatTime24,
   getCalendarWorkingDaysInHorizon,
   getDailyOpenClose,
@@ -2278,11 +2279,11 @@ export function verifyAgentTimelineInvariants(
       const next = slices[i + 1];
       if (curr.to.getTime() > next.from.getTime()) {
         errors.push(
-          `Agent-${agentId + 1} slice overlap: slice ends at ${curr.to.toISOString()} but next slice starts at ${next.from.toISOString()}`
+          `Agent-${agentId + 1} slice overlap: slice ends at ${formatDateTime24(curr.to)} but next slice starts at ${formatDateTime24(next.from)}`
         );
       } else if (curr.to.getTime() < next.from.getTime()) {
         errors.push(
-          `Agent-${agentId + 1} slice gap: slice ends at ${curr.to.toISOString()} but next slice starts at ${next.from.toISOString()}`
+          `Agent-${agentId + 1} slice gap: slice ends at ${formatDateTime24(curr.to)} but next slice starts at ${formatDateTime24(next.from)}`
         );
       }
     }
@@ -2299,19 +2300,19 @@ export function verifyAgentTimelineInvariants(
       if (calendar.is24x7) continue; // no window to violate
       if (!isWorkingDay(slice.from, calendar)) {
         errors.push(
-          `Agent-${slice.agentId + 1} busy slice on non-working day: ${slice.from.toISOString()}`
+          `Agent-${slice.agentId + 1} busy slice on non-working day: ${formatDateTime24(slice.from)}`
         );
         continue;
       }
       const { openTime, closeTime } = getDailyOpenClose(slice.from, calendar);
       if (slice.from.getTime() < openTime.getTime() || slice.from.getTime() >= closeTime.getTime()) {
         errors.push(
-          `Agent-${slice.agentId + 1} busy slice starts outside business window: ${slice.from.toISOString()} (window ${openTime.toISOString()}–${closeTime.toISOString()})`
+          `Agent-${slice.agentId + 1} busy slice starts outside business window: ${formatDateTime24(slice.from)} (window ${formatDateTime24(openTime)}–${formatDateTime24(closeTime)})`
         );
       }
       if (slice.to.getTime() > closeTime.getTime()) {
         errors.push(
-          `Agent-${slice.agentId + 1} busy slice ends after business close: ${slice.to.toISOString()} (close ${closeTime.toISOString()})`
+          `Agent-${slice.agentId + 1} busy slice ends after business close: ${formatDateTime24(slice.to)} (close ${formatDateTime24(closeTime)})`
         );
       }
     }
@@ -2364,7 +2365,7 @@ export function verifyAgentTimelineInvariants(
       const ownStart = new Date(openTime.getTime() + offset * 60000);
       if (slice.from.getTime() < ownStart.getTime()) {
         errors.push(
-          `Agent-${slice.agentId + 1} busy slice starts before its own assigned offset: ${slice.from.toISOString()} (own shift starts ${ownStart.toISOString()}, offset +${offset}min)`
+          `Agent-${slice.agentId + 1} busy slice starts before its own assigned offset: ${formatDateTime24(slice.from)} (own shift starts ${formatDateTime24(ownStart)}, offset +${offset}min)`
         );
       }
     }
