@@ -567,7 +567,7 @@ export interface CoverageSummary {
 export interface RosterPolishResult {
   /**
    * adopted: the full target coverage roster passed every CI gate and covers business hours better.
-   * adopted_partial: only k of K one-agent moves toward the target pass every gate (movesApplied / movesTotal).
+   * adopted_partial: only k of K one-agent moves toward the target pass every gate (movesApplied / movesTotal; siloed: some queues reached their own target, others stopped earlier — see byCategory).
    * kept_current_failed_gate: even the first move broke a gate; current roster kept.
    * no_improvement: no re-spread covers business hours better (higher minOnShift, tie lower gap).
    * not_applicable: no staggering possible (24x7, shift >= open window, no valid starts, no demand).
@@ -582,7 +582,13 @@ export interface RosterPolishResult {
   /** Coverage of the adopted roster (or of the target roster when nothing was adopted). */
   polished?: CoverageSummary;
   /** Siloed only: the same current / polished summary per category, each against its own demand and seats. */
-  byCategory?: Record<string, { current: CoverageSummary; polished?: CoverageSummary }>;
+  byCategory?: Record<string, {
+    current: CoverageSummary;
+    polished?: CoverageSummary;
+    /** One-agent moves of THIS category's own path adopted / needed to reach its target (siloed searches each queue separately). */
+    movesApplied?: number;
+    movesTotal?: number;
+  }>;
   /** Median primary SLA % across replications at the recommended HC, current / polished roster. */
   currentSlaPct?: number;
   polishedSlaPct?: number;
