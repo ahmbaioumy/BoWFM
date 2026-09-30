@@ -406,6 +406,12 @@ export function App() {
             workloadReductionPct: Number.isFinite(workloadReductionRaw)
               ? Math.min(50, Math.max(1, Math.round(workloadReductionRaw)))
               : DEFAULT_SLA.workloadReductionPct,
+            // Clock start is derived from the basis: business_time always starts at next open;
+            // wall_clock keeps the file's value (an absent value means 'arrival', not the default).
+            clockStartPolicy:
+              (json.sla.clockBasis ?? DEFAULT_SLA.clockBasis) === 'business_time'
+                ? 'next_open'
+                : (json.sla.clockStartPolicy ?? 'arrival'),
           });
         }
         if (json.categories) setCategories(json.categories);

@@ -14,6 +14,7 @@ import {
   CaseEntity,
   CaseRunResult,
   CategoryConfig,
+  ClockStartPolicy,
   DESResult,
   DispatchDecidedBy,
   DispatchFairnessConfig,
@@ -422,6 +423,23 @@ interface ActiveProcessingState {
 }
 
 /**
+ * The ONE siloed seat split: per-category workload = sum of totalAhtMinutes over `cases`, every name in
+ * `categoryNames` present at 0 minutes, then allocateAgentsToCategories. runBackofficeDES and the roster
+ * polish (hc-search seatsByDistributionKey) both call this, so the polish can never seat a different
+ * number of agents per category than the DES does for the same case set.
+ */
+export function allocateSiloedSeats(
+  cases: ReadonlyArray<{ category: string; totalAhtMinutes: number }>,
+  operationalHC: number,
+  categoryNames: Iterable<string> = []
+): Map<string, number> {
+  const catWorkloadMinutes = new Map<string, number>();
+  for (const name of categoryNames) catWorkloadMinutes.set(name, 0);
+  for (const c of cases) catWorkloadMinutes.set(c.category, (catWorkloadMinutes.get(c.category) || 0) + c.totalAhtMinutes);
+  return allocateAgentsToCategories(catWorkloadMinutes, operationalHC);
+}
+
+/**
  * Splits operational headcount across categories for the siloed queue architecture,
  * proportionally to each category's workload.
  *
@@ -483,6 +501,17 @@ export function allocateAgentsToCategories(
   return seats;
 }
 
+/**
+ * Effective SLA clock-start policy — the single source of truth (approved 2026-09-30).
+ * A business-time SLA only runs while the business is open, so its clock always starts at the
+ * next open moment (addWorkingTime already does this, making the choice HC-neutral); the stored
+ * value is ignored. A wall-clock SLA honours the stored policy, defaulting to 'arrival'.
+ */
+export function resolveClockStartPolicy(sla: SLAPolicyConfig): ClockStartPolicy {
+  if (sla.clockBasis === 'business_time') return 'next_open';
+  return sla.clockStartPolicy ?? 'arrival';
+}
+
 export function generateCaseEntities(params: {
   intervals: StandardInterval[];
   openingWIP: OpeningWIPCase[];
@@ -510,6 +539,7 @@ export function generateCaseEntities(params: {
     sla.clockBasis,
     calendar
   );
+  const clockStartPolicy = resolveClockStartPolicy(sla);
 
   // Add opening WIP
   for (const wip of openingWIP) {
@@ -524,7 +554,7 @@ export function generateCaseEntities(params: {
     };
 
     const arrival = wip.arrival && !isNaN(wip.arrival.getTime()) ? new Date(wip.arrival) : new Date(horizonStart);
-    const clockStart = sla.clockStartPolicy === 'next_open' ? nextOpen(arrival, calendar) : new Date(arrival);
+    const clockStart = clockStartPolicy === 'next_open' ? nextOpen(arrival, calendar) : new Date(arrival);
 
     const primaryWinMin =
       cat.primaryWindow !== undefined && cat.primaryUnit
@@ -595,7 +625,7 @@ export function generateCaseEntities(params: {
       const offsetMs = Math.floor(prng() * intervalDurationMs);
       const arrival = new Date(intervalStartMs + offsetMs);
       const clockStart =
-        sla.clockStartPolicy === 'next_open' && !isWorking(arrival, calendar)
+        clockStartPolicy === 'next_open' && !isWorking(arrival, calendar)
           ? nextOpen(arrival, calendar)
           : new Date(arrival);
 
@@ -895,17 +925,12 @@ export function runBackofficeDES(params: {
     categories.forEach((c) => allCatNames.add(c.name));
     allCases.forEach((c) => allCatNames.add(c.category));
 
-    const catWorkloadMinutes = new Map<string, number>();
     allCatNames.forEach((name) => {
-      catWorkloadMinutes.set(name, 0);
       siloedQueues.set(name, new CaseMinHeap());
       siloedIdleAgents.set(name, []);
     });
-    allCases.forEach((c) => {
-      catWorkloadMinutes.set(c.category, (catWorkloadMinutes.get(c.category) || 0) + c.totalAhtMinutes);
-    });
     if (operationalHC > 0) {
-      const seats = allocateAgentsToCategories(catWorkloadMinutes, operationalHC);
+      const seats = allocateSiloedSeats(allCases, operationalHC, allCatNames);
       let agentId = 0;
       for (const [catName, count] of seats.entries()) {
         for (let j = 0; j < count; j++) {

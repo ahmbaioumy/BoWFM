@@ -846,7 +846,11 @@ export function validateDataQuality(params: {
       severity: 'warning',
       field: 'Operating Hours & Demand Distribution Diagnostic',
       message: `Significant off-hours arrival: ${totalOutsidePct}% of volume arrives outside configured operating hours (${weekdayOffPct}% weekday off-hours, ${weekendPct}% weekend/non-working days).`,
-      details: `With current calendar (${calendar.is24x7 ? '24/7' : `Open ${calendar.dailyOpenHour}:00-${calendar.dailyCloseHour}:00, ${calendar.workingDays.length} days/wk`}), off-hours volume will park in queue until the next opening window. If SLA clock starts on arrival, this creates queue spikes at opening that can inflate required headcount. Recommended fixes: (1) Enable 24x7 operations or 6-day work weeks if work is handled continuously, or (2) Set Clock Start Policy to 'Next Open Business Window'.`,
+      details: `With current calendar (${calendar.is24x7 ? '24/7' : `Open ${calendar.dailyOpenHour}:00-${calendar.dailyCloseHour}:00, ${calendar.workingDays.length} days/wk`}), off-hours volume will park in queue until the next opening window. ${
+        sla.clockBasis === 'business_time'
+          ? 'No action needed for the SLA clock: under a business-time SLA the clock starts at the next open business moment automatically. If the work is really handled continuously, consider enabling 24x7 operations or 6-day work weeks.'
+          : "If SLA clock starts on arrival, this creates queue spikes at opening that can inflate required headcount. Recommended fixes: (1) Enable 24x7 operations or 6-day work weeks if work is handled continuously, or (2) Set Clock Start Policy to 'Next Open Business Window'."
+      }`,
     });
   }
 

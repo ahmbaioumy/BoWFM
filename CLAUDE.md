@@ -71,7 +71,11 @@ shrinkage gross-up, harmonic blend, sum, then a single `round`).
    adequately utilised. See `BUG-OCC-ROOT` in `scripts/verify-fixes.mts`. (The per-agent
    `busy/(busy+idle)` figure in `ResultsFlow.tsx` is a different, legitimate metric.)
 4. **`N_min` is a hard floor for the search** — guards against a headcount "passing" only by
-   exploiting the finite-horizon drain-window edge effect.
+   exploiting the finite-horizon drain-window edge effect. **Default ON.** An opt-out
+   (`sla.nMinFloorEnabled === false`, "Workload Floor" toggle) was approved 2026-09-30: the
+   search may then walk below `max(N_min, N_occ)` and Results flag `belowWorkloadFloor`. Start
+   point, floor and baseline-vs-cap verdict come only from `resolveSearchBounds`
+   (`hc-search.ts`). Never change the default or remove the warning without approval.
 5. **Shrinkage excluded from Stage 2, applied only in Stage 4** — applying it in both is the
    classic WFM double-count.
 6. **Harmonic (not arithmetic) effective-shrinkage blend.**

@@ -21,7 +21,7 @@ import {
 import { exportToExcelCSV } from '../utils/csv-parser';
 import { AgentAnalyticsPanel } from './AgentAnalyticsPanel';
 import { formatDateTime24, getCalendarWorkingDaysInHorizon, getDailyWindowLengthHours } from '../utils/calendar';
-import { verifyAgentTimelineInvariants } from '../utils/des-engine';
+import { resolveClockStartPolicy, verifyAgentTimelineInvariants } from '../utils/des-engine';
 import { buildBreachExportRows, buildCaseExportRows, buildSliceExportRows } from '../utils/export-rows';
 import { clampConfidenceLevelPct, effectivePrimaryTarget } from '../utils/hc-search';
 import {
@@ -47,6 +47,90 @@ import {
   Activity,
   XCircle,
 } from 'lucide-react';
+
+const pctText = (v: number | undefined): string => (v === undefined || !Number.isFinite(v) ? 'n/a' : `${Math.round(v * 10) / 10}%`);
+const clockLabel = (calendar: CalendarConfig, minutesAfterOpen: number): string => {
+  const total = (calendar.dailyOpenHour ?? 8) * 60 + (calendar.dailyOpenMinute ?? 0) + minutesAfterOpen;
+  const h = Math.floor(total / 60) % 24;
+  const m = Math.round(total % 60);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+};
+
+/** Stage 3b roster polish: status line + per-bucket bars (required vs on-shift current vs polished). */
+const RosterCoverageCard: React.FC<{
+  polish: NonNullable<HCSearchOutput['rosterPolish']>;
+  hc: number;
+  calendar: CalendarConfig;
+  targetLabel: string;
+}> = ({ polish, hc, calendar, targetLabel }) => {
+  const { profile, current, polished } = polish;
+  const gap = (v: number) => `${Math.round(v * 10) / 10}`;
+  let status: string;
+  const cover = (pol: NonNullable<typeof polished>) =>
+    `fewest agents on shift ${current.minOnShift} → ${pol.minOnShift}, coverage gap ${gap(current.gapAgentHours)} → ${gap(pol.gapAgentHours)} agent-hours, business-hour buckets meeting need ${pctText(current.bucketsMeetingNeedPct)} → ${pctText(pol.bucketsMeetingNeedPct)}, SLA ${pctText(polish.currentSlaPct)} → ${pctText(polish.polishedSlaPct)} (≥ target ${targetLabel}), HC unchanged`;
+  if (polish.status === 'adopted' && polished) {
+    status = `Polished roster adopted: ${cover(polished)}.`;
+  } else if (polish.status === 'adopted_partial' && polished) {
+    status = `Partially spread: moved ${polish.movesApplied ?? 0} of ${polish.movesTotal ?? 0} agents toward the coverage roster — the rest would break ${polish.reason ?? 'a CI gate'}. ${cover(polished)}.`;
+  } else if (polish.status === 'kept_current_failed_gate') {
+    status = `Kept current roster: even the first move toward the coverage roster failed ${polish.reason ?? 'a CI gate'} at N = ${hc}.`;
+  } else if (polish.status === 'no_improvement') {
+    status = 'Kept current roster: no re-spread covers business hours better at this headcount.';
+  } else {
+    status = `Roster polish not applicable: ${polish.reason ?? 'no staggering possible'}.`;
+  }
+  const buckets = profile.bucketStartMinutes.length;
+  const peak = Math.max(1, ...profile.requiredAgents, ...profile.onShiftCurrent, ...(profile.onShiftPolished ?? []));
+  const barH = (v: number) => `${Math.max(1, (v / peak) * 100)}%`;
+  return (
+    <div className="mt-2 text-[11px] text-slate-700 bg-blue-50/50 border border-blue-200 rounded-lg px-2.5 py-2 leading-relaxed space-y-2">
+      <div>
+        <strong>Roster coverage by hour.</strong> {status}
+      </div>
+      {polish.byCategory && Object.keys(polish.byCategory).length > 0 && (
+        <ul className="space-y-0.5" aria-label="Roster coverage per queue">
+          {Object.keys(polish.byCategory).sort().map((name) => {
+            const c = polish.byCategory![name];
+            const moves = c.movesTotal !== undefined ? ` · moves ${c.movesApplied ?? 0}/${c.movesTotal}` : '';
+            return (
+              <li key={name}>
+                <strong>{name}</strong>: fewest agents on shift in any business hour {c.current.minOnShift} → {(polish.status === 'adopted' || polish.status === 'adopted_partial') && c.polished ? c.polished.minOnShift : c.current.minOnShift}{moves}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {buckets > 0 && (
+        <>
+          <div className="flex items-end gap-px h-24 border-b border-slate-300" role="img" aria-label="Agents required versus on shift per bucket">
+            {profile.bucketStartMinutes.map((start, i) => (
+              <div
+                key={start}
+                className="flex-1 flex items-end justify-center gap-px h-full"
+                title={`${clockLabel(calendar, start)}  need ${profile.requiredAgents[i].toFixed(1)}  current ${profile.onShiftCurrent[i]}${profile.onShiftPolished ? `  polished ${profile.onShiftPolished[i]}` : ''}`}
+              >
+                <div className="w-1/3 bg-amber-400" style={{ height: barH(profile.requiredAgents[i]) }} />
+                <div className="w-1/3 bg-slate-500" style={{ height: barH(profile.onShiftCurrent[i]) }} />
+                {profile.onShiftPolished && <div className="w-1/3 bg-blue-600" style={{ height: barH(profile.onShiftPolished[i]) }} />}
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-between font-mono text-[10px] text-slate-500">
+            <span>{clockLabel(calendar, profile.bucketStartMinutes[0])}</span>
+            <span>{clockLabel(calendar, profile.bucketStartMinutes[Math.floor(buckets / 2)])}</span>
+            <span>{clockLabel(calendar, profile.bucketStartMinutes[buckets - 1] + profile.bucketMinutes)}</span>
+          </div>
+          <div className="flex gap-3 flex-wrap text-[10px]">
+            <span><span className="inline-block w-2 h-2 bg-amber-400 mr-1" />Agents needed</span>
+            <span><span className="inline-block w-2 h-2 bg-slate-500 mr-1" />On shift, current roster</span>
+            {profile.onShiftPolished && <span><span className="inline-block w-2 h-2 bg-blue-600 mr-1" />On shift, adopted / target roster</span>}
+            <span className="text-slate-500">Scale peak = {Math.round(peak * 10) / 10} agents; one bar group per {profile.bucketMinutes}-minute bucket, clock times.</span>
+          </div>
+        </>
+      )}
+    </div>
+  );
+};
 
 interface ResultsFlowProps {
   currentTab: string;
@@ -810,7 +894,13 @@ function ResultsFlowBody({
                       </>
                     ) : null}
                   </div>
-                  {Number.isFinite(searchOutput.nMinAnalytical) &&
+                  {searchOutput.belowWorkloadFloor && (
+                    <div className="text-[11px] text-red-800 bg-red-50 border border-red-200 rounded-lg px-2.5 py-2 leading-relaxed">
+                      Req HC {searchOutput.recommendedHC} is below the workload floor (N_min {searchOutput.nMinAnalytical}, N_occ {searchOutput.occupancyFeasibleFloor ?? 'n/a'}). This team only clears the SLA by draining backlog after the planning horizon — treat as optimistic.
+                    </div>
+                  )}
+                  {sla.nMinFloorEnabled !== false &&
+                    Number.isFinite(searchOutput.nMinAnalytical) &&
                     primaryHC === searchOutput.nMinAnalytical && (
                       <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2 leading-relaxed">
                         Req HC is held at the workload floor <strong>N_min = {searchOutput.nMinAnalytical}</strong>{searchOutput.workloadReductionAppliedPct ? ` (workload reduced ${searchOutput.workloadReductionAppliedPct}%)` : ''}.
@@ -839,10 +929,18 @@ function ResultsFlowBody({
                         : ''}
                       {searchOutput.shiftPlacement.winningDistribution
                         ? ' — the recommended headcount uses a staggered shift-start distribution, not a uniform business-open start.'
-                        : ' — the recommendation used a uniform business-open start; placement did not find a better distribution.'}
+                        : ' — the recommendation used the uniform business-open start (plus the minimal coverage-repair stagger); no staggered distribution was needed to pass.'}
                     </>
                   )}
                 </div>
+              )}
+              {searchOutput.rosterPolish && (
+                <RosterCoverageCard
+                  polish={searchOutput.rosterPolish}
+                  hc={primaryHC}
+                  calendar={calendar}
+                  targetLabel={primaryTargetLabel}
+                />
               )}
             </div>
           </div>
@@ -1162,7 +1260,7 @@ function ResultsFlowBody({
                     {sla.confidenceLevelPct ?? 95}% CI Lower Bound ≥ {primaryTargetLabel}.
                   </p>
                   <div className="text-[11px] font-mono bg-white p-2 rounded border border-slate-200 text-slate-700">
-                    Final Operational Headcount: <code>N_op = max(N_min, Primary_Required) = max({rosterFloor}, {primaryHC}) = {staffing.operationalHC}</code>{searchOutput.workloadReductionAppliedPct && <span className="text-amber-700"> (whole chain sized on workload reduced {searchOutput.workloadReductionAppliedPct}%)</span>}
+                    Final Operational Headcount: {sla.nMinFloorEnabled === false ? <code>N_op = Primary_Required (workload floor OFF) = {primaryHC} = {staffing.operationalHC}</code> : <code>N_op = max(N_min, Primary_Required) = max({rosterFloor}, {primaryHC}) = {staffing.operationalHC}</code>}{searchOutput.workloadReductionAppliedPct && <span className="text-amber-700"> (whole chain sized on workload reduced {searchOutput.workloadReductionAppliedPct}%)</span>}
                   </div>
                 </div>
               </div>
@@ -2253,7 +2351,7 @@ function ResultsFlowBody({
                 </span>
                 <div>queue_architecture: {searchOutput.queueArchitecture || 'pooled'}</div>
                 <div>sla_clock_basis: {sla.clockBasis}</div>
-                <div>sla_clock_start_policy: {sla.clockStartPolicy}</div>
+                <div>sla_clock_start_policy: {resolveClockStartPolicy(sla)}</div>
                 <div>primary_sla: {sla.primaryPct}% in {sla.primaryWindow} {sla.primaryUnit}</div>
                 <div>
                   sla_acceptance_slack:{' '}
@@ -2264,6 +2362,8 @@ function ResultsFlowBody({
                   {searchOutput.workloadReductionAppliedPct ? `${searchOutput.workloadReductionAppliedPct}%` : 'off'}
                 </div>
                 <div>confidence_level_pct: {sla.confidenceLevelPct ?? 95}%</div>
+                <div>n_min_floor_enabled: {sla.nMinFloorEnabled !== false ? 'true' : 'false'}</div>
+                <div>below_workload_floor: {searchOutput.belowWorkloadFloor ? 'true' : 'false'}</div>
                 <div>n_min_analytical: {rosterFloor} agents{searchOutput.nMinBeforeReduction !== undefined && ` (before reduction: ${searchOutput.nMinBeforeReduction})`}</div>
                 <div>primary_driven_hc: {primaryHC} agents</div>
                 <div>prng_seed: {simParams.seed}</div>

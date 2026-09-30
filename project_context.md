@@ -631,6 +631,34 @@ effect while being unsustainable in a repeating period.
 > against a 30-min AHT). Expect workload, occupancy cap, adherence and productive hours to be
 > the real levers. See PRD §10 `L16`.
 
+> **Fifth Update — Workload Floor opt-out (explicit human approval, 2026-09-30).**
+> `sla.nMinFloorEnabled` (UI "Workload Floor (N_min)", SLA Defaults). Omitted/true = everything
+> above, unchanged. `false` = the search keeps the same start point `max(N_min, N_occ)` but, if it
+> passes, walks down by −1 (full R, CRN, all CI gates) to N = 1, stopping at the first failure;
+> the `N_min > cap` infeasible verdict is dropped. `resolveSearchBounds` (`hc-search.ts`) is the
+> single source of `startN` / `floorN` / cap verdict for both search entry points (D11 guard).
+> The `analytical_baseline` binding label only fires with the floor ON; `belowWorkloadFloor`
+> flags a result under `max(N_min, N_occ)` and Results show a red warning. Practical reach is
+> small: the always-on occupancy ceiling rejects any N below `N_occ` on the DES hours basis, so
+> Off only lowers HC when `N_min > N_occ` (agent-hours override). Tests: `D47.*`.
+
+### 6.4b Roster polish never moves HC (Stage 3b, 2026-09-30)
+*Looks like:* placement ON should spread shifts across the day.
+*Actually:* the spread is applied **after** `recommendedHC` is final, and only as far as every CI
+gate still passes at that same N (binary search over a one-agent-at-a-time path toward the
+coverage target; shared helpers `buildPolishedRoster` / `buildRosterInterpolation` /
+`createRosterKSearch` in `hc-search.ts`, both search entry points call them). HC never changes;
+when the SLA is already tight (AJM_Only: Tech HVC CI low 80.x%) the roster stays as it was and
+Results say which gate blocked it. Changing this to "add HC to buy coverage" would be a new
+decision. Siloed: a step is also rejected if any category's own `minOnShift` drops
+(`coverageIsBetter` with per-category `byKey` profiles); polish and DES share the seat split
+`allocateSiloedSeats` (`des-engine.ts`). The min-coverage floor stays org-wide, as in the DES gate.
+Siloed searches every queue's own move path in parallel (`createParallelRosterKSearch`): one
+evaluation per round, each queue narrowed by its own `categoryPasses[key]`, org-gate failures
+charged to the queues that moved, combined roster confirmed once. Pooled keeps the single-path
+`createRosterKSearch` (byte-identical). Tests: D50 (pooled), D51 (siloed guard), D52 (per-queue). Sample-file guard: D49 pins `test_files/AJM_Only.csv` in
+`npm test`; `npm run test:audit` (opt-in, ~30 min) re-runs all 24 audit cells and diffs them.
+
 ### 6.4a Extra OFF is a coverage ratio, not a calendar-week fraction
 *Looks like:* `(1 + extraOffDays/7)` — off days as a share of the 7-day week, symmetric with
 how `offPct` is displayed.
@@ -825,7 +853,8 @@ npm run test:sizing   # sizing-chain suite only (faster)
 | Suite | Tests | Covers |
 |---|---|---|
 | `scripts/verify-fixes.mts` | 174 | Legacy regression — CSV/date parsing, calendar arithmetic, CRN consistency, occupancy semantics, artifact integrity, analytical infeasibility diagnosis, 24x7 midnight budget accounting. **Treat as append-only.** |
-| `scripts/verify-sizing-fixes.mts` | 393 | Sizing chain — `D1` working-day counting, `D3` apportionment monotonicity, `D7` staffing-chain integrity, `D9` offline enforcement, `D20`-`D26` deadline-coverage shift placement (Stage 3a: valid-slap enumeration, no-regression, greedy monotonicity/optimality, I1/I2 invariants under staggering, seed determinism, positive control, I4 occupancy-ceiling regression guard), `D27` day-open telemetry off-by-one, `D28` fast-path/full-path attainment agreement, `D29` I5 per-agent stagger-offset compliance (check #8), `D30`/`D31` shift-end enforcement + in-flight case handover, `D32`/`D33` minimum-coverage floor + flag-independent redistribution repair, `D34` N_sla walk-down safety-net fix, `D35` adherence/capacity conflation closed-form pin, `D36` 24×7 coverage-gate regression fix, `D37` real 24×7 multi-start (staggering, shift-end, coverage repair), `D38` "exact minimum" wording pin (source-text based — the message is unreachable dead code), `D39` empirical monotonicity sweep for the uniform-only predicate (N=1..25, no violation found), `D40` extra-OFF coverage-ratio fix (ratio table sweep + integer-exactness cases — see §6.4a), `D41` non-blocking DQ warnings for zero off-days / override-vs-horizon scale / calendar-open days with no uploaded rows |
+| `scripts/verify-sizing-fixes.mts` | 499 | Sizing chain — `D1` working-day counting, `D3` apportionment monotonicity, `D7` staffing-chain integrity, `D9` offline enforcement, `D20`-`D26` deadline-coverage shift placement (Stage 3a: valid-slap enumeration, no-regression, greedy monotonicity/optimality, I1/I2 invariants under staggering, seed determinism, positive control, I4 occupancy-ceiling regression guard), `D27` day-open telemetry off-by-one, `D28` fast-path/full-path attainment agreement, `D29` I5 per-agent stagger-offset compliance (check #8), `D30`/`D31` shift-end enforcement + in-flight case handover, `D32`/`D33` minimum-coverage floor + flag-independent redistribution repair, `D34` N_sla walk-down safety-net fix, `D35` adherence/capacity conflation closed-form pin, `D36` 24×7 coverage-gate regression fix, `D37` real 24×7 multi-start (staggering, shift-end, coverage repair), `D38` "exact minimum" wording pin (source-text based — the message is unreachable dead code), `D39` empirical monotonicity sweep for the uniform-only predicate (N=1..25, no violation found), `D40` extra-OFF coverage-ratio fix (ratio table sweep + integer-exactness cases — see §6.4a), `D41` non-blocking DQ warnings for zero off-days / override-vs-horizon scale / calendar-open days with no uploaded rows, `D47` Workload Floor toggle, `D48` clock-start derivation, `D49` pinned HC of `test_files/AJM_Only.csv`, `D50`/`D51`/`D52` roster polish at fixed HC (pooled / siloed guard / per-queue search) |
+| `scripts/audit-compare.mts` (`npm run test:audit`, opt-in, ~30 min) | 24 cells | All four `test_files/` samples × 6 settings, diffed against `docs/audit/sample-hc-after-2026-09-30.jsonl`; exits 1 on any difference |
 | `scripts/verify-agent-analytics.mts` | 60 | `EX` export timestamps == on-screen formatter (fixed UTC+4 TZ, midnight-crossing, real engine rows, static no-`toISOString` guard); `AA` agent analytics (reconciles to `completedCases`/`totalHandlingMinutes`/`agentFairness`, date/category/agent filters, determinism, late cohorts); `AW` work share (split case 0.75/0.25, totals == finished, slice-date attribution, avg handle) + single-agent-cover insight fixtures |
 | `scripts/check-artifact-freshness.mts` | gate | Fails if `BoWFM.html` is missing or older than `src/` / build inputs (`npm run check:artifact`) |
 
@@ -926,6 +955,8 @@ Work down the chain in order — the fault is almost always upstream of where it
 
 | Defect | Impact when broken |
 |---|---|
+| **Shift placement never re-spread a passing roster** (Stage 3b roster polish; `hc-search.ts`; D50; 2026-09-30) | With placement ON, every sample file shipped all-but-one agents at open and **one agent for the last 2.5 business hours**, because placement only ran on failing candidates. Now re-spread at fixed HC as far as the CI gates allow: EGS_Only tail 1 → 14 agents (HC 100 unchanged); AJM_Only unchanged (next move breaks Tech HVC's 80% CI) |
+| **Clock Start Policy looked like a sizing lever under Business Time** (`resolveClockStartPolicy`, `des-engine.ts`; D48; 2026-09-30) | Planners flipped Arrival ↔ Next Open and saw no HC change — correct, because `addWorkingTime` already starts business-time deadlines at `nextOpen`. Measured on the four `test_files/` samples: identical HC/SLA/occupancy. Now derived and locked (Business → Next Open); Wall Clock keeps the choice, where it matters (Arrival + 6h window infeasible on all four samples, Next Open sizes 22/178/140/111) |
 | **Unconfigured categories** dropped from the staffing gross-up | Hiring requirement understated **46%** (`grossHCTotal` 7 vs 13; `fteNet` 5 vs 10) |
 | **Case/slice CSV exports in UTC** (`toISOString`) vs local time on screen | Excel showed times shifted by the planner's UTC offset (08:18 on screen, 04:18Z in file at UTC+4); fixed 2026-09-29, pinned by `EX.*` |
 | **ResultsFlow hook-order crash** (early return before hooks) | Reset All -> reload sample -> Run -> View Results gave a blank page ("Rendered more hooks than during the previous render"); fixed 2026-09-29 by a guard wrapper (`ResultsFlow`) that mounts the hook-heavy `ResultsFlowBody` only when results exist |
@@ -986,7 +1017,9 @@ mitigation, absent from `searchOptimalHCAsync` (the path the UI actually calls),
 `sla.clockStartPolicy` when >15% of volume arrived outside business hours — measured to flip a
 recommendation from `HC=24` to fully infeasible depending on which entry point ran. Fixed
 2026-08-28 by deleting the mitigation from sync (see `docs/wfm/07`, D8) rather than porting it
-into async: `clockStartPolicy` is a deliberate planner toggle, the DQ layer
+into async: `clockStartPolicy` was then a deliberate planner toggle (since 2026-09-30 it is
+derived from `clockBasis` — Business Time → Next Open, locked; Wall Clock → selectable,
+default Arrival — via `resolveClockStartPolicy` in `des-engine.ts`, D48), the DQ layer
 (`csv-parser.ts:838`) already warns at the same 15% threshold with the same recommended fix,
 and there was no output field to report the override if it had been ported. ~500 lines of the
 two functions remain near-identical; any future fix must still be applied twice, and nothing
