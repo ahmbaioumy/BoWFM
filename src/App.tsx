@@ -36,6 +36,7 @@ import { SensitivityFlow } from './components/SensitivityFlow';
 import { SimulationProgressModal } from './components/SimulationProgressModal';
 import { ResetConfirmModal } from './components/ResetConfirmModal';
 import { buildSampleDataset, nextMondayAt8 } from './utils/sample-data';
+import { diffRunInputs, RunInputs } from './utils/run-inputs';
 
 import {
   DEFAULT_CALENDAR,
@@ -100,6 +101,9 @@ export function App() {
 
   // Simulation & Search State
   const [searchOutput, setSearchOutput] = useState<HCSearchOutput | null>(null);
+  // Exact settings the current searchOutput was computed with. Results render from this (not the live
+  // settings), so audits/formulas/exports describe the run even if the planner edits config afterwards.
+  const [runInputs, setRunInputs] = useState<RunInputs | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [showProgressModal, setShowProgressModal] = useState(false);
   // Reset confirmation gate. 'reset' = plain Sidebar Reset click. { type: 'upload' | 'sample' }
@@ -115,6 +119,12 @@ export function App() {
   const [searchProgress, setSearchProgress] = useState<SearchProgressState | null>(null);
   const [simulationError, setSimulationError] = useState<string | null>(null);
   const [importNotification, setImportNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  const liveInputs = useMemo<RunInputs>(
+    () => ({ calendar, labor, sla, categories, simParams }),
+    [calendar, labor, sla, categories, simParams]
+  );
+  const settingsChangedSinceRun = useMemo(() => diffRunInputs(runInputs, liveInputs), [runInputs, liveInputs]);
 
   // Map Raw Rows to Standard Intervals
   const intervals = useMemo(() => {
@@ -167,6 +177,7 @@ export function App() {
   function applyFileUpload(text: string, filename: string) {
     setSimulationError(null);
     setSearchOutput(null);
+    setRunInputs(null);
 
     const { headers, rows } = parseCSVRaw(text);
     setRawHeaders(headers);
@@ -197,6 +208,7 @@ export function App() {
   function applyLoadSample(sampleType: 'claims' | 'support' | 'healthcare') {
     setSimulationError(null);
     setSearchOutput(null);
+    setRunInputs(null);
 
     // Pure generator in utils/sample-data.ts — same code the regression tests run with a fixed Monday.
     const { headers, rows } = buildSampleDataset(sampleType, nextMondayAt8(new Date()));
@@ -223,6 +235,7 @@ export function App() {
     // Clear previous simulation error and stale results
     setSimulationError(null);
     setSearchOutput(null);
+    setRunInputs(null);
 
     if (!dqResult || !dqResult.passed) {
       setSimulationError(
@@ -245,19 +258,22 @@ export function App() {
       currentMessage: 'Preparing horizon workload and calculating analytical lower bound N_min...',
     });
 
+    // Captured at run start: exactly what is passed to the search (not re-read after the await).
+    const runSnapshot: RunInputs = { calendar, labor, sla, categories, simParams };
+
     try {
       const result = await searchOptimalHCAsync({
         intervals,
         openingWIP,
-        categories,
-        calendar,
-        labor,
-        sla,
-        seed: simParams.seed,
-        userMaxHC: simParams.maxHCSearch,
-        replications: simParams.replications || 30,
-        queueArchitecture: simParams.queueArchitecture || 'pooled',
-        dispatchFairness: simParams.dispatchFairness,
+        categories: runSnapshot.categories,
+        calendar: runSnapshot.calendar,
+        labor: runSnapshot.labor,
+        sla: runSnapshot.sla,
+        seed: runSnapshot.simParams.seed,
+        userMaxHC: runSnapshot.simParams.maxHCSearch,
+        replications: runSnapshot.simParams.replications || 30,
+        queueArchitecture: runSnapshot.simParams.queueArchitecture || 'pooled',
+        dispatchFairness: runSnapshot.simParams.dispatchFairness,
         onProgress: (progress) => {
           setSearchProgress(progress);
         },
@@ -268,6 +284,7 @@ export function App() {
         // Clear previous errors on successful run
         setSimulationError(null);
         setSearchOutput(result);
+        setRunInputs(runSnapshot);
         setIsSimulating(false);
       }
     } catch (err: any) {
@@ -276,6 +293,7 @@ export function App() {
         // User explicitly stopped or cancelled simulation; dismiss cleanly without showing error
         setSimulationError(null);
         setSearchOutput(null);
+        setRunInputs(null);
         setShowProgressModal(false);
         setSearchProgress(null);
       } else {
@@ -283,6 +301,7 @@ export function App() {
           `Simulation execution failed: ${desc}. Please check your configuration parameters and the Data Quality gate before re-running.`
         );
         setSearchOutput(null);
+        setRunInputs(null);
         setShowProgressModal(false);
         setSearchProgress(null);
         console.error('Simulation error:', err);
@@ -322,6 +341,7 @@ export function App() {
     setColumnMapping({ intervalStartCol: '', volumeCol: '' });
     setOpeningWIP([]);
     setSearchOutput(null);
+    setRunInputs(null);
     setSimulationError(null);
     setIsSimulating(false);
     setShowProgressModal(false);
@@ -355,16 +375,20 @@ export function App() {
   }
 
   // Export JSON Parameters
-  function handleExportParams() {
-    const configSnapshot = {
-      calendar,
-      labor,
-      sla,
-      categories,
-      simParams,
+  // Shared by the Config-screen export (live settings) and the Results export (run snapshot).
+  function buildConfigSnapshot(src: RunInputs) {
+    return {
+      calendar: src.calendar,
+      labor: src.labor,
+      sla: src.sla,
+      categories: src.categories,
+      simParams: src.simParams,
       columnMapping,
       exportedAt: new Date().toISOString(),
     };
+  }
+
+  function downloadConfigSnapshot(configSnapshot: ReturnType<typeof buildConfigSnapshot>) {
 
     const blob = new Blob([JSON.stringify(configSnapshot, null, 2)], {
       type: 'application/json',
@@ -375,6 +399,15 @@ export function App() {
     link.download = `wfm_config_snapshot_${Date.now()}.json`;
     link.click();
     URL.revokeObjectURL(url);
+  }
+
+  function handleExportParams() {
+    downloadConfigSnapshot(buildConfigSnapshot(liveInputs));
+  }
+
+  // Results-screen export: the settings the displayed numbers were computed with.
+  function handleExportRunSnapshotParams() {
+    downloadConfigSnapshot(buildConfigSnapshot(runInputs ?? liveInputs));
   }
 
   // Import JSON Parameters
@@ -619,14 +652,15 @@ export function App() {
               <ResultsFlow
                 currentTab={currentTab}
                 searchOutput={searchOutput}
-                calendar={calendar}
-                labor={labor}
-                sla={sla}
-                categories={categories}
+                calendar={(runInputs ?? liveInputs).calendar}
+                labor={(runInputs ?? liveInputs).labor}
+                sla={(runInputs ?? liveInputs).sla}
+                categories={(runInputs ?? liveInputs).categories}
                 intervals={intervals}
                 openingWIP={openingWIP}
-                simParams={simParams}
-                onExportAssumptionsJSON={handleExportParams}
+                simParams={(runInputs ?? liveInputs).simParams}
+                settingsChangedSinceRun={settingsChangedSinceRun}
+                onExportAssumptionsJSON={handleExportRunSnapshotParams}
               />
             )}
 

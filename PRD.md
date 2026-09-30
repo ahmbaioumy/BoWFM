@@ -524,6 +524,16 @@ results.
 
 ### 5.9 Results and evidence
 
+**FR-9.0 — Results describe the run that produced them (2026-09-30).** When a run finishes, the
+calendar, labor, SLA, category and simulation settings it used are kept with the results
+(`runInputs`, `App.tsx`). Every Results figure, formula, the Agent Browser audit check and the
+Results-tab "Export assumptions JSON" use that snapshot, not the live settings. If settings are
+edited afterwards, an amber banner names what changed ("Settings changed since this run (Business
+calendar) … re-run to refresh"; `diffRunInputs`, `src/utils/run-inputs.ts`). Audit messages print
+local time (`YYYY-MM-DD HH:mm`). Fixes a false "busy slice starts outside business window" flood:
+measured on EGS_Only, a run at 08:00 open checked after moving the open to 10:00 gave 7,515 warnings,
+now 0. Tests: D53.
+
 **FR-9.1 — Summary tab** must present the following sections **in this top-to-bottom order**
 (infeasibility banner first when present; otherwise the Dual Sizing banner leads):
 1. An **infeasibility banner** when no headcount within the search cap satisfies the
@@ -1102,12 +1112,12 @@ comment. Nothing else.
 
 ## 9. Validation and quality
 
-### 9.1 Automated test suites — 837 checks (174 + 499 + 164 trusted-source)
+### 9.1 Automated test suites — 856 checks (174 + 518 + 164 trusted-source)
 
 | Suite | Tests | Covers |
 |---|---|---|
 | `scripts/verify-fixes.mts` | 174 | Legacy regression: CSV parsing, date handling, calendar arithmetic, CRN consistency, occupancy semantics, standalone artifact integrity, analytical infeasibility diagnosis, 24x7 midnight budget accounting |
-| `scripts/verify-sizing-fixes.mts` | 499 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement, fair agent assignment (D43: spread bounds, determinism, EDF order pinned to the pre-change engine, OFF = original HC, HC pins on pooled/siloed/staggered/24x7; D44: no double-booking in gated 24x7 runs; D45: availability accrual and pinned HC of the three built-in samples; D47: Workload Floor toggle; D48: clock-start derivation; D49: pinned HC of `test_files/AJM_Only.csv`; D50/D51/D52: roster polish at fixed HC — pooled, siloed guard, per-queue search) |
+| `scripts/verify-sizing-fixes.mts` | 518 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement, fair agent assignment (D43: spread bounds, determinism, EDF order pinned to the pre-change engine, OFF = original HC, HC pins on pooled/siloed/staggered/24x7; D44: no double-booking in gated 24x7 runs; D45: availability accrual and pinned HC of the three built-in samples; D47: Workload Floor toggle; D48: clock-start derivation; D49: pinned HC of `test_files/AJM_Only.csv`; D50/D51/D52: roster polish at fixed HC — pooled, siloed guard, per-queue search; D53: Results use run-time settings) |
 | `scripts/audit-compare.mts` (`npm run test:audit`, opt-in, ~30 min) | 24 cells | Re-runs all four `test_files/` samples × 6 settings and fails on any difference from `docs/audit/sample-hc-after-2026-09-30.jsonl` |
 | `scripts/check-artifact-freshness.mts` | gate | Fails if `BoWFM.html` is missing or older than shippable sources (`npm run check:artifact`) |
 

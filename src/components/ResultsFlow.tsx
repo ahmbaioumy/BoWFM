@@ -142,6 +142,8 @@ interface ResultsFlowProps {
   intervals: StandardInterval[];
   openingWIP: OpeningWIPCase[];
   simParams: SimulationParams;
+  /** Sections whose live settings differ from the run snapshot the props above carry (empty = in sync). */
+  settingsChangedSinceRun?: string[];
   onExportAssumptionsJSON: () => void;
 }
 
@@ -181,6 +183,7 @@ function ResultsFlowBody({
   intervals,
   openingWIP,
   simParams,
+  settingsChangedSinceRun = [],
   onExportAssumptionsJSON,
 }: ResultsFlowProps) {
   const [caseSearch, setCaseSearch] = useState('');
@@ -495,6 +498,12 @@ function ResultsFlowBody({
 
   return (
     <div className="space-y-6">
+      {settingsChangedSinceRun.length > 0 && (
+        <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 leading-relaxed">
+          <strong>Settings changed since this run ({settingsChangedSinceRun.join(', ')}).</strong>{' '}
+          Results show the settings used for this run — re-run to refresh.
+        </div>
+      )}
       {/* 1. SUMMARY TAB */}
       {currentTab === 'summary' && (
         <div className="space-y-6">

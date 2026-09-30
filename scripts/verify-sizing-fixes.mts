@@ -4055,6 +4055,86 @@ console.log('\n--- Suite D52: roster polish, siloed per-queue parallel search --
   }
 }
 
+// =================================================================
+// Suite D53 — Results describe the settings the run used; audit messages in local time
+//
+// Pre-fix ResultsFlow received the LIVE calendar/labor/sla/categories and ran
+// verifyAgentTimelineInvariants(des, labor, calendar) on old results against settings edited
+// after the run (run at 08:00, calendar changed to 10:00 -> 7,515 false "busy slice starts outside
+// business window" errors on EGS_Only). App now snapshots the run inputs (runInputs) and feeds
+// Results from them; diffRunInputs drives an amber "settings changed" banner. The audit messages
+// also printed UTC (toISOString, 08:00 looked like 04:00) — now local via formatDateTime24.
+// =================================================================
+console.log('\n--- Suite D53: results use run-time settings; local-time audit messages ---');
+{
+  let diffRunInputs: ((a: any, b: any) => string[]) | null = null;
+  try {
+    diffRunInputs = (await import('../src/utils/run-inputs')).diffRunInputs;
+  } catch (e) {
+    diffRunInputs = null;
+  }
+  assert(typeof diffRunInputs === 'function', 'D53.0 src/utils/run-inputs.ts exports diffRunInputs', 'module missing');
+  const base = { calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, categories: DEFAULT_CATEGORIES, simParams: DEFAULT_SIM_PARAMS };
+  const clone = () => JSON.parse(JSON.stringify(base));
+  if (diffRunInputs) {
+    const d = diffRunInputs;
+    assert(JSON.stringify(d(base, clone())) === '[]', 'D53.1 identical inputs -> []', JSON.stringify(d(base, clone())));
+    const c2 = clone(); c2.calendar.dailyOpenHour = (c2.calendar.dailyOpenHour + 2) % 24;
+    assert(JSON.stringify(d(base, c2)) === '["Business calendar"]', 'D53.2 calendar open hour changed -> [Business calendar]', JSON.stringify(d(base, c2)));
+    const reordered = { simParams: { ...base.simParams }, categories: base.categories.map((c) => Object.fromEntries(Object.entries(c).reverse())), sla: Object.fromEntries(Object.entries(base.sla).reverse()), labor: Object.fromEntries(Object.entries(base.labor).reverse()), calendar: Object.fromEntries(Object.entries(base.calendar).reverse()) };
+    assert(JSON.stringify(d(base, reordered)) === '[]', 'D53.3 key order is ignored', JSON.stringify(d(base, reordered)));
+    const c4 = clone(); c4.labor.dailyProductiveHours += 1;
+    assert(JSON.stringify(d(base, c4)) === '["Labor"]', 'D53.4a labor change detected', JSON.stringify(d(base, c4)));
+    const c5 = clone(); c5.sla.primaryPct = c5.sla.primaryPct - 5;
+    assert(JSON.stringify(d(base, c5)) === '["SLA policy"]', 'D53.4b SLA change detected', JSON.stringify(d(base, c5)));
+    const c6 = clone(); c6.categories[0].ahtMinutes += 1;
+    assert(JSON.stringify(d(base, c6)) === '["Categories"]', 'D53.4c categories change detected', JSON.stringify(d(base, c6)));
+    const c7 = clone(); c7.simParams.seed = (c7.simParams.seed ?? 0) + 1;
+    assert(JSON.stringify(d(base, c7)) === '["Simulation settings"]', 'D53.4d simParams change detected', JSON.stringify(d(base, c7)));
+    const c8 = clone(); c8.calendar.dailyOpenHour = (c8.calendar.dailyOpenHour + 2) % 24; c8.sla.primaryPct -= 5;
+    assert(JSON.stringify(d(base, c8)) === '["Business calendar","SLA policy"]', 'D53.4e multiple sections listed in display order', JSON.stringify(d(base, c8)));
+  }
+
+  // Invariant check: matching vs edited-after-run calendar (local-time messages).
+  const cal08: CalendarConfig = { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 18 };
+  const cal10: CalendarConfig = { ...BIZ_CAL, dailyOpenHour: 10, dailyCloseHour: 20 };
+  const ivs53: StandardInterval[] = [];
+  let idx53 = 0;
+  for (let d = 0; d < 3; d++) {
+    for (let h = 8; h < 18; h++) for (const m of [0, 30]) {
+      ivs53.push({ intervalIndex: idx53++, start: new Date(2026, 9, 5 + d, h, m), end: new Date(2026, 9, 5 + d, h, m + 30), volume: 6, category: 'General' });
+    }
+  }
+  const cats53: CategoryConfig[] = [{ id: 'General', name: 'General', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 }];
+  const sla53: SLAPolicyConfig = { ...DEFAULT_SLA, primaryPct: 80, primaryWindow: 6, primaryUnit: 'hours', occupancyCapEnabled: false, boAsaEnabled: false };
+  const des53 = runBackofficeDES({ operationalHC: 6, intervals: ivs53, openingWIP: [], categories: cats53, calendar: cal08, labor: LABOR, sla: sla53, seed: 42 });
+  const same53 = verifyAgentTimelineInvariants(des53, LABOR, cal08);
+  assert(same53.valid && same53.errors.length === 0, 'D53.5 08:00 run checked with the same 08:00 calendar -> 0 errors', `errors=${same53.errors.length} ${same53.errors[0] ?? ''}`);
+  const stale53 = verifyAgentTimelineInvariants(des53, LABOR, cal10);
+  assert(stale53.errors.length > 0, 'D53.6a 08:00 run checked with a 10:00 calendar -> errors (the stale-settings symptom the snapshot removes)', `errors=${stale53.errors.length}`);
+  const isoRe = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}[^ ]*Z/;
+  assert(stale53.errors.length > 0 && stale53.errors.every((e) => !isoRe.test(e)), 'D53.6b no ISO/UTC "T..Z" timestamps in audit messages', stale53.errors.find((e) => isoRe.test(e)) ?? '');
+  assert(stale53.errors.some((e) => /2026-10-0\d 08:00/.test(e)), 'D53.6c messages show local "YYYY-MM-DD 08:00"', stale53.errors[0] ?? '');
+
+  // Source checks: App feeds Results from the run snapshot; export uses it too.
+  const root53 = resolve(import.meta.dirname, '..');
+  const appSrc53 = readFileSync(join(root53, 'src', 'App.tsx'), 'utf-8');
+  const resultsStart53 = appSrc53.indexOf('<ResultsFlow');
+  const resultsBlock53 = resultsStart53 < 0 ? '' : appSrc53.slice(resultsStart53, appSrc53.indexOf('/>', resultsStart53));
+  assert(['calendar', 'labor', 'sla', 'categories', 'simParams'].every((p) => new RegExp(`${p}=\\{[^}]*runInputs[^}]*\\}`).test(resultsBlock53)), 'D53.7a App passes runInputs-derived calendar/labor/sla/categories/simParams to ResultsFlow', resultsBlock53);
+  assert(/settingsChangedSinceRun=/.test(resultsBlock53) && /diffRunInputs/.test(appSrc53), 'D53.7b App passes the diffRunInputs result as settingsChangedSinceRun', '');
+  const nClear53 = (appSrc53.match(/setSearchOutput\(null\)/g) || []).length;
+  const nRunClear53 = (appSrc53.match(/setRunInputs\(null\)/g) || []).length;
+  assert(/setRunInputs\((?!null)/.test(appSrc53) && nClear53 > 0 && nClear53 === nRunClear53, 'D53.7c runInputs set with the result and cleared everywhere searchOutput is cleared', `${nClear53} vs ${nRunClear53}`);
+  const desSrc53 = readFileSync(join(root53, 'src', 'utils', 'des-engine.ts'), 'utf-8');
+  const invStart53 = desSrc53.indexOf('export function verifyAgentTimelineInvariants');
+  const invNext53 = desSrc53.indexOf('\nexport ', invStart53 + 10);
+  assert(invStart53 > 0 && !/toISOString\(\)/.test(desSrc53.slice(invStart53, invNext53 > 0 ? invNext53 : undefined)), 'D53.8 verifyAgentTimelineInvariants has no toISOString()', '');
+  const rfSrc53 = readFileSync(join(root53, 'src', 'components', 'ResultsFlow.tsx'), 'utf-8');
+  assert(/settingsChangedSinceRun/.test(rfSrc53) && /Settings changed since this run/.test(rfSrc53), 'D53.9 ResultsFlow renders the stale-settings banner', '');
+  assert(/buildConfigSnapshot/.test(appSrc53) && /onExportAssumptionsJSON=\{[^}]*\}/.test(resultsBlock53) && !/onExportAssumptionsJSON=\{handleExportParams\}/.test(resultsBlock53), 'D53.10 Results export is wired to a run-snapshot handler, not the live Config export', resultsBlock53);
+}
+
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');
