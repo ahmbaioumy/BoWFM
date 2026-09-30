@@ -581,6 +581,8 @@ export interface RosterPolishResult {
   current: CoverageSummary;
   /** Coverage of the adopted roster (or of the target roster when nothing was adopted). */
   polished?: CoverageSummary;
+  /** Siloed only: the same current / polished summary per category, each against its own demand and seats. */
+  byCategory?: Record<string, { current: CoverageSummary; polished?: CoverageSummary }>;
   /** Median primary SLA % across replications at the recommended HC, current / polished roster. */
   currentSlaPct?: number;
   polishedSlaPct?: number;

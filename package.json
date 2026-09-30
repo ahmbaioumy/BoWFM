@@ -14,7 +14,8 @@
     "test": "npx tsx scripts/verify-fixes.mts && npx tsx scripts/verify-sizing-fixes.mts && npx tsx scripts/verify-agent-analytics.mts && npx tsx scripts/check-artifact-freshness.mts",
     "test:sizing": "npx tsx scripts/verify-sizing-fixes.mts",
     "test:agents": "npx tsx scripts/verify-agent-analytics.mts",
-    "test:trusted-source": "npx tsx scripts/verify-trusted-source.mts"
+    "test:trusted-source": "npx tsx scripts/verify-trusted-source.mts",
+    "test:audit": "npx tsx scripts/audit-compare.mts docs/audit/sample-hc-after-2026-09-30.jsonl"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.14",

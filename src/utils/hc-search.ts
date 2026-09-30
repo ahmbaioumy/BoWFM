@@ -33,7 +33,7 @@ import {
   getValidSlapStarts,
   isWorkingDay,
 } from './calendar';
-import { allocateAgentsToCategories, generateCaseEntities, resolveEffectiveAdherence, resolveMinAgentsPerInterval, resolveOccupancyCapPct, resolveShiftSlapMinutes, runBackofficeDES } from './des-engine';
+import { allocateAgentsToCategories, allocateSiloedSeats, generateCaseEntities, resolveEffectiveAdherence, resolveMinAgentsPerInterval, resolveOccupancyCapPct, resolveShiftSlapMinutes, runBackofficeDES } from './des-engine';
 
 /**
  * Net extra OFF (post-DES) and the roster coverage uplift derived from it.
@@ -787,14 +787,20 @@ export interface CoverageProfile extends CoverageSummary {
   onShift: number[];
   /** Work released in the bucket per working day / (bucket minutes x effective adherence). Full precision. */
   requiredAgents: number[];
+  /**
+   * Siloed only: the same summary per category, each measured against THAT category's own demand grid
+   * and own agents (categories with no seats or no demand are omitted). Absent for pooled.
+   */
+  byKey?: Record<string, CoverageSummary>;
 }
 
-/** Seat count per distribution key: the whole pool, or the frozen Webster split for siloed. */
-function seatsByDistributionKey(cases: CaseEntity[], n: number, queueArchitecture: 'pooled' | 'siloed'): Map<string, number> {
+/**
+ * Seat count per distribution key: the whole pool, or the frozen Webster split for siloed. Siloed goes
+ * through allocateSiloedSeats — the SAME function runBackofficeDES seats agents with (D51.4 pins parity).
+ */
+export function seatsByDistributionKey(cases: CaseEntity[], n: number, queueArchitecture: 'pooled' | 'siloed'): Map<string, number> {
   if (queueArchitecture === 'pooled') return new Map<string, number>([['__POOLED__', n]]);
-  const catWorkloadMinutes = new Map<string, number>();
-  for (const c of cases) catWorkloadMinutes.set(c.category, (catWorkloadMinutes.get(c.category) || 0) + c.totalAhtMinutes);
-  return allocateAgentsToCategories(catWorkloadMinutes, n);
+  return allocateSiloedSeats(cases, n);
 }
 
 /** Every agent's start offset, expanded the way runBackofficeDES assigns slaps (ascending, remainder at offset 0). */
@@ -831,12 +837,39 @@ export function computeCoverageProfile(params: {
 }): CoverageProfile | null {
   const { distribution, n, cases, calendar, labor, queueArchitecture } = params;
   if (calendar.is24x7 || n <= 0) return null;
-  const grid = buildOneDayDemandGrid(cases, calendar, resolveShiftSlapMinutes(labor));
+  const slapMinutes = resolveShiftSlapMinutes(labor);
+  const grid = buildOneDayDemandGrid(cases, calendar, slapMinutes);
   if (grid.totalWorkMinutes <= 0) return null;
   const adherence = resolveEffectiveAdherence(labor);
   const shiftLengthMinutes = labor.dailyProductiveHours * 60;
-  const offsets = expandAgentStartOffsets(distribution, seatsByDistributionKey(cases, n, queueArchitecture));
+  const seats = seatsByDistributionKey(cases, n, queueArchitecture);
+  const profile = coverageProfileOnGrid(grid, expandAgentStartOffsets(distribution, seats), adherence, shiftLengthMinutes);
+  if (!profile) return null;
 
+  if (queueArchitecture === 'siloed') {
+    // Per-category view (each category vs its own demand and its own seats) for the polish decision's
+    // "no category gets worse" guard. Sorted keys for deterministic output.
+    const casesByCategory = new Map<string, CaseEntity[]>();
+    for (const c of cases) {
+      if (!casesByCategory.has(c.category)) casesByCategory.set(c.category, []);
+      casesByCategory.get(c.category)!.push(c);
+    }
+    const byKey: Record<string, CoverageSummary> = {};
+    for (const key of Array.from(seats.keys()).sort()) {
+      const seatCount = seats.get(key)!;
+      if (seatCount <= 0) continue;
+      const catGrid = buildOneDayDemandGrid(casesByCategory.get(key) || [], calendar, slapMinutes);
+      if (catGrid.totalWorkMinutes <= 0) continue;
+      const catProfile = coverageProfileOnGrid(catGrid, expandAgentStartOffsets(distribution, new Map([[key, seatCount]])), adherence, shiftLengthMinutes);
+      if (catProfile) byKey[key] = { minOnShift: catProfile.minOnShift, bucketsMeetingNeedPct: catProfile.bucketsMeetingNeedPct, gapAgentHours: catProfile.gapAgentHours };
+    }
+    profile.byKey = byKey;
+  }
+  return profile;
+}
+
+/** Coverage of a set of agent start offsets against one demand grid. null when the grid has no open bucket. */
+function coverageProfileOnGrid(grid: DemandGrid, offsets: number[], adherence: number, shiftLengthMinutes: number): CoverageProfile | null {
   const bucketStartMinutes: number[] = [];
   const onShift: number[] = [];
   const requiredAgents: number[] = [];
@@ -900,6 +933,10 @@ export function buildPolishedRoster(params: {
   if (validStarts.length === 0) return { distribution: null, reason: 'no valid shift start fits inside the open window' };
 
   const capacityMinutes = shiftLengthMinutes * resolveEffectiveAdherence(labor);
+  // Seed size follows the DES gate, which is ORG-WIDE: countAgentsOnShiftNow counts every agent and is
+  // compared with resolveMinAgentsPerInterval(sla, totalHC) — not a per-category floor. So the seed stays
+  // sized from the total n (and is applied to a category only when its seats can hold the cover); the
+  // per-category protection is the "no category's minOnShift drops" guard in coverageIsBetter.
   const minAgents = resolveMinAgentsPerInterval(sla, n);
   const cover = computeMinimalCoverStarts(validStarts, shiftLengthMinutes, windowLengthMinutes);
   const placeSeats = (grid: DemandGrid, seats: number): ShiftSlapDistribution => {
@@ -1091,8 +1128,18 @@ export type RosterPolishPlan =
       improves: boolean;
     };
 
-/** Strictly better coverage: higher minimum on shift across open buckets; tie -> strictly lower gap (agent-hours). */
-function coverageIsBetter(candidate: CoverageSummary, baseline: CoverageSummary): boolean {
+/**
+ * Strictly better coverage: higher minimum on shift across open buckets; tie -> strictly lower gap
+ * (agent-hours). Siloed adds a guard: no category's own minOnShift may drop (an org-wide gain can hide
+ * one queue losing coverage). Pooled profiles carry no byKey, so pooled is exactly the org test.
+ */
+function coverageIsBetter(candidate: CoverageProfile, baseline: CoverageProfile): boolean {
+  if (baseline.byKey && candidate.byKey) {
+    for (const key of Object.keys(baseline.byKey)) {
+      const cand = candidate.byKey[key];
+      if (cand && cand.minOnShift < baseline.byKey[key].minOnShift) return false;
+    }
+  }
   if (candidate.minOnShift > baseline.minOnShift) return true;
   return candidate.minOnShift === baseline.minOnShift && candidate.gapAgentHours < baseline.gapAgentHours - 1e-9;
 }
@@ -1167,9 +1214,18 @@ export function finalizeRosterPolish(params: {
     };
   }
   const K = plan.totalMoves;
+  const mkByCategory = (polishedProfile: CoverageProfile): Pick<RosterPolishResult, 'byCategory'> => {
+    if (!plan.current.byKey) return {};
+    const byCategory: NonNullable<RosterPolishResult['byCategory']> = {};
+    for (const key of Object.keys(plan.current.byKey).sort()) {
+      byCategory[key] = { current: plan.current.byKey[key], ...(polishedProfile.byKey?.[key] ? { polished: polishedProfile.byKey[key] } : {}) };
+    }
+    return { byCategory };
+  };
   const mkProfile = (polishedProfile: CoverageProfile) => ({
     current: summarizeCoverage(plan.current),
     polished: summarizeCoverage(polishedProfile),
+    ...mkByCategory(polishedProfile),
     currentSlaPct,
     movesTotal: K,
     profile: {
@@ -3220,6 +3276,10 @@ export async function searchOptimalHCAsync(params: {
         let currN = ceilingHigh - 1;
         const totalDownSteps = Math.max(1, ceilingHigh - floorN);
         let downStepIndex = 0;
+        // Progress wording only: startN itself passed (workload floor OFF), so no leap ran; and whether a
+        // failure (vs. reaching floorN) ended the walk.
+        const walkStartedFromStartN = ceilingHigh === startN && startEval.passesAllConstraints;
+        let walkEndedOnFailure = false;
 
         while (currN >= floorN) {
           if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
@@ -3229,7 +3289,9 @@ export async function searchOptimalHCAsync(params: {
           const res = await evaluateAsync(
             currN,
             downProgress,
-            `Refining −1: N=${currN} (ceiling was ${ceilingHigh})...`
+            walkStartedFromStartN
+              ? `Start N=${startN} passed; refining down: N=${currN}...`
+              : `Refining −1: N=${currN} (ceiling was ${ceilingHigh})...`
           );
 
           if (res.passesAllConstraints) {
@@ -3238,6 +3300,7 @@ export async function searchOptimalHCAsync(params: {
           } else {
             // first fail walking down
             primaryFailedResult = res;
+            walkEndedOnFailure = true;
             break;
           }
         }
@@ -3247,7 +3310,7 @@ export async function searchOptimalHCAsync(params: {
         primaryPassedResult = await evaluateAsync(
           recommendedHC,
           93,
-          `Lowest verified-passing N=${recommendedHC} found (N-1=${recommendedHC - 1} failed the gate). Leap ${ceilingHigh} discarded.`
+          `Lowest verified-passing N=${recommendedHC} found (${walkEndedOnFailure ? `N-1=${recommendedHC - 1} failed the gate` : `reached the search floor N=${floorN}`}).${walkStartedFromStartN ? '' : ` Leap ${ceilingHigh} discarded.`}`
         );
         evalN = recommendedHC;
         isInfeasible = false;
