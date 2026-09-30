@@ -848,7 +848,11 @@ and the status line. Placement OFF: no polish, output byte-identical. Measured 2
 config, R=30): EGS_Only 100 HC → `adopted_partial` 13/72, late-tail coverage **1 → 14 agents**,
 SLA 92.7→92.5%; AJM_Only 16 HC → `kept_current_failed_gate` — moving even one agent later drops
 category Tech HVC's CI lower bound to 79.7% (< 80%), so at this HC better coverage costs SLA.
-Tests: D50.
+**Siloed queues:** coverage is also measured per category, and a step is rejected if any single
+queue's minimum agents on shift would drop — an org-wide gain cannot hide one queue getting
+worse. The polish and the DES seat agents per category through the same function
+(`allocateSiloedSeats`), so they can never disagree on who sits in which queue. The minimum-coverage
+floor stays org-wide, matching the DES gate. Tests: D50 (pooled), D51 (siloed).
 
 ### Stage 4 — Operational HC → Extra OFF Roster Uplift → Gross HC / FTE
 
@@ -1090,12 +1094,13 @@ comment. Nothing else.
 
 ## 9. Validation and quality
 
-### 9.1 Automated test suites — 789 checks (174 + 451 + 164 trusted-source)
+### 9.1 Automated test suites — 819 checks (174 + 481 + 164 trusted-source)
 
 | Suite | Tests | Covers |
 |---|---|---|
 | `scripts/verify-fixes.mts` | 174 | Legacy regression: CSV parsing, date handling, calendar arithmetic, CRN consistency, occupancy semantics, standalone artifact integrity, analytical infeasibility diagnosis, 24x7 midnight budget accounting |
-| `scripts/verify-sizing-fixes.mts` | 451 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement, fair agent assignment (D43: spread bounds, determinism, EDF order pinned to the pre-change engine, OFF = original HC, HC pins on pooled/siloed/staggered/24x7; D44: no double-booking in gated 24x7 runs; D45: availability accrual and pinned HC of the three built-in samples; D47: Workload Floor toggle; D48: clock-start derivation; D50: roster polish at fixed HC) |
+| `scripts/verify-sizing-fixes.mts` | 481 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement, fair agent assignment (D43: spread bounds, determinism, EDF order pinned to the pre-change engine, OFF = original HC, HC pins on pooled/siloed/staggered/24x7; D44: no double-booking in gated 24x7 runs; D45: availability accrual and pinned HC of the three built-in samples; D47: Workload Floor toggle; D48: clock-start derivation; D49: pinned HC of `test_files/AJM_Only.csv`; D50/D51: roster polish at fixed HC, pooled/siloed) |
+| `scripts/audit-compare.mts` (`npm run test:audit`, opt-in, ~30 min) | 24 cells | Re-runs all four `test_files/` samples × 6 settings and fails on any difference from `docs/audit/sample-hc-after-2026-09-30.jsonl` |
 | `scripts/check-artifact-freshness.mts` | gate | Fails if `BoWFM.html` is missing or older than shippable sources (`npm run check:artifact`) |
 
 Run with `npm test` (suites + freshness gate). No test framework is used — that would breach NFR-2.1; both suites use a
