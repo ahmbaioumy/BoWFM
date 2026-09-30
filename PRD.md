@@ -853,6 +853,10 @@ queue's minimum agents on shift would drop — an org-wide gain cannot hide one 
 worse. The polish and the DES seat agents per category through the same function
 (`allocateSiloedSeats`), so they can never disagree on who sits in which queue. The minimum-coverage
 floor stays org-wide, matching the DES gate. Tests: D50 (pooled), D51 (siloed).
+Known limit (measured 2026-09-30, AJM_Simu siloed, HC 93 unchanged): the one-agent-at-a-time path
+re-spreads categories in name order, and the search stops at the first move that breaks any gate —
+so once the first queue (Billing HVC, late tail 1 → 3) hits its SLA limit, the later queues stay
+as they were (5 of 61 moves). A per-category search would reach them at extra simulation cost.
 
 ### Stage 4 — Operational HC → Extra OFF Roster Uplift → Gross HC / FTE
 
