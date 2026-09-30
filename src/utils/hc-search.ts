@@ -1779,6 +1779,7 @@ function computeStatisticalEvaluation(
 
   // --- Category SLA Statistics across R replications ---
   let passesCategorySLA = true;
+  const categoryPasses: Record<string, boolean> = {};
   const categoryFailureMessages: string[] = [];
   const catNames = new Set([
     ...categories.map((c) => c.name),
@@ -1797,6 +1798,7 @@ function computeStatisticalEvaluation(
     const cLow = Math.max(0, Math.round((cMean - tVal * cSE) * 10) / 10);
     const cHigh = Math.min(100, Math.round((cMean + tVal * cSE) * 10) / 10);
     const catPass = R > 1 ? cLow >= catTarget : cMean >= catTarget;
+    categoryPasses[catName] = catPass;
 
     if (!catPass) {
       passesCategorySLA = false;
@@ -1859,6 +1861,9 @@ function computeStatisticalEvaluation(
     representativeRepIndex: bestRepIdx,
     passesPrimaryCI,
     passesCoverage,
+    passesCategorySLA,
+    categoryPasses,
+    passesOrgGates: passesPrimaryCI && passesBOASA && passesOccupancyCap && passesCoverage,
     passesAllConstraints,
     failingReasons,
   };
@@ -1887,6 +1892,11 @@ export function evaluateCandidateStatistical(params: {
   representativeResult: DESResult;
   representativeRepIndex: number;
   passesPrimaryCI: boolean;
+  passesCategorySLA: boolean;
+  /** Per-category verdict (same keys the category SLA gate walks); every value true iff passesCategorySLA. */
+  categoryPasses: Record<string, boolean>;
+  /** The org-wide gates: overall Primary SLA CI, BO ASA, occupancy cap, coverage floor. */
+  passesOrgGates: boolean;
   passesAllConstraints: boolean;
   failingReasons: string[];
 } {
@@ -1968,6 +1978,11 @@ async function evaluateCandidateStatisticalAsync(params: {
   representativeResult: DESResult;
   representativeRepIndex: number;
   passesPrimaryCI: boolean;
+  passesCategorySLA: boolean;
+  /** Per-category verdict (same keys the category SLA gate walks); every value true iff passesCategorySLA. */
+  categoryPasses: Record<string, boolean>;
+  /** The org-wide gates: overall Primary SLA CI, BO ASA, occupancy cap, coverage floor. */
+  passesOrgGates: boolean;
   passesAllConstraints: boolean;
   failingReasons: string[];
 }> {

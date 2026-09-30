@@ -3912,6 +3912,150 @@ console.log('\n--- Suite D51: roster polish, siloed ---');
   }
 }
 
+// =================================================================
+// Suite D52 — Stage 3b roster polish, SILOED: every queue gets its own best spread
+//
+// Pre-fix the siloed polish walked ONE name-ordered move path with one global k, so the first
+// category (by name) that hit its own SLA limit stopped every later category at its current roster
+// (AJM_Simu HC 93: 4 of 5 queues kept 1 agent for the last 2.5 h). Siloed queues are independent in
+// the DES (own agents, own queue, CRN arrivals), so each category is binary-searched in PARALLEL
+// inside the same evaluations from its own categoryPasses verdict; org-wide gate failures are
+// charged to every key that moved up that round; the combined vector is confirmed once and falls
+// back to the best fully-passing evaluated vector. Pooled is untouched (D50 stays byte-identical).
+// =================================================================
+console.log('\n--- Suite D52: roster polish, siloed per-queue parallel search ---');
+{
+  const cal52: CalendarConfig = { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 20 };
+  const labor52Off: LaborConfig = { ...LABOR, dailyProductiveHours: 8 };
+  const labor52On: LaborConfig = { ...labor52Off, shiftPlacementEnabled: true, shiftSlapMinutes: 30 };
+  // A: strict own SLA (95%) + an 08:00 spike -> saturates after a couple of moves. B: no own target, mid-day peak -> can spread further.
+  const cats52: CategoryConfig[] = [
+    { id: 'A', name: 'A', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1, primaryPct: 95 },
+    { id: 'B', name: 'B', ahtMinutes: 25, shrinkagePct: 0.1, priority: 2 },
+  ];
+  const mkIv52 = (): StandardInterval[] => {
+    const out: StandardInterval[] = [];
+    for (let day = 0; day < 5; day++) {
+      for (let h = 8; h < 20; h++) {
+        for (let m = 0; m < 60; m += 30) {
+          for (const [category, vol] of [['A', h === 8 ? 60 : 4], ['B', h >= 12 && h < 16 ? 10 : 2]] as Array<[string, number]>) {
+            out.push({ intervalIndex: out.length, start: new Date(2026, 2, 2 + day, h, m), end: new Date(2026, 2, 2 + day, h, m + 30), volume: vol, category });
+          }
+        }
+      }
+    }
+    return out;
+  };
+  const sla52: SLAPolicyConfig = {
+    primaryPct: 85, primaryWindow: 4, primaryUnit: 'hours', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes',
+    asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'next_open',
+    occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 90,
+  };
+  const iv52 = mkIv52();
+  const run52 = (labor: LaborConfig) => ({
+    intervals: iv52, openingWIP: [] as any[], categories: cats52, calendar: cal52, labor, sla: sla52, seed: 42, userMaxHC: 60, replications: 6,
+    queueArchitecture: 'siloed' as const,
+  });
+  const distStr52 = (d: ShiftDistributionByCategory | undefined) => JSON.stringify(d ? Object.keys(d).sort().map((k) => [k, d[k].slaps]) : null);
+
+  const off52 = searchOptimalHC(run52(labor52Off));
+  const on52 = searchOptimalHC(run52(labor52On));
+  const rp52 = (on52 as any).rosterPolish;
+  const bc = rp52?.byCategory ?? {};
+
+  // D52.1 — the later category spreads further than the first one allows.
+  assert(rp52?.status === 'adopted_partial', 'D52.1a siloed placement ON: adopted_partial (A saturates)', `status=${rp52?.status} reason=${rp52?.reason}`);
+  assert(bc.A?.polished?.minOnShift > bc.A?.current?.minOnShift, 'D52.1b first-by-name category A still improves its own minOnShift', JSON.stringify(bc.A));
+  assert(bc.B?.polished?.minOnShift > bc.B?.current?.minOnShift, 'D52.1c later category B ALSO improves its minOnShift (pre-fix: stuck at current)', JSON.stringify(bc.B));
+  assert(Object.keys(bc).length === 2 && Object.keys(bc).every((k) => bc[k].polished && bc[k].polished.minOnShift >= bc[k].current.minOnShift), 'D52.1d no category minOnShift drops', JSON.stringify(bc));
+  const sumApplied = Object.values<any>(bc).reduce((a, v) => a + (v.movesApplied ?? NaN), 0);
+  const sumTotal = Object.values<any>(bc).reduce((a, v) => a + (v.movesTotal ?? NaN), 0);
+  assert(sumApplied === rp52?.movesApplied && sumTotal === rp52?.movesTotal && bc.A?.movesApplied < bc.A?.movesTotal, 'D52.1e byCategory movesApplied/movesTotal are per key and sum to the top-level counts', `${JSON.stringify(bc)} top=${rp52?.movesApplied}/${rp52?.movesTotal}`);
+
+  // D52.2 — HC never moves; sync === async; deterministic.
+  assert(on52.recommendedHC !== null && on52.recommendedHC === off52.recommendedHC && on52.staffing?.grossHCTotal === off52.staffing?.grossHCTotal, 'D52.2a HC and gross HC equal placement OFF (sync)', `off=${off52.recommendedHC}/${off52.staffing?.grossHCTotal} on=${on52.recommendedHC}/${on52.staffing?.grossHCTotal}`);
+  const on52A = await searchOptimalHCAsync(run52(labor52On));
+  assert(on52A.recommendedHC === off52.recommendedHC && on52A.staffing?.grossHCTotal === off52.staffing?.grossHCTotal, 'D52.2b HC and gross HC equal placement OFF (async)', `async=${on52A.recommendedHC}`);
+  assert(JSON.stringify((on52A as any).rosterPolish) === JSON.stringify(rp52) && distStr52(on52A.shiftPlacement?.winningDistribution) === distStr52(on52.shiftPlacement?.winningDistribution), 'D52.2c sync === async (rosterPolish incl. per-key moves + adopted roster)', '');
+  const on52b = searchOptimalHC(run52(labor52On));
+  assert(JSON.stringify((on52b as any).rosterPolish) === JSON.stringify(rp52) && distStr52(on52b.shiftPlacement?.winningDistribution) === distStr52(on52.shiftPlacement?.winningDistribution), 'D52.2d deterministic across runs', '');
+  const floor52 = resolveMinAgentsPerInterval(sla52, on52.recommendedHC ?? 0);
+  assert(floor52 >= 1 && (on52.finalDESResult?.minCoverageObserved ?? -1) >= floor52, 'D52.2e coverage floor honoured in the final DES', `min=${on52.finalDESResult?.minCoverageObserved} floor=${floor52}`);
+
+  // D52.3 — categoryPasses agrees with the category gate: every value true <=> passesCategorySLA.
+  {
+    const evalAt = (hc: number) => (hcNs as any).evaluateCandidateStatistical({
+      operationalHC: hc, intervals: iv52, openingWIP: [], categories: cats52, calendar: cal52, labor: labor52Off, sla: sla52,
+      baseSeed: 42, replications: 4, queueArchitecture: 'siloed',
+    });
+    let allAgree = true; let sawFail = false; let sawPass = false; let keysOk = true;
+    for (const hc of [4, 8, 12, 16, 20, 30]) {
+      const r = evalAt(hc);
+      const cp = r.categoryPasses as Record<string, boolean> | undefined;
+      if (!cp) { allAgree = false; keysOk = false; break; }
+      const allTrue = Object.values(cp).every(Boolean);
+      if (allTrue !== r.passesCategorySLA) allAgree = false;
+      if (allTrue !== !r.failingReasons.some((x: string) => x.startsWith("Category '"))) allAgree = false;
+      if (JSON.stringify(Object.keys(cp).sort()) !== JSON.stringify(['A', 'B'])) keysOk = false;
+      if (allTrue) sawPass = true; else sawFail = true;
+    }
+    assert(allAgree && keysOk && sawFail && sawPass, 'D52.3 categoryPasses (keys = categories) all-true <=> passesCategorySLA, across passing and failing HCs', `agree=${allAgree} keys=${keysOk} fail=${sawFail} pass=${sawPass}`);
+  }
+
+  // D52.4 — the parallel k-search control (pure helper, fake evaluators).
+  {
+    const cps = (hcNs as any).createParallelRosterKSearch as ((totals: Record<string, number>) => { next: () => Record<string, number> | null; record: (v: Record<string, number>, e: any) => void; result: () => any }) | undefined;
+    assert(typeof cps === 'function', 'D52.4a createParallelRosterKSearch is exported', '');
+    if (typeof cps === 'function') {
+      // fake DES: per-category verdicts + an org-wide verdict, both supplied by the test.
+      const drive = (totals: Record<string, number>, ev: (v: Record<string, number>) => { cat: Record<string, boolean>; org: boolean }) => {
+        const s = cps(totals); const seen: Array<Record<string, number>> = [];
+        for (let v = s.next(); v !== null; v = s.next()) {
+          seen.push({ ...v });
+          const e = ev(v);
+          s.record(v, { passes: e.org && Object.values(e.cat).every(Boolean), passesOrgGates: e.org, categoryPasses: e.cat, reasons: e.org ? [] : ['org gate'], slaPct: 0 });
+        }
+        return { seen, res: s.result() };
+      };
+      const bound = (totals: Record<string, number>) => Math.ceil(Math.log2(Math.max(...Object.values(totals)))) + 2;
+      const limitsEv = (lim: Record<string, number>, orgCap = Infinity) => (v: Record<string, number>) => ({
+        cat: Object.fromEntries(Object.keys(lim).map((k) => [k, v[k] <= lim[k]])),
+        org: Object.values(v).reduce((a, b) => a + b, 0) <= orgCap,
+      });
+      const tot = { A: 9, B: 12 };
+      const a = drive(tot, limitsEv({ A: 4, B: 12 }));
+      assert(JSON.stringify(a.res.bestVector) === JSON.stringify({ A: 4, B: 12 }) && a.seen.length <= bound(tot) && JSON.stringify(a.seen[0]) === JSON.stringify(tot) && a.res.allReached === false, 'D52.4b independent limits: each key lands on its own largest passing k, K tried first, within ceil(log2 maxK)+2 evaluations', JSON.stringify({ n: a.seen.length, best: a.res.bestVector }));
+      const b = drive(tot, limitsEv({ A: 9, B: 12 }));
+      assert(b.seen.length === 1 && b.res.allReached === true && JSON.stringify(b.res.bestVector) === JSON.stringify(tot), 'D52.4c every key passes at K: one evaluation, allReached', JSON.stringify({ n: b.seen.length, r: b.res }));
+      const c = drive(tot, limitsEv({ A: 0, B: 0 }));
+      assert(JSON.stringify(c.res.bestVector) === JSON.stringify({ A: 0, B: 0 }) && c.seen.length <= bound(tot) && c.seen.some((v) => v.A === 1) && c.seen.some((v) => v.B === 1), 'D52.4d nothing passes: zeros (current roster), step 1 tried for every key', JSON.stringify({ n: c.seen.length, best: c.res.bestVector }));
+      const totO = { A: 8, B: 8 };
+      const d = drive(totO, limitsEv({ A: 8, B: 8 }, 10));
+      const dv = d.res.bestVector as Record<string, number>;
+      assert(dv.A + dv.B <= 10 && dv.A + dv.B > 0 && d.seen.length <= bound(totO) && typeof d.res.blockReason === 'string' && d.res.blockReason.includes('org gate'), 'D52.4e org-gate failure is charged to the keys that moved: result respects the org cap, within the evaluation bound, blockReason names the gate', JSON.stringify({ n: d.seen.length, best: dv, why: d.res.blockReason }));
+      // D52.4f — the combined vector was never evaluated and FAILS the confirm: fall back to the best passing evaluated vector.
+      const coupled = (v: Record<string, number>) => ({ cat: { A: v.A <= 6 - (v.B >= 5 ? 2 : 0), B: v.B <= 8 }, org: true });
+      const f = drive({ A: 8, B: 8 }, coupled);
+      const fb = f.res.bestVector as Record<string, number>;
+      const fbEval = coupled(fb);
+      const confirmedFail = f.seen.some((v) => !Object.values(coupled(v).cat).every(Boolean) && JSON.stringify(v) === JSON.stringify(f.res.chosenVector));
+      assert(fbEval.cat.A && fbEval.cat.B && f.seen.length <= bound({ A: 8, B: 8 }) && confirmedFail && f.res.allReached === false && typeof f.res.blockReason === 'string' && f.res.blockReason.length > 0, 'D52.4f confirm fails -> falls back to the best fully-passing evaluated vector (never adopts an unverified or failing one)', JSON.stringify({ seen: f.seen, best: fb, chosen: f.res.chosenVector, why: f.res.blockReason }));
+      // D52.4g — property sweep: whatever the fake does, the adopted vector is all-zero or was evaluated fully passing, and the bound holds.
+      let propOk = true; let firstBad = '';
+      for (let ka = 1; ka <= 12; ka++) for (let kb = 1; kb <= 12; kb += 2) for (let la = 0; la <= ka; la += 2) for (let cap = 4; cap <= 24; cap += 5) {
+        const t = { A: ka, B: kb };
+        const ev = (v: Record<string, number>) => ({ cat: { A: v.A <= la, B: v.B <= Math.max(0, kb - (v.A >= 3 ? 1 : 0)) }, org: v.A + v.B <= cap });
+        const r = drive(t, ev);
+        const bv = r.res.bestVector as Record<string, number>;
+        const e = ev(bv);
+        const ok = (bv.A === 0 && bv.B === 0) || (e.org && e.cat.A && e.cat.B && r.seen.some((x) => x.A === bv.A && x.B === bv.B));
+        if (!ok || r.seen.length > bound(t)) { propOk = false; firstBad ||= JSON.stringify({ t, la, cap, bv, n: r.seen.length }); }
+      }
+      assert(propOk, 'D52.4g sweep: adopted vector is all-zero or was evaluated fully passing; evaluations <= ceil(log2 maxK)+2', firstBad);
+    }
+  }
+}
+
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');
