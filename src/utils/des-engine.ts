@@ -423,6 +423,23 @@ interface ActiveProcessingState {
 }
 
 /**
+ * The ONE siloed seat split: per-category workload = sum of totalAhtMinutes over `cases`, every name in
+ * `categoryNames` present at 0 minutes, then allocateAgentsToCategories. runBackofficeDES and the roster
+ * polish (hc-search seatsByDistributionKey) both call this, so the polish can never seat a different
+ * number of agents per category than the DES does for the same case set.
+ */
+export function allocateSiloedSeats(
+  cases: ReadonlyArray<{ category: string; totalAhtMinutes: number }>,
+  operationalHC: number,
+  categoryNames: Iterable<string> = []
+): Map<string, number> {
+  const catWorkloadMinutes = new Map<string, number>();
+  for (const name of categoryNames) catWorkloadMinutes.set(name, 0);
+  for (const c of cases) catWorkloadMinutes.set(c.category, (catWorkloadMinutes.get(c.category) || 0) + c.totalAhtMinutes);
+  return allocateAgentsToCategories(catWorkloadMinutes, operationalHC);
+}
+
+/**
  * Splits operational headcount across categories for the siloed queue architecture,
  * proportionally to each category's workload.
  *
@@ -908,17 +925,12 @@ export function runBackofficeDES(params: {
     categories.forEach((c) => allCatNames.add(c.name));
     allCases.forEach((c) => allCatNames.add(c.category));
 
-    const catWorkloadMinutes = new Map<string, number>();
     allCatNames.forEach((name) => {
-      catWorkloadMinutes.set(name, 0);
       siloedQueues.set(name, new CaseMinHeap());
       siloedIdleAgents.set(name, []);
     });
-    allCases.forEach((c) => {
-      catWorkloadMinutes.set(c.category, (catWorkloadMinutes.get(c.category) || 0) + c.totalAhtMinutes);
-    });
     if (operationalHC > 0) {
-      const seats = allocateAgentsToCategories(catWorkloadMinutes, operationalHC);
+      const seats = allocateSiloedSeats(allCases, operationalHC, allCatNames);
       let agentId = 0;
       for (const [catName, count] of seats.entries()) {
         for (let j = 0; j < count; j++) {

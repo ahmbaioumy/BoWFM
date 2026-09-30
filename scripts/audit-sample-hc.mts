@@ -6,14 +6,15 @@
  * before/after pair of runs can be diffed.
  *
  * Usage: npx tsx scripts/audit-sample-hc.mts <out.jsonl> <csv file in test_files/> <cell,cell,...>
+ * Regression diff of all files x cells against a baseline: `npm run test:audit` (scripts/audit-compare.mts).
  * Cells: BA BN WA WN (clock basis x clock start), PON (placement ON), FOFF (N_min floor OFF).
  */
-import { appendFileSync, readFileSync } from 'node:fs';
-import { parseCSVRaw, mapRawRecordsToIntervals, discoverAndSyncCategories } from '../src/utils/csv-parser';
+import { appendFileSync } from 'node:fs';
+import { loadSampleFile } from './sample-files';
 import { searchOptimalHC } from '../src/utils/hc-search';
 import { getDailyWindowLengthHours } from '../src/utils/calendar';
 import {
-  DEFAULT_CALENDAR, DEFAULT_CATEGORIES, DEFAULT_LABOR, DEFAULT_SIM_PARAMS, DEFAULT_SLA,
+  DEFAULT_CALENDAR, DEFAULT_LABOR, DEFAULT_SIM_PARAMS, DEFAULT_SLA,
 } from '../src/utils/default-config';
 import type { LaborConfig, ShiftDistributionByCategory, SLAPolicyConfig } from '../src/types/wfm';
 
@@ -45,9 +46,7 @@ function onShiftByBucket(dist: ShiftDistributionByCategory | undefined, hc: numb
   return out;
 }
 
-const raw = parseCSVRaw(readFileSync(`test_files/${csvName}`, 'utf8'));
-const intervals = mapRawRecordsToIntervals(raw.rows, { intervalStartCol: 'Date', timeCol: 'int', volumeCol: 'Vol', categoryCol: 'Seg' } as any);
-const categories = discoverAndSyncCategories(intervals, DEFAULT_CATEGORIES, DEFAULT_SLA);
+const { intervals, categories } = loadSampleFile(csvName);
 
 for (const cell of cellArg.split(',')) {
   const spec = CELLS[cell];

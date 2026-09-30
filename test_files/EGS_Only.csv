@@ -1,0 +1,4465 @@
+Date,int,Vol,Seg
+01/10/2026,00:00:00,1,OS Billing Gold
+02/10/2026,00:00:00,0,OS Billing Gold
+03/10/2026,00:00:00,0,OS Billing Gold
+04/10/2026,00:00:00,1,OS Billing Gold
+05/10/2026,00:00:00,3,OS Billing Gold
+06/10/2026,00:00:00,0,OS Billing Gold
+07/10/2026,00:00:00,0,OS Billing Gold
+08/10/2026,00:00:00,0,OS Billing Gold
+09/10/2026,00:00:00,0,OS Billing Gold
+10/10/2026,00:00:00,0,OS Billing Gold
+11/10/2026,00:00:00,0,OS Billing Gold
+12/10/2026,00:00:00,2,OS Billing Gold
+13/10/2026,00:00:00,0,OS Billing Gold
+14/10/2026,00:00:00,1,OS Billing Gold
+15/10/2026,00:00:00,0,OS Billing Gold
+16/10/2026,00:00:00,1,OS Billing Gold
+17/10/2026,00:00:00,1,OS Billing Gold
+18/10/2026,00:00:00,0,OS Billing Gold
+19/10/2026,00:00:00,2,OS Billing Gold
+20/10/2026,00:00:00,0,OS Billing Gold
+21/10/2026,00:00:00,1,OS Billing Gold
+22/10/2026,00:00:00,2,OS Billing Gold
+23/10/2026,00:00:00,0,OS Billing Gold
+24/10/2026,00:00:00,1,OS Billing Gold
+25/10/2026,00:00:00,4,OS Billing Gold
+26/10/2026,00:00:00,1,OS Billing Gold
+27/10/2026,00:00:00,0,OS Billing Gold
+28/10/2026,00:00:00,0,OS Billing Gold
+29/10/2026,00:00:00,0,OS Billing Gold
+30/10/2026,00:00:00,1,OS Billing Gold
+31/10/2026,00:00:00,0,OS Billing Gold
+01/10/2026,00:30:00,5,OS Billing Gold
+02/10/2026,00:30:00,1,OS Billing Gold
+03/10/2026,00:30:00,2,OS Billing Gold
+04/10/2026,00:30:00,2,OS Billing Gold
+05/10/2026,00:30:00,1,OS Billing Gold
+06/10/2026,00:30:00,0,OS Billing Gold
+07/10/2026,00:30:00,0,OS Billing Gold
+08/10/2026,00:30:00,0,OS Billing Gold
+09/10/2026,00:30:00,2,OS Billing Gold
+10/10/2026,00:30:00,0,OS Billing Gold
+11/10/2026,00:30:00,1,OS Billing Gold
+12/10/2026,00:30:00,0,OS Billing Gold
+13/10/2026,00:30:00,0,OS Billing Gold
+14/10/2026,00:30:00,1,OS Billing Gold
+15/10/2026,00:30:00,0,OS Billing Gold
+16/10/2026,00:30:00,0,OS Billing Gold
+17/10/2026,00:30:00,0,OS Billing Gold
+18/10/2026,00:30:00,0,OS Billing Gold
+19/10/2026,00:30:00,0,OS Billing Gold
+20/10/2026,00:30:00,0,OS Billing Gold
+21/10/2026,00:30:00,1,OS Billing Gold
+22/10/2026,00:30:00,0,OS Billing Gold
+23/10/2026,00:30:00,0,OS Billing Gold
+24/10/2026,00:30:00,0,OS Billing Gold
+25/10/2026,00:30:00,0,OS Billing Gold
+26/10/2026,00:30:00,0,OS Billing Gold
+27/10/2026,00:30:00,2,OS Billing Gold
+28/10/2026,00:30:00,0,OS Billing Gold
+29/10/2026,00:30:00,2,OS Billing Gold
+30/10/2026,00:30:00,0,OS Billing Gold
+31/10/2026,00:30:00,0,OS Billing Gold
+01/10/2026,01:00:00,1,OS Billing Gold
+02/10/2026,01:00:00,0,OS Billing Gold
+03/10/2026,01:00:00,0,OS Billing Gold
+04/10/2026,01:00:00,0,OS Billing Gold
+05/10/2026,01:00:00,1,OS Billing Gold
+06/10/2026,01:00:00,0,OS Billing Gold
+07/10/2026,01:00:00,0,OS Billing Gold
+08/10/2026,01:00:00,1,OS Billing Gold
+09/10/2026,01:00:00,0,OS Billing Gold
+10/10/2026,01:00:00,0,OS Billing Gold
+11/10/2026,01:00:00,0,OS Billing Gold
+12/10/2026,01:00:00,0,OS Billing Gold
+13/10/2026,01:00:00,0,OS Billing Gold
+14/10/2026,01:00:00,0,OS Billing Gold
+15/10/2026,01:00:00,0,OS Billing Gold
+16/10/2026,01:00:00,1,OS Billing Gold
+17/10/2026,01:00:00,0,OS Billing Gold
+18/10/2026,01:00:00,0,OS Billing Gold
+19/10/2026,01:00:00,2,OS Billing Gold
+20/10/2026,01:00:00,0,OS Billing Gold
+21/10/2026,01:00:00,0,OS Billing Gold
+22/10/2026,01:00:00,0,OS Billing Gold
+23/10/2026,01:00:00,0,OS Billing Gold
+24/10/2026,01:00:00,1,OS Billing Gold
+25/10/2026,01:00:00,0,OS Billing Gold
+26/10/2026,01:00:00,0,OS Billing Gold
+27/10/2026,01:00:00,2,OS Billing Gold
+28/10/2026,01:00:00,0,OS Billing Gold
+29/10/2026,01:00:00,0,OS Billing Gold
+30/10/2026,01:00:00,1,OS Billing Gold
+31/10/2026,01:00:00,1,OS Billing Gold
+01/10/2026,01:30:00,0,OS Billing Gold
+02/10/2026,01:30:00,0,OS Billing Gold
+03/10/2026,01:30:00,1,OS Billing Gold
+04/10/2026,01:30:00,0,OS Billing Gold
+05/10/2026,01:30:00,1,OS Billing Gold
+06/10/2026,01:30:00,0,OS Billing Gold
+07/10/2026,01:30:00,0,OS Billing Gold
+08/10/2026,01:30:00,0,OS Billing Gold
+09/10/2026,01:30:00,0,OS Billing Gold
+10/10/2026,01:30:00,0,OS Billing Gold
+11/10/2026,01:30:00,0,OS Billing Gold
+12/10/2026,01:30:00,0,OS Billing Gold
+13/10/2026,01:30:00,1,OS Billing Gold
+14/10/2026,01:30:00,0,OS Billing Gold
+15/10/2026,01:30:00,0,OS Billing Gold
+16/10/2026,01:30:00,1,OS Billing Gold
+17/10/2026,01:30:00,1,OS Billing Gold
+18/10/2026,01:30:00,0,OS Billing Gold
+19/10/2026,01:30:00,0,OS Billing Gold
+20/10/2026,01:30:00,0,OS Billing Gold
+21/10/2026,01:30:00,0,OS Billing Gold
+22/10/2026,01:30:00,0,OS Billing Gold
+23/10/2026,01:30:00,0,OS Billing Gold
+24/10/2026,01:30:00,0,OS Billing Gold
+25/10/2026,01:30:00,0,OS Billing Gold
+26/10/2026,01:30:00,1,OS Billing Gold
+27/10/2026,01:30:00,0,OS Billing Gold
+28/10/2026,01:30:00,1,OS Billing Gold
+29/10/2026,01:30:00,0,OS Billing Gold
+30/10/2026,01:30:00,0,OS Billing Gold
+31/10/2026,01:30:00,0,OS Billing Gold
+01/10/2026,02:00:00,0,OS Billing Gold
+02/10/2026,02:00:00,0,OS Billing Gold
+03/10/2026,02:00:00,1,OS Billing Gold
+04/10/2026,02:00:00,0,OS Billing Gold
+05/10/2026,02:00:00,0,OS Billing Gold
+06/10/2026,02:00:00,0,OS Billing Gold
+07/10/2026,02:00:00,0,OS Billing Gold
+08/10/2026,02:00:00,0,OS Billing Gold
+09/10/2026,02:00:00,0,OS Billing Gold
+10/10/2026,02:00:00,0,OS Billing Gold
+11/10/2026,02:00:00,0,OS Billing Gold
+12/10/2026,02:00:00,3,OS Billing Gold
+13/10/2026,02:00:00,1,OS Billing Gold
+14/10/2026,02:00:00,0,OS Billing Gold
+15/10/2026,02:00:00,0,OS Billing Gold
+16/10/2026,02:00:00,0,OS Billing Gold
+17/10/2026,02:00:00,0,OS Billing Gold
+18/10/2026,02:00:00,0,OS Billing Gold
+19/10/2026,02:00:00,0,OS Billing Gold
+20/10/2026,02:00:00,0,OS Billing Gold
+21/10/2026,02:00:00,0,OS Billing Gold
+22/10/2026,02:00:00,0,OS Billing Gold
+23/10/2026,02:00:00,0,OS Billing Gold
+24/10/2026,02:00:00,0,OS Billing Gold
+25/10/2026,02:00:00,3,OS Billing Gold
+26/10/2026,02:00:00,2,OS Billing Gold
+27/10/2026,02:00:00,0,OS Billing Gold
+28/10/2026,02:00:00,1,OS Billing Gold
+29/10/2026,02:00:00,1,OS Billing Gold
+30/10/2026,02:00:00,0,OS Billing Gold
+31/10/2026,02:00:00,0,OS Billing Gold
+01/10/2026,02:30:00,0,OS Billing Gold
+02/10/2026,02:30:00,0,OS Billing Gold
+03/10/2026,02:30:00,1,OS Billing Gold
+04/10/2026,02:30:00,0,OS Billing Gold
+05/10/2026,02:30:00,0,OS Billing Gold
+06/10/2026,02:30:00,1,OS Billing Gold
+07/10/2026,02:30:00,0,OS Billing Gold
+08/10/2026,02:30:00,1,OS Billing Gold
+09/10/2026,02:30:00,0,OS Billing Gold
+10/10/2026,02:30:00,0,OS Billing Gold
+11/10/2026,02:30:00,0,OS Billing Gold
+12/10/2026,02:30:00,0,OS Billing Gold
+13/10/2026,02:30:00,0,OS Billing Gold
+14/10/2026,02:30:00,0,OS Billing Gold
+15/10/2026,02:30:00,0,OS Billing Gold
+16/10/2026,02:30:00,0,OS Billing Gold
+17/10/2026,02:30:00,0,OS Billing Gold
+18/10/2026,02:30:00,0,OS Billing Gold
+19/10/2026,02:30:00,0,OS Billing Gold
+20/10/2026,02:30:00,0,OS Billing Gold
+21/10/2026,02:30:00,0,OS Billing Gold
+22/10/2026,02:30:00,2,OS Billing Gold
+23/10/2026,02:30:00,0,OS Billing Gold
+24/10/2026,02:30:00,0,OS Billing Gold
+25/10/2026,02:30:00,0,OS Billing Gold
+26/10/2026,02:30:00,0,OS Billing Gold
+27/10/2026,02:30:00,0,OS Billing Gold
+28/10/2026,02:30:00,0,OS Billing Gold
+29/10/2026,02:30:00,0,OS Billing Gold
+30/10/2026,02:30:00,0,OS Billing Gold
+31/10/2026,02:30:00,0,OS Billing Gold
+01/10/2026,03:00:00,0,OS Billing Gold
+02/10/2026,03:00:00,0,OS Billing Gold
+03/10/2026,03:00:00,0,OS Billing Gold
+04/10/2026,03:00:00,0,OS Billing Gold
+05/10/2026,03:00:00,0,OS Billing Gold
+06/10/2026,03:00:00,0,OS Billing Gold
+07/10/2026,03:00:00,0,OS Billing Gold
+08/10/2026,03:00:00,0,OS Billing Gold
+09/10/2026,03:00:00,0,OS Billing Gold
+10/10/2026,03:00:00,1,OS Billing Gold
+11/10/2026,03:00:00,0,OS Billing Gold
+12/10/2026,03:00:00,0,OS Billing Gold
+13/10/2026,03:00:00,0,OS Billing Gold
+14/10/2026,03:00:00,0,OS Billing Gold
+15/10/2026,03:00:00,0,OS Billing Gold
+16/10/2026,03:00:00,0,OS Billing Gold
+17/10/2026,03:00:00,0,OS Billing Gold
+18/10/2026,03:00:00,0,OS Billing Gold
+19/10/2026,03:00:00,0,OS Billing Gold
+20/10/2026,03:00:00,0,OS Billing Gold
+21/10/2026,03:00:00,0,OS Billing Gold
+22/10/2026,03:00:00,0,OS Billing Gold
+23/10/2026,03:00:00,0,OS Billing Gold
+24/10/2026,03:00:00,0,OS Billing Gold
+25/10/2026,03:00:00,0,OS Billing Gold
+26/10/2026,03:00:00,0,OS Billing Gold
+27/10/2026,03:00:00,0,OS Billing Gold
+28/10/2026,03:00:00,0,OS Billing Gold
+29/10/2026,03:00:00,0,OS Billing Gold
+30/10/2026,03:00:00,0,OS Billing Gold
+31/10/2026,03:00:00,0,OS Billing Gold
+01/10/2026,03:30:00,0,OS Billing Gold
+02/10/2026,03:30:00,0,OS Billing Gold
+03/10/2026,03:30:00,1,OS Billing Gold
+04/10/2026,03:30:00,0,OS Billing Gold
+05/10/2026,03:30:00,0,OS Billing Gold
+06/10/2026,03:30:00,0,OS Billing Gold
+07/10/2026,03:30:00,0,OS Billing Gold
+08/10/2026,03:30:00,0,OS Billing Gold
+09/10/2026,03:30:00,0,OS Billing Gold
+10/10/2026,03:30:00,0,OS Billing Gold
+11/10/2026,03:30:00,0,OS Billing Gold
+12/10/2026,03:30:00,0,OS Billing Gold
+13/10/2026,03:30:00,0,OS Billing Gold
+14/10/2026,03:30:00,0,OS Billing Gold
+15/10/2026,03:30:00,0,OS Billing Gold
+16/10/2026,03:30:00,0,OS Billing Gold
+17/10/2026,03:30:00,0,OS Billing Gold
+18/10/2026,03:30:00,0,OS Billing Gold
+19/10/2026,03:30:00,0,OS Billing Gold
+20/10/2026,03:30:00,0,OS Billing Gold
+21/10/2026,03:30:00,0,OS Billing Gold
+22/10/2026,03:30:00,0,OS Billing Gold
+23/10/2026,03:30:00,0,OS Billing Gold
+24/10/2026,03:30:00,0,OS Billing Gold
+25/10/2026,03:30:00,0,OS Billing Gold
+26/10/2026,03:30:00,0,OS Billing Gold
+27/10/2026,03:30:00,0,OS Billing Gold
+28/10/2026,03:30:00,0,OS Billing Gold
+29/10/2026,03:30:00,0,OS Billing Gold
+30/10/2026,03:30:00,0,OS Billing Gold
+31/10/2026,03:30:00,0,OS Billing Gold
+01/10/2026,04:00:00,0,OS Billing Gold
+02/10/2026,04:00:00,0,OS Billing Gold
+03/10/2026,04:00:00,1,OS Billing Gold
+04/10/2026,04:00:00,2,OS Billing Gold
+05/10/2026,04:00:00,0,OS Billing Gold
+06/10/2026,04:00:00,0,OS Billing Gold
+07/10/2026,04:00:00,0,OS Billing Gold
+08/10/2026,04:00:00,0,OS Billing Gold
+09/10/2026,04:00:00,0,OS Billing Gold
+10/10/2026,04:00:00,0,OS Billing Gold
+11/10/2026,04:00:00,0,OS Billing Gold
+12/10/2026,04:00:00,2,OS Billing Gold
+13/10/2026,04:00:00,0,OS Billing Gold
+14/10/2026,04:00:00,0,OS Billing Gold
+15/10/2026,04:00:00,0,OS Billing Gold
+16/10/2026,04:00:00,0,OS Billing Gold
+17/10/2026,04:00:00,0,OS Billing Gold
+18/10/2026,04:00:00,0,OS Billing Gold
+19/10/2026,04:00:00,0,OS Billing Gold
+20/10/2026,04:00:00,0,OS Billing Gold
+21/10/2026,04:00:00,0,OS Billing Gold
+22/10/2026,04:00:00,0,OS Billing Gold
+23/10/2026,04:00:00,0,OS Billing Gold
+24/10/2026,04:00:00,0,OS Billing Gold
+25/10/2026,04:00:00,0,OS Billing Gold
+26/10/2026,04:00:00,0,OS Billing Gold
+27/10/2026,04:00:00,0,OS Billing Gold
+28/10/2026,04:00:00,0,OS Billing Gold
+29/10/2026,04:00:00,0,OS Billing Gold
+30/10/2026,04:00:00,0,OS Billing Gold
+31/10/2026,04:00:00,0,OS Billing Gold
+01/10/2026,04:30:00,0,OS Billing Gold
+02/10/2026,04:30:00,1,OS Billing Gold
+03/10/2026,04:30:00,1,OS Billing Gold
+04/10/2026,04:30:00,0,OS Billing Gold
+05/10/2026,04:30:00,0,OS Billing Gold
+06/10/2026,04:30:00,0,OS Billing Gold
+07/10/2026,04:30:00,0,OS Billing Gold
+08/10/2026,04:30:00,0,OS Billing Gold
+09/10/2026,04:30:00,0,OS Billing Gold
+10/10/2026,04:30:00,0,OS Billing Gold
+11/10/2026,04:30:00,0,OS Billing Gold
+12/10/2026,04:30:00,0,OS Billing Gold
+13/10/2026,04:30:00,0,OS Billing Gold
+14/10/2026,04:30:00,0,OS Billing Gold
+15/10/2026,04:30:00,0,OS Billing Gold
+16/10/2026,04:30:00,0,OS Billing Gold
+17/10/2026,04:30:00,0,OS Billing Gold
+18/10/2026,04:30:00,0,OS Billing Gold
+19/10/2026,04:30:00,0,OS Billing Gold
+20/10/2026,04:30:00,0,OS Billing Gold
+21/10/2026,04:30:00,0,OS Billing Gold
+22/10/2026,04:30:00,0,OS Billing Gold
+23/10/2026,04:30:00,0,OS Billing Gold
+24/10/2026,04:30:00,0,OS Billing Gold
+25/10/2026,04:30:00,0,OS Billing Gold
+26/10/2026,04:30:00,1,OS Billing Gold
+27/10/2026,04:30:00,0,OS Billing Gold
+28/10/2026,04:30:00,0,OS Billing Gold
+29/10/2026,04:30:00,0,OS Billing Gold
+30/10/2026,04:30:00,0,OS Billing Gold
+31/10/2026,04:30:00,0,OS Billing Gold
+01/10/2026,05:00:00,0,OS Billing Gold
+02/10/2026,05:00:00,0,OS Billing Gold
+03/10/2026,05:00:00,0,OS Billing Gold
+04/10/2026,05:00:00,0,OS Billing Gold
+05/10/2026,05:00:00,0,OS Billing Gold
+06/10/2026,05:00:00,0,OS Billing Gold
+07/10/2026,05:00:00,0,OS Billing Gold
+08/10/2026,05:00:00,0,OS Billing Gold
+09/10/2026,05:00:00,0,OS Billing Gold
+10/10/2026,05:00:00,0,OS Billing Gold
+11/10/2026,05:00:00,0,OS Billing Gold
+12/10/2026,05:00:00,2,OS Billing Gold
+13/10/2026,05:00:00,0,OS Billing Gold
+14/10/2026,05:00:00,0,OS Billing Gold
+15/10/2026,05:00:00,0,OS Billing Gold
+16/10/2026,05:00:00,0,OS Billing Gold
+17/10/2026,05:00:00,0,OS Billing Gold
+18/10/2026,05:00:00,0,OS Billing Gold
+19/10/2026,05:00:00,0,OS Billing Gold
+20/10/2026,05:00:00,0,OS Billing Gold
+21/10/2026,05:00:00,0,OS Billing Gold
+22/10/2026,05:00:00,2,OS Billing Gold
+23/10/2026,05:00:00,0,OS Billing Gold
+24/10/2026,05:00:00,0,OS Billing Gold
+25/10/2026,05:00:00,0,OS Billing Gold
+26/10/2026,05:00:00,0,OS Billing Gold
+27/10/2026,05:00:00,0,OS Billing Gold
+28/10/2026,05:00:00,0,OS Billing Gold
+29/10/2026,05:00:00,0,OS Billing Gold
+30/10/2026,05:00:00,0,OS Billing Gold
+31/10/2026,05:00:00,0,OS Billing Gold
+01/10/2026,05:30:00,0,OS Billing Gold
+02/10/2026,05:30:00,0,OS Billing Gold
+03/10/2026,05:30:00,0,OS Billing Gold
+04/10/2026,05:30:00,1,OS Billing Gold
+05/10/2026,05:30:00,0,OS Billing Gold
+06/10/2026,05:30:00,0,OS Billing Gold
+07/10/2026,05:30:00,0,OS Billing Gold
+08/10/2026,05:30:00,0,OS Billing Gold
+09/10/2026,05:30:00,0,OS Billing Gold
+10/10/2026,05:30:00,0,OS Billing Gold
+11/10/2026,05:30:00,0,OS Billing Gold
+12/10/2026,05:30:00,0,OS Billing Gold
+13/10/2026,05:30:00,0,OS Billing Gold
+14/10/2026,05:30:00,0,OS Billing Gold
+15/10/2026,05:30:00,0,OS Billing Gold
+16/10/2026,05:30:00,0,OS Billing Gold
+17/10/2026,05:30:00,0,OS Billing Gold
+18/10/2026,05:30:00,0,OS Billing Gold
+19/10/2026,05:30:00,0,OS Billing Gold
+20/10/2026,05:30:00,0,OS Billing Gold
+21/10/2026,05:30:00,0,OS Billing Gold
+22/10/2026,05:30:00,0,OS Billing Gold
+23/10/2026,05:30:00,0,OS Billing Gold
+24/10/2026,05:30:00,0,OS Billing Gold
+25/10/2026,05:30:00,1,OS Billing Gold
+26/10/2026,05:30:00,0,OS Billing Gold
+27/10/2026,05:30:00,0,OS Billing Gold
+28/10/2026,05:30:00,0,OS Billing Gold
+29/10/2026,05:30:00,0,OS Billing Gold
+30/10/2026,05:30:00,0,OS Billing Gold
+31/10/2026,05:30:00,0,OS Billing Gold
+01/10/2026,06:00:00,1,OS Billing Gold
+02/10/2026,06:00:00,0,OS Billing Gold
+03/10/2026,06:00:00,0,OS Billing Gold
+04/10/2026,06:00:00,0,OS Billing Gold
+05/10/2026,06:00:00,0,OS Billing Gold
+06/10/2026,06:00:00,1,OS Billing Gold
+07/10/2026,06:00:00,1,OS Billing Gold
+08/10/2026,06:00:00,0,OS Billing Gold
+09/10/2026,06:00:00,0,OS Billing Gold
+10/10/2026,06:00:00,1,OS Billing Gold
+11/10/2026,06:00:00,0,OS Billing Gold
+12/10/2026,06:00:00,0,OS Billing Gold
+13/10/2026,06:00:00,0,OS Billing Gold
+14/10/2026,06:00:00,0,OS Billing Gold
+15/10/2026,06:00:00,0,OS Billing Gold
+16/10/2026,06:00:00,0,OS Billing Gold
+17/10/2026,06:00:00,0,OS Billing Gold
+18/10/2026,06:00:00,0,OS Billing Gold
+19/10/2026,06:00:00,0,OS Billing Gold
+20/10/2026,06:00:00,0,OS Billing Gold
+21/10/2026,06:00:00,0,OS Billing Gold
+22/10/2026,06:00:00,0,OS Billing Gold
+23/10/2026,06:00:00,2,OS Billing Gold
+24/10/2026,06:00:00,1,OS Billing Gold
+25/10/2026,06:00:00,0,OS Billing Gold
+26/10/2026,06:00:00,1,OS Billing Gold
+27/10/2026,06:00:00,0,OS Billing Gold
+28/10/2026,06:00:00,0,OS Billing Gold
+29/10/2026,06:00:00,0,OS Billing Gold
+30/10/2026,06:00:00,0,OS Billing Gold
+31/10/2026,06:00:00,0,OS Billing Gold
+01/10/2026,06:30:00,1,OS Billing Gold
+02/10/2026,06:30:00,0,OS Billing Gold
+03/10/2026,06:30:00,0,OS Billing Gold
+04/10/2026,06:30:00,0,OS Billing Gold
+05/10/2026,06:30:00,0,OS Billing Gold
+06/10/2026,06:30:00,0,OS Billing Gold
+07/10/2026,06:30:00,0,OS Billing Gold
+08/10/2026,06:30:00,0,OS Billing Gold
+09/10/2026,06:30:00,0,OS Billing Gold
+10/10/2026,06:30:00,0,OS Billing Gold
+11/10/2026,06:30:00,0,OS Billing Gold
+12/10/2026,06:30:00,0,OS Billing Gold
+13/10/2026,06:30:00,0,OS Billing Gold
+14/10/2026,06:30:00,0,OS Billing Gold
+15/10/2026,06:30:00,0,OS Billing Gold
+16/10/2026,06:30:00,0,OS Billing Gold
+17/10/2026,06:30:00,1,OS Billing Gold
+18/10/2026,06:30:00,0,OS Billing Gold
+19/10/2026,06:30:00,0,OS Billing Gold
+20/10/2026,06:30:00,0,OS Billing Gold
+21/10/2026,06:30:00,0,OS Billing Gold
+22/10/2026,06:30:00,0,OS Billing Gold
+23/10/2026,06:30:00,0,OS Billing Gold
+24/10/2026,06:30:00,0,OS Billing Gold
+25/10/2026,06:30:00,0,OS Billing Gold
+26/10/2026,06:30:00,0,OS Billing Gold
+27/10/2026,06:30:00,1,OS Billing Gold
+28/10/2026,06:30:00,0,OS Billing Gold
+29/10/2026,06:30:00,0,OS Billing Gold
+30/10/2026,06:30:00,0,OS Billing Gold
+31/10/2026,06:30:00,1,OS Billing Gold
+01/10/2026,07:00:00,1,OS Billing Gold
+02/10/2026,07:00:00,0,OS Billing Gold
+03/10/2026,07:00:00,0,OS Billing Gold
+04/10/2026,07:00:00,0,OS Billing Gold
+05/10/2026,07:00:00,0,OS Billing Gold
+06/10/2026,07:00:00,0,OS Billing Gold
+07/10/2026,07:00:00,0,OS Billing Gold
+08/10/2026,07:00:00,0,OS Billing Gold
+09/10/2026,07:00:00,0,OS Billing Gold
+10/10/2026,07:00:00,0,OS Billing Gold
+11/10/2026,07:00:00,0,OS Billing Gold
+12/10/2026,07:00:00,0,OS Billing Gold
+13/10/2026,07:00:00,0,OS Billing Gold
+14/10/2026,07:00:00,1,OS Billing Gold
+15/10/2026,07:00:00,0,OS Billing Gold
+16/10/2026,07:00:00,0,OS Billing Gold
+17/10/2026,07:00:00,0,OS Billing Gold
+18/10/2026,07:00:00,0,OS Billing Gold
+19/10/2026,07:00:00,0,OS Billing Gold
+20/10/2026,07:00:00,0,OS Billing Gold
+21/10/2026,07:00:00,0,OS Billing Gold
+22/10/2026,07:00:00,2,OS Billing Gold
+23/10/2026,07:00:00,0,OS Billing Gold
+24/10/2026,07:00:00,0,OS Billing Gold
+25/10/2026,07:00:00,0,OS Billing Gold
+26/10/2026,07:00:00,0,OS Billing Gold
+27/10/2026,07:00:00,0,OS Billing Gold
+28/10/2026,07:00:00,0,OS Billing Gold
+29/10/2026,07:00:00,0,OS Billing Gold
+30/10/2026,07:00:00,1,OS Billing Gold
+31/10/2026,07:00:00,0,OS Billing Gold
+01/10/2026,07:30:00,1,OS Billing Gold
+02/10/2026,07:30:00,0,OS Billing Gold
+03/10/2026,07:30:00,1,OS Billing Gold
+04/10/2026,07:30:00,0,OS Billing Gold
+05/10/2026,07:30:00,0,OS Billing Gold
+06/10/2026,07:30:00,0,OS Billing Gold
+07/10/2026,07:30:00,0,OS Billing Gold
+08/10/2026,07:30:00,0,OS Billing Gold
+09/10/2026,07:30:00,0,OS Billing Gold
+10/10/2026,07:30:00,0,OS Billing Gold
+11/10/2026,07:30:00,0,OS Billing Gold
+12/10/2026,07:30:00,2,OS Billing Gold
+13/10/2026,07:30:00,0,OS Billing Gold
+14/10/2026,07:30:00,1,OS Billing Gold
+15/10/2026,07:30:00,0,OS Billing Gold
+16/10/2026,07:30:00,0,OS Billing Gold
+17/10/2026,07:30:00,0,OS Billing Gold
+18/10/2026,07:30:00,0,OS Billing Gold
+19/10/2026,07:30:00,0,OS Billing Gold
+20/10/2026,07:30:00,0,OS Billing Gold
+21/10/2026,07:30:00,0,OS Billing Gold
+22/10/2026,07:30:00,0,OS Billing Gold
+23/10/2026,07:30:00,0,OS Billing Gold
+24/10/2026,07:30:00,0,OS Billing Gold
+25/10/2026,07:30:00,0,OS Billing Gold
+26/10/2026,07:30:00,1,OS Billing Gold
+27/10/2026,07:30:00,0,OS Billing Gold
+28/10/2026,07:30:00,0,OS Billing Gold
+29/10/2026,07:30:00,0,OS Billing Gold
+30/10/2026,07:30:00,0,OS Billing Gold
+31/10/2026,07:30:00,1,OS Billing Gold
+01/10/2026,08:00:00,1,OS Billing Gold
+02/10/2026,08:00:00,2,OS Billing Gold
+03/10/2026,08:00:00,0,OS Billing Gold
+04/10/2026,08:00:00,0,OS Billing Gold
+05/10/2026,08:00:00,0,OS Billing Gold
+06/10/2026,08:00:00,0,OS Billing Gold
+07/10/2026,08:00:00,0,OS Billing Gold
+08/10/2026,08:00:00,0,OS Billing Gold
+09/10/2026,08:00:00,0,OS Billing Gold
+10/10/2026,08:00:00,1,OS Billing Gold
+11/10/2026,08:00:00,0,OS Billing Gold
+12/10/2026,08:00:00,0,OS Billing Gold
+13/10/2026,08:00:00,0,OS Billing Gold
+14/10/2026,08:00:00,0,OS Billing Gold
+15/10/2026,08:00:00,2,OS Billing Gold
+16/10/2026,08:00:00,0,OS Billing Gold
+17/10/2026,08:00:00,0,OS Billing Gold
+18/10/2026,08:00:00,0,OS Billing Gold
+19/10/2026,08:00:00,0,OS Billing Gold
+20/10/2026,08:00:00,0,OS Billing Gold
+21/10/2026,08:00:00,0,OS Billing Gold
+22/10/2026,08:00:00,0,OS Billing Gold
+23/10/2026,08:00:00,0,OS Billing Gold
+24/10/2026,08:00:00,0,OS Billing Gold
+25/10/2026,08:00:00,0,OS Billing Gold
+26/10/2026,08:00:00,0,OS Billing Gold
+27/10/2026,08:00:00,0,OS Billing Gold
+28/10/2026,08:00:00,0,OS Billing Gold
+29/10/2026,08:00:00,0,OS Billing Gold
+30/10/2026,08:00:00,1,OS Billing Gold
+31/10/2026,08:00:00,0,OS Billing Gold
+01/10/2026,08:30:00,0,OS Billing Gold
+02/10/2026,08:30:00,0,OS Billing Gold
+03/10/2026,08:30:00,0,OS Billing Gold
+04/10/2026,08:30:00,0,OS Billing Gold
+05/10/2026,08:30:00,0,OS Billing Gold
+06/10/2026,08:30:00,0,OS Billing Gold
+07/10/2026,08:30:00,1,OS Billing Gold
+08/10/2026,08:30:00,1,OS Billing Gold
+09/10/2026,08:30:00,0,OS Billing Gold
+10/10/2026,08:30:00,0,OS Billing Gold
+11/10/2026,08:30:00,0,OS Billing Gold
+12/10/2026,08:30:00,2,OS Billing Gold
+13/10/2026,08:30:00,1,OS Billing Gold
+14/10/2026,08:30:00,0,OS Billing Gold
+15/10/2026,08:30:00,0,OS Billing Gold
+16/10/2026,08:30:00,0,OS Billing Gold
+17/10/2026,08:30:00,1,OS Billing Gold
+18/10/2026,08:30:00,0,OS Billing Gold
+19/10/2026,08:30:00,0,OS Billing Gold
+20/10/2026,08:30:00,0,OS Billing Gold
+21/10/2026,08:30:00,1,OS Billing Gold
+22/10/2026,08:30:00,0,OS Billing Gold
+23/10/2026,08:30:00,2,OS Billing Gold
+24/10/2026,08:30:00,0,OS Billing Gold
+25/10/2026,08:30:00,0,OS Billing Gold
+26/10/2026,08:30:00,1,OS Billing Gold
+27/10/2026,08:30:00,0,OS Billing Gold
+28/10/2026,08:30:00,3,OS Billing Gold
+29/10/2026,08:30:00,2,OS Billing Gold
+30/10/2026,08:30:00,0,OS Billing Gold
+31/10/2026,08:30:00,0,OS Billing Gold
+01/10/2026,09:00:00,1,OS Billing Gold
+02/10/2026,09:00:00,0,OS Billing Gold
+03/10/2026,09:00:00,2,OS Billing Gold
+04/10/2026,09:00:00,0,OS Billing Gold
+05/10/2026,09:00:00,0,OS Billing Gold
+06/10/2026,09:00:00,0,OS Billing Gold
+07/10/2026,09:00:00,1,OS Billing Gold
+08/10/2026,09:00:00,3,OS Billing Gold
+09/10/2026,09:00:00,2,OS Billing Gold
+10/10/2026,09:00:00,0,OS Billing Gold
+11/10/2026,09:00:00,3,OS Billing Gold
+12/10/2026,09:00:00,0,OS Billing Gold
+13/10/2026,09:00:00,1,OS Billing Gold
+14/10/2026,09:00:00,0,OS Billing Gold
+15/10/2026,09:00:00,1,OS Billing Gold
+16/10/2026,09:00:00,1,OS Billing Gold
+17/10/2026,09:00:00,0,OS Billing Gold
+18/10/2026,09:00:00,0,OS Billing Gold
+19/10/2026,09:00:00,0,OS Billing Gold
+20/10/2026,09:00:00,3,OS Billing Gold
+21/10/2026,09:00:00,0,OS Billing Gold
+22/10/2026,09:00:00,0,OS Billing Gold
+23/10/2026,09:00:00,0,OS Billing Gold
+24/10/2026,09:00:00,0,OS Billing Gold
+25/10/2026,09:00:00,0,OS Billing Gold
+26/10/2026,09:00:00,1,OS Billing Gold
+27/10/2026,09:00:00,0,OS Billing Gold
+28/10/2026,09:00:00,0,OS Billing Gold
+29/10/2026,09:00:00,1,OS Billing Gold
+30/10/2026,09:00:00,1,OS Billing Gold
+31/10/2026,09:00:00,1,OS Billing Gold
+01/10/2026,09:30:00,4,OS Billing Gold
+02/10/2026,09:30:00,0,OS Billing Gold
+03/10/2026,09:30:00,0,OS Billing Gold
+04/10/2026,09:30:00,1,OS Billing Gold
+05/10/2026,09:30:00,0,OS Billing Gold
+06/10/2026,09:30:00,1,OS Billing Gold
+07/10/2026,09:30:00,2,OS Billing Gold
+08/10/2026,09:30:00,1,OS Billing Gold
+09/10/2026,09:30:00,2,OS Billing Gold
+10/10/2026,09:30:00,1,OS Billing Gold
+11/10/2026,09:30:00,0,OS Billing Gold
+12/10/2026,09:30:00,2,OS Billing Gold
+13/10/2026,09:30:00,1,OS Billing Gold
+14/10/2026,09:30:00,0,OS Billing Gold
+15/10/2026,09:30:00,1,OS Billing Gold
+16/10/2026,09:30:00,0,OS Billing Gold
+17/10/2026,09:30:00,1,OS Billing Gold
+18/10/2026,09:30:00,0,OS Billing Gold
+19/10/2026,09:30:00,0,OS Billing Gold
+20/10/2026,09:30:00,3,OS Billing Gold
+21/10/2026,09:30:00,0,OS Billing Gold
+22/10/2026,09:30:00,2,OS Billing Gold
+23/10/2026,09:30:00,2,OS Billing Gold
+24/10/2026,09:30:00,1,OS Billing Gold
+25/10/2026,09:30:00,1,OS Billing Gold
+26/10/2026,09:30:00,0,OS Billing Gold
+27/10/2026,09:30:00,1,OS Billing Gold
+28/10/2026,09:30:00,2,OS Billing Gold
+29/10/2026,09:30:00,0,OS Billing Gold
+30/10/2026,09:30:00,2,OS Billing Gold
+31/10/2026,09:30:00,0,OS Billing Gold
+01/10/2026,10:00:00,5,OS Billing Gold
+02/10/2026,10:00:00,4,OS Billing Gold
+03/10/2026,10:00:00,0,OS Billing Gold
+04/10/2026,10:00:00,4,OS Billing Gold
+05/10/2026,10:00:00,4,OS Billing Gold
+06/10/2026,10:00:00,2,OS Billing Gold
+07/10/2026,10:00:00,1,OS Billing Gold
+08/10/2026,10:00:00,2,OS Billing Gold
+09/10/2026,10:00:00,2,OS Billing Gold
+10/10/2026,10:00:00,1,OS Billing Gold
+11/10/2026,10:00:00,3,OS Billing Gold
+12/10/2026,10:00:00,0,OS Billing Gold
+13/10/2026,10:00:00,1,OS Billing Gold
+14/10/2026,10:00:00,3,OS Billing Gold
+15/10/2026,10:00:00,1,OS Billing Gold
+16/10/2026,10:00:00,0,OS Billing Gold
+17/10/2026,10:00:00,3,OS Billing Gold
+18/10/2026,10:00:00,1,OS Billing Gold
+19/10/2026,10:00:00,3,OS Billing Gold
+20/10/2026,10:00:00,0,OS Billing Gold
+21/10/2026,10:00:00,1,OS Billing Gold
+22/10/2026,10:00:00,2,OS Billing Gold
+23/10/2026,10:00:00,0,OS Billing Gold
+24/10/2026,10:00:00,4,OS Billing Gold
+25/10/2026,10:00:00,4,OS Billing Gold
+26/10/2026,10:00:00,1,OS Billing Gold
+27/10/2026,10:00:00,2,OS Billing Gold
+28/10/2026,10:00:00,1,OS Billing Gold
+29/10/2026,10:00:00,2,OS Billing Gold
+30/10/2026,10:00:00,0,OS Billing Gold
+31/10/2026,10:00:00,0,OS Billing Gold
+01/10/2026,10:30:00,2,OS Billing Gold
+02/10/2026,10:30:00,2,OS Billing Gold
+03/10/2026,10:30:00,4,OS Billing Gold
+04/10/2026,10:30:00,5,OS Billing Gold
+05/10/2026,10:30:00,1,OS Billing Gold
+06/10/2026,10:30:00,2,OS Billing Gold
+07/10/2026,10:30:00,6,OS Billing Gold
+08/10/2026,10:30:00,5,OS Billing Gold
+09/10/2026,10:30:00,0,OS Billing Gold
+10/10/2026,10:30:00,1,OS Billing Gold
+11/10/2026,10:30:00,1,OS Billing Gold
+12/10/2026,10:30:00,3,OS Billing Gold
+13/10/2026,10:30:00,1,OS Billing Gold
+14/10/2026,10:30:00,0,OS Billing Gold
+15/10/2026,10:30:00,4,OS Billing Gold
+16/10/2026,10:30:00,2,OS Billing Gold
+17/10/2026,10:30:00,3,OS Billing Gold
+18/10/2026,10:30:00,1,OS Billing Gold
+19/10/2026,10:30:00,0,OS Billing Gold
+20/10/2026,10:30:00,3,OS Billing Gold
+21/10/2026,10:30:00,1,OS Billing Gold
+22/10/2026,10:30:00,3,OS Billing Gold
+23/10/2026,10:30:00,6,OS Billing Gold
+24/10/2026,10:30:00,2,OS Billing Gold
+25/10/2026,10:30:00,0,OS Billing Gold
+26/10/2026,10:30:00,5,OS Billing Gold
+27/10/2026,10:30:00,2,OS Billing Gold
+28/10/2026,10:30:00,2,OS Billing Gold
+29/10/2026,10:30:00,0,OS Billing Gold
+30/10/2026,10:30:00,0,OS Billing Gold
+31/10/2026,10:30:00,3,OS Billing Gold
+01/10/2026,11:00:00,5,OS Billing Gold
+02/10/2026,11:00:00,7,OS Billing Gold
+03/10/2026,11:00:00,2,OS Billing Gold
+04/10/2026,11:00:00,2,OS Billing Gold
+05/10/2026,11:00:00,5,OS Billing Gold
+06/10/2026,11:00:00,5,OS Billing Gold
+07/10/2026,11:00:00,3,OS Billing Gold
+08/10/2026,11:00:00,6,OS Billing Gold
+09/10/2026,11:00:00,8,OS Billing Gold
+10/10/2026,11:00:00,3,OS Billing Gold
+11/10/2026,11:00:00,4,OS Billing Gold
+12/10/2026,11:00:00,5,OS Billing Gold
+13/10/2026,11:00:00,6,OS Billing Gold
+14/10/2026,11:00:00,0,OS Billing Gold
+15/10/2026,11:00:00,2,OS Billing Gold
+16/10/2026,11:00:00,1,OS Billing Gold
+17/10/2026,11:00:00,3,OS Billing Gold
+18/10/2026,11:00:00,1,OS Billing Gold
+19/10/2026,11:00:00,2,OS Billing Gold
+20/10/2026,11:00:00,3,OS Billing Gold
+21/10/2026,11:00:00,1,OS Billing Gold
+22/10/2026,11:00:00,2,OS Billing Gold
+23/10/2026,11:00:00,0,OS Billing Gold
+24/10/2026,11:00:00,0,OS Billing Gold
+25/10/2026,11:00:00,4,OS Billing Gold
+26/10/2026,11:00:00,0,OS Billing Gold
+27/10/2026,11:00:00,2,OS Billing Gold
+28/10/2026,11:00:00,2,OS Billing Gold
+29/10/2026,11:00:00,5,OS Billing Gold
+30/10/2026,11:00:00,2,OS Billing Gold
+31/10/2026,11:00:00,0,OS Billing Gold
+01/10/2026,11:30:00,9,OS Billing Gold
+02/10/2026,11:30:00,6,OS Billing Gold
+03/10/2026,11:30:00,2,OS Billing Gold
+04/10/2026,11:30:00,6,OS Billing Gold
+05/10/2026,11:30:00,4,OS Billing Gold
+06/10/2026,11:30:00,6,OS Billing Gold
+07/10/2026,11:30:00,5,OS Billing Gold
+08/10/2026,11:30:00,2,OS Billing Gold
+09/10/2026,11:30:00,2,OS Billing Gold
+10/10/2026,11:30:00,6,OS Billing Gold
+11/10/2026,11:30:00,3,OS Billing Gold
+12/10/2026,11:30:00,0,OS Billing Gold
+13/10/2026,11:30:00,7,OS Billing Gold
+14/10/2026,11:30:00,6,OS Billing Gold
+15/10/2026,11:30:00,3,OS Billing Gold
+16/10/2026,11:30:00,1,OS Billing Gold
+17/10/2026,11:30:00,6,OS Billing Gold
+18/10/2026,11:30:00,2,OS Billing Gold
+19/10/2026,11:30:00,2,OS Billing Gold
+20/10/2026,11:30:00,0,OS Billing Gold
+21/10/2026,11:30:00,1,OS Billing Gold
+22/10/2026,11:30:00,2,OS Billing Gold
+23/10/2026,11:30:00,2,OS Billing Gold
+24/10/2026,11:30:00,3,OS Billing Gold
+25/10/2026,11:30:00,4,OS Billing Gold
+26/10/2026,11:30:00,4,OS Billing Gold
+27/10/2026,11:30:00,1,OS Billing Gold
+28/10/2026,11:30:00,1,OS Billing Gold
+29/10/2026,11:30:00,0,OS Billing Gold
+30/10/2026,11:30:00,3,OS Billing Gold
+31/10/2026,11:30:00,3,OS Billing Gold
+01/10/2026,12:00:00,6,OS Billing Gold
+02/10/2026,12:00:00,5,OS Billing Gold
+03/10/2026,12:00:00,4,OS Billing Gold
+04/10/2026,12:00:00,7,OS Billing Gold
+05/10/2026,12:00:00,1,OS Billing Gold
+06/10/2026,12:00:00,6,OS Billing Gold
+07/10/2026,12:00:00,6,OS Billing Gold
+08/10/2026,12:00:00,6,OS Billing Gold
+09/10/2026,12:00:00,2,OS Billing Gold
+10/10/2026,12:00:00,6,OS Billing Gold
+11/10/2026,12:00:00,3,OS Billing Gold
+12/10/2026,12:00:00,2,OS Billing Gold
+13/10/2026,12:00:00,6,OS Billing Gold
+14/10/2026,12:00:00,3,OS Billing Gold
+15/10/2026,12:00:00,5,OS Billing Gold
+16/10/2026,12:00:00,0,OS Billing Gold
+17/10/2026,12:00:00,0,OS Billing Gold
+18/10/2026,12:00:00,1,OS Billing Gold
+19/10/2026,12:00:00,0,OS Billing Gold
+20/10/2026,12:00:00,1,OS Billing Gold
+21/10/2026,12:00:00,4,OS Billing Gold
+22/10/2026,12:00:00,2,OS Billing Gold
+23/10/2026,12:00:00,8,OS Billing Gold
+24/10/2026,12:00:00,0,OS Billing Gold
+25/10/2026,12:00:00,3,OS Billing Gold
+26/10/2026,12:00:00,2,OS Billing Gold
+27/10/2026,12:00:00,3,OS Billing Gold
+28/10/2026,12:00:00,3,OS Billing Gold
+29/10/2026,12:00:00,1,OS Billing Gold
+30/10/2026,12:00:00,5,OS Billing Gold
+31/10/2026,12:00:00,3,OS Billing Gold
+01/10/2026,12:30:00,12,OS Billing Gold
+02/10/2026,12:30:00,5,OS Billing Gold
+03/10/2026,12:30:00,8,OS Billing Gold
+04/10/2026,12:30:00,5,OS Billing Gold
+05/10/2026,12:30:00,3,OS Billing Gold
+06/10/2026,12:30:00,5,OS Billing Gold
+07/10/2026,12:30:00,2,OS Billing Gold
+08/10/2026,12:30:00,2,OS Billing Gold
+09/10/2026,12:30:00,5,OS Billing Gold
+10/10/2026,12:30:00,2,OS Billing Gold
+11/10/2026,12:30:00,1,OS Billing Gold
+12/10/2026,12:30:00,0,OS Billing Gold
+13/10/2026,12:30:00,1,OS Billing Gold
+14/10/2026,12:30:00,7,OS Billing Gold
+15/10/2026,12:30:00,2,OS Billing Gold
+16/10/2026,12:30:00,5,OS Billing Gold
+17/10/2026,12:30:00,1,OS Billing Gold
+18/10/2026,12:30:00,2,OS Billing Gold
+19/10/2026,12:30:00,2,OS Billing Gold
+20/10/2026,12:30:00,5,OS Billing Gold
+21/10/2026,12:30:00,1,OS Billing Gold
+22/10/2026,12:30:00,0,OS Billing Gold
+23/10/2026,12:30:00,0,OS Billing Gold
+24/10/2026,12:30:00,2,OS Billing Gold
+25/10/2026,12:30:00,4,OS Billing Gold
+26/10/2026,12:30:00,2,OS Billing Gold
+27/10/2026,12:30:00,2,OS Billing Gold
+28/10/2026,12:30:00,4,OS Billing Gold
+29/10/2026,12:30:00,0,OS Billing Gold
+30/10/2026,12:30:00,3,OS Billing Gold
+31/10/2026,12:30:00,3,OS Billing Gold
+01/10/2026,13:00:00,2,OS Billing Gold
+02/10/2026,13:00:00,6,OS Billing Gold
+03/10/2026,13:00:00,0,OS Billing Gold
+04/10/2026,13:00:00,2,OS Billing Gold
+05/10/2026,13:00:00,4,OS Billing Gold
+06/10/2026,13:00:00,2,OS Billing Gold
+07/10/2026,13:00:00,6,OS Billing Gold
+08/10/2026,13:00:00,5,OS Billing Gold
+09/10/2026,13:00:00,5,OS Billing Gold
+10/10/2026,13:00:00,2,OS Billing Gold
+11/10/2026,13:00:00,1,OS Billing Gold
+12/10/2026,13:00:00,2,OS Billing Gold
+13/10/2026,13:00:00,4,OS Billing Gold
+14/10/2026,13:00:00,6,OS Billing Gold
+15/10/2026,13:00:00,2,OS Billing Gold
+16/10/2026,13:00:00,4,OS Billing Gold
+17/10/2026,13:00:00,4,OS Billing Gold
+18/10/2026,13:00:00,1,OS Billing Gold
+19/10/2026,13:00:00,0,OS Billing Gold
+20/10/2026,13:00:00,3,OS Billing Gold
+21/10/2026,13:00:00,3,OS Billing Gold
+22/10/2026,13:00:00,2,OS Billing Gold
+23/10/2026,13:00:00,2,OS Billing Gold
+24/10/2026,13:00:00,2,OS Billing Gold
+25/10/2026,13:00:00,3,OS Billing Gold
+26/10/2026,13:00:00,1,OS Billing Gold
+27/10/2026,13:00:00,4,OS Billing Gold
+28/10/2026,13:00:00,0,OS Billing Gold
+29/10/2026,13:00:00,5,OS Billing Gold
+30/10/2026,13:00:00,2,OS Billing Gold
+31/10/2026,13:00:00,0,OS Billing Gold
+01/10/2026,13:30:00,7,OS Billing Gold
+02/10/2026,13:30:00,10,OS Billing Gold
+03/10/2026,13:30:00,4,OS Billing Gold
+04/10/2026,13:30:00,1,OS Billing Gold
+05/10/2026,13:30:00,7,OS Billing Gold
+06/10/2026,13:30:00,5,OS Billing Gold
+07/10/2026,13:30:00,3,OS Billing Gold
+08/10/2026,13:30:00,3,OS Billing Gold
+09/10/2026,13:30:00,0,OS Billing Gold
+10/10/2026,13:30:00,2,OS Billing Gold
+11/10/2026,13:30:00,4,OS Billing Gold
+12/10/2026,13:30:00,2,OS Billing Gold
+13/10/2026,13:30:00,5,OS Billing Gold
+14/10/2026,13:30:00,3,OS Billing Gold
+15/10/2026,13:30:00,4,OS Billing Gold
+16/10/2026,13:30:00,4,OS Billing Gold
+17/10/2026,13:30:00,3,OS Billing Gold
+18/10/2026,13:30:00,5,OS Billing Gold
+19/10/2026,13:30:00,3,OS Billing Gold
+20/10/2026,13:30:00,4,OS Billing Gold
+21/10/2026,13:30:00,3,OS Billing Gold
+22/10/2026,13:30:00,0,OS Billing Gold
+23/10/2026,13:30:00,0,OS Billing Gold
+24/10/2026,13:30:00,2,OS Billing Gold
+25/10/2026,13:30:00,3,OS Billing Gold
+26/10/2026,13:30:00,6,OS Billing Gold
+27/10/2026,13:30:00,1,OS Billing Gold
+28/10/2026,13:30:00,3,OS Billing Gold
+29/10/2026,13:30:00,3,OS Billing Gold
+30/10/2026,13:30:00,0,OS Billing Gold
+31/10/2026,13:30:00,3,OS Billing Gold
+01/10/2026,14:00:00,6,OS Billing Gold
+02/10/2026,14:00:00,5,OS Billing Gold
+03/10/2026,14:00:00,8,OS Billing Gold
+04/10/2026,14:00:00,7,OS Billing Gold
+05/10/2026,14:00:00,3,OS Billing Gold
+06/10/2026,14:00:00,5,OS Billing Gold
+07/10/2026,14:00:00,5,OS Billing Gold
+08/10/2026,14:00:00,5,OS Billing Gold
+09/10/2026,14:00:00,0,OS Billing Gold
+10/10/2026,14:00:00,3,OS Billing Gold
+11/10/2026,14:00:00,6,OS Billing Gold
+12/10/2026,14:00:00,2,OS Billing Gold
+13/10/2026,14:00:00,2,OS Billing Gold
+14/10/2026,14:00:00,4,OS Billing Gold
+15/10/2026,14:00:00,3,OS Billing Gold
+16/10/2026,14:00:00,1,OS Billing Gold
+17/10/2026,14:00:00,0,OS Billing Gold
+18/10/2026,14:00:00,4,OS Billing Gold
+19/10/2026,14:00:00,2,OS Billing Gold
+20/10/2026,14:00:00,7,OS Billing Gold
+21/10/2026,14:00:00,3,OS Billing Gold
+22/10/2026,14:00:00,7,OS Billing Gold
+23/10/2026,14:00:00,4,OS Billing Gold
+24/10/2026,14:00:00,2,OS Billing Gold
+25/10/2026,14:00:00,1,OS Billing Gold
+26/10/2026,14:00:00,5,OS Billing Gold
+27/10/2026,14:00:00,1,OS Billing Gold
+28/10/2026,14:00:00,3,OS Billing Gold
+29/10/2026,14:00:00,3,OS Billing Gold
+30/10/2026,14:00:00,1,OS Billing Gold
+31/10/2026,14:00:00,5,OS Billing Gold
+01/10/2026,14:30:00,7,OS Billing Gold
+02/10/2026,14:30:00,10,OS Billing Gold
+03/10/2026,14:30:00,7,OS Billing Gold
+04/10/2026,14:30:00,2,OS Billing Gold
+05/10/2026,14:30:00,3,OS Billing Gold
+06/10/2026,14:30:00,1,OS Billing Gold
+07/10/2026,14:30:00,6,OS Billing Gold
+08/10/2026,14:30:00,3,OS Billing Gold
+09/10/2026,14:30:00,5,OS Billing Gold
+10/10/2026,14:30:00,2,OS Billing Gold
+11/10/2026,14:30:00,5,OS Billing Gold
+12/10/2026,14:30:00,6,OS Billing Gold
+13/10/2026,14:30:00,5,OS Billing Gold
+14/10/2026,14:30:00,1,OS Billing Gold
+15/10/2026,14:30:00,5,OS Billing Gold
+16/10/2026,14:30:00,4,OS Billing Gold
+17/10/2026,14:30:00,3,OS Billing Gold
+18/10/2026,14:30:00,4,OS Billing Gold
+19/10/2026,14:30:00,3,OS Billing Gold
+20/10/2026,14:30:00,5,OS Billing Gold
+21/10/2026,14:30:00,4,OS Billing Gold
+22/10/2026,14:30:00,3,OS Billing Gold
+23/10/2026,14:30:00,4,OS Billing Gold
+24/10/2026,14:30:00,1,OS Billing Gold
+25/10/2026,14:30:00,6,OS Billing Gold
+26/10/2026,14:30:00,4,OS Billing Gold
+27/10/2026,14:30:00,4,OS Billing Gold
+28/10/2026,14:30:00,1,OS Billing Gold
+29/10/2026,14:30:00,5,OS Billing Gold
+30/10/2026,14:30:00,1,OS Billing Gold
+31/10/2026,14:30:00,7,OS Billing Gold
+01/10/2026,15:00:00,7,OS Billing Gold
+02/10/2026,15:00:00,6,OS Billing Gold
+03/10/2026,15:00:00,8,OS Billing Gold
+04/10/2026,15:00:00,0,OS Billing Gold
+05/10/2026,15:00:00,7,OS Billing Gold
+06/10/2026,15:00:00,5,OS Billing Gold
+07/10/2026,15:00:00,6,OS Billing Gold
+08/10/2026,15:00:00,5,OS Billing Gold
+09/10/2026,15:00:00,6,OS Billing Gold
+10/10/2026,15:00:00,3,OS Billing Gold
+11/10/2026,15:00:00,6,OS Billing Gold
+12/10/2026,15:00:00,0,OS Billing Gold
+13/10/2026,15:00:00,0,OS Billing Gold
+14/10/2026,15:00:00,3,OS Billing Gold
+15/10/2026,15:00:00,5,OS Billing Gold
+16/10/2026,15:00:00,2,OS Billing Gold
+17/10/2026,15:00:00,1,OS Billing Gold
+18/10/2026,15:00:00,4,OS Billing Gold
+19/10/2026,15:00:00,0,OS Billing Gold
+20/10/2026,15:00:00,1,OS Billing Gold
+21/10/2026,15:00:00,6,OS Billing Gold
+22/10/2026,15:00:00,2,OS Billing Gold
+23/10/2026,15:00:00,2,OS Billing Gold
+24/10/2026,15:00:00,2,OS Billing Gold
+25/10/2026,15:00:00,4,OS Billing Gold
+26/10/2026,15:00:00,2,OS Billing Gold
+27/10/2026,15:00:00,4,OS Billing Gold
+28/10/2026,15:00:00,4,OS Billing Gold
+29/10/2026,15:00:00,6,OS Billing Gold
+30/10/2026,15:00:00,3,OS Billing Gold
+31/10/2026,15:00:00,5,OS Billing Gold
+01/10/2026,15:30:00,14,OS Billing Gold
+02/10/2026,15:30:00,8,OS Billing Gold
+03/10/2026,15:30:00,4,OS Billing Gold
+04/10/2026,15:30:00,2,OS Billing Gold
+05/10/2026,15:30:00,1,OS Billing Gold
+06/10/2026,15:30:00,6,OS Billing Gold
+07/10/2026,15:30:00,6,OS Billing Gold
+08/10/2026,15:30:00,3,OS Billing Gold
+09/10/2026,15:30:00,8,OS Billing Gold
+10/10/2026,15:30:00,3,OS Billing Gold
+11/10/2026,15:30:00,1,OS Billing Gold
+12/10/2026,15:30:00,2,OS Billing Gold
+13/10/2026,15:30:00,2,OS Billing Gold
+14/10/2026,15:30:00,3,OS Billing Gold
+15/10/2026,15:30:00,2,OS Billing Gold
+16/10/2026,15:30:00,5,OS Billing Gold
+17/10/2026,15:30:00,1,OS Billing Gold
+18/10/2026,15:30:00,7,OS Billing Gold
+19/10/2026,15:30:00,8,OS Billing Gold
+20/10/2026,15:30:00,0,OS Billing Gold
+21/10/2026,15:30:00,10,OS Billing Gold
+22/10/2026,15:30:00,2,OS Billing Gold
+23/10/2026,15:30:00,2,OS Billing Gold
+24/10/2026,15:30:00,3,OS Billing Gold
+25/10/2026,15:30:00,3,OS Billing Gold
+26/10/2026,15:30:00,1,OS Billing Gold
+27/10/2026,15:30:00,2,OS Billing Gold
+28/10/2026,15:30:00,3,OS Billing Gold
+29/10/2026,15:30:00,5,OS Billing Gold
+30/10/2026,15:30:00,6,OS Billing Gold
+31/10/2026,15:30:00,11,OS Billing Gold
+01/10/2026,16:00:00,12,OS Billing Gold
+02/10/2026,16:00:00,5,OS Billing Gold
+03/10/2026,16:00:00,4,OS Billing Gold
+04/10/2026,16:00:00,6,OS Billing Gold
+05/10/2026,16:00:00,3,OS Billing Gold
+06/10/2026,16:00:00,8,OS Billing Gold
+07/10/2026,16:00:00,4,OS Billing Gold
+08/10/2026,16:00:00,2,OS Billing Gold
+09/10/2026,16:00:00,2,OS Billing Gold
+10/10/2026,16:00:00,2,OS Billing Gold
+11/10/2026,16:00:00,5,OS Billing Gold
+12/10/2026,16:00:00,2,OS Billing Gold
+13/10/2026,16:00:00,1,OS Billing Gold
+14/10/2026,16:00:00,3,OS Billing Gold
+15/10/2026,16:00:00,2,OS Billing Gold
+16/10/2026,16:00:00,4,OS Billing Gold
+17/10/2026,16:00:00,3,OS Billing Gold
+18/10/2026,16:00:00,2,OS Billing Gold
+19/10/2026,16:00:00,3,OS Billing Gold
+20/10/2026,16:00:00,4,OS Billing Gold
+21/10/2026,16:00:00,4,OS Billing Gold
+22/10/2026,16:00:00,7,OS Billing Gold
+23/10/2026,16:00:00,4,OS Billing Gold
+24/10/2026,16:00:00,7,OS Billing Gold
+25/10/2026,16:00:00,0,OS Billing Gold
+26/10/2026,16:00:00,1,OS Billing Gold
+27/10/2026,16:00:00,8,OS Billing Gold
+28/10/2026,16:00:00,2,OS Billing Gold
+29/10/2026,16:00:00,6,OS Billing Gold
+30/10/2026,16:00:00,5,OS Billing Gold
+31/10/2026,16:00:00,7,OS Billing Gold
+01/10/2026,16:30:00,6,OS Billing Gold
+02/10/2026,16:30:00,6,OS Billing Gold
+03/10/2026,16:30:00,2,OS Billing Gold
+04/10/2026,16:30:00,5,OS Billing Gold
+05/10/2026,16:30:00,8,OS Billing Gold
+06/10/2026,16:30:00,5,OS Billing Gold
+07/10/2026,16:30:00,3,OS Billing Gold
+08/10/2026,16:30:00,5,OS Billing Gold
+09/10/2026,16:30:00,3,OS Billing Gold
+10/10/2026,16:30:00,6,OS Billing Gold
+11/10/2026,16:30:00,0,OS Billing Gold
+12/10/2026,16:30:00,2,OS Billing Gold
+13/10/2026,16:30:00,6,OS Billing Gold
+14/10/2026,16:30:00,3,OS Billing Gold
+15/10/2026,16:30:00,5,OS Billing Gold
+16/10/2026,16:30:00,4,OS Billing Gold
+17/10/2026,16:30:00,6,OS Billing Gold
+18/10/2026,16:30:00,4,OS Billing Gold
+19/10/2026,16:30:00,2,OS Billing Gold
+20/10/2026,16:30:00,5,OS Billing Gold
+21/10/2026,16:30:00,0,OS Billing Gold
+22/10/2026,16:30:00,7,OS Billing Gold
+23/10/2026,16:30:00,4,OS Billing Gold
+24/10/2026,16:30:00,5,OS Billing Gold
+25/10/2026,16:30:00,3,OS Billing Gold
+26/10/2026,16:30:00,2,OS Billing Gold
+27/10/2026,16:30:00,8,OS Billing Gold
+28/10/2026,16:30:00,2,OS Billing Gold
+29/10/2026,16:30:00,0,OS Billing Gold
+30/10/2026,16:30:00,1,OS Billing Gold
+31/10/2026,16:30:00,5,OS Billing Gold
+01/10/2026,17:00:00,11,OS Billing Gold
+02/10/2026,17:00:00,8,OS Billing Gold
+03/10/2026,17:00:00,3,OS Billing Gold
+04/10/2026,17:00:00,8,OS Billing Gold
+05/10/2026,17:00:00,4,OS Billing Gold
+06/10/2026,17:00:00,2,OS Billing Gold
+07/10/2026,17:00:00,6,OS Billing Gold
+08/10/2026,17:00:00,1,OS Billing Gold
+09/10/2026,17:00:00,5,OS Billing Gold
+10/10/2026,17:00:00,1,OS Billing Gold
+11/10/2026,17:00:00,5,OS Billing Gold
+12/10/2026,17:00:00,2,OS Billing Gold
+13/10/2026,17:00:00,2,OS Billing Gold
+14/10/2026,17:00:00,1,OS Billing Gold
+15/10/2026,17:00:00,5,OS Billing Gold
+16/10/2026,17:00:00,2,OS Billing Gold
+17/10/2026,17:00:00,1,OS Billing Gold
+18/10/2026,17:00:00,4,OS Billing Gold
+19/10/2026,17:00:00,3,OS Billing Gold
+20/10/2026,17:00:00,5,OS Billing Gold
+21/10/2026,17:00:00,3,OS Billing Gold
+22/10/2026,17:00:00,3,OS Billing Gold
+23/10/2026,17:00:00,2,OS Billing Gold
+24/10/2026,17:00:00,0,OS Billing Gold
+25/10/2026,17:00:00,6,OS Billing Gold
+26/10/2026,17:00:00,2,OS Billing Gold
+27/10/2026,17:00:00,6,OS Billing Gold
+28/10/2026,17:00:00,8,OS Billing Gold
+29/10/2026,17:00:00,5,OS Billing Gold
+30/10/2026,17:00:00,3,OS Billing Gold
+31/10/2026,17:00:00,5,OS Billing Gold
+01/10/2026,17:30:00,7,OS Billing Gold
+02/10/2026,17:30:00,7,OS Billing Gold
+03/10/2026,17:30:00,5,OS Billing Gold
+04/10/2026,17:30:00,6,OS Billing Gold
+05/10/2026,17:30:00,4,OS Billing Gold
+06/10/2026,17:30:00,5,OS Billing Gold
+07/10/2026,17:30:00,4,OS Billing Gold
+08/10/2026,17:30:00,6,OS Billing Gold
+09/10/2026,17:30:00,2,OS Billing Gold
+10/10/2026,17:30:00,1,OS Billing Gold
+11/10/2026,17:30:00,4,OS Billing Gold
+12/10/2026,17:30:00,0,OS Billing Gold
+13/10/2026,17:30:00,5,OS Billing Gold
+14/10/2026,17:30:00,9,OS Billing Gold
+15/10/2026,17:30:00,5,OS Billing Gold
+16/10/2026,17:30:00,1,OS Billing Gold
+17/10/2026,17:30:00,3,OS Billing Gold
+18/10/2026,17:30:00,4,OS Billing Gold
+19/10/2026,17:30:00,7,OS Billing Gold
+20/10/2026,17:30:00,1,OS Billing Gold
+21/10/2026,17:30:00,5,OS Billing Gold
+22/10/2026,17:30:00,2,OS Billing Gold
+23/10/2026,17:30:00,4,OS Billing Gold
+24/10/2026,17:30:00,5,OS Billing Gold
+25/10/2026,17:30:00,4,OS Billing Gold
+26/10/2026,17:30:00,2,OS Billing Gold
+27/10/2026,17:30:00,2,OS Billing Gold
+28/10/2026,17:30:00,2,OS Billing Gold
+29/10/2026,17:30:00,3,OS Billing Gold
+30/10/2026,17:30:00,3,OS Billing Gold
+31/10/2026,17:30:00,3,OS Billing Gold
+01/10/2026,18:00:00,6,OS Billing Gold
+02/10/2026,18:00:00,5,OS Billing Gold
+03/10/2026,18:00:00,11,OS Billing Gold
+04/10/2026,18:00:00,2,OS Billing Gold
+05/10/2026,18:00:00,0,OS Billing Gold
+06/10/2026,18:00:00,5,OS Billing Gold
+07/10/2026,18:00:00,2,OS Billing Gold
+08/10/2026,18:00:00,1,OS Billing Gold
+09/10/2026,18:00:00,3,OS Billing Gold
+10/10/2026,18:00:00,0,OS Billing Gold
+11/10/2026,18:00:00,0,OS Billing Gold
+12/10/2026,18:00:00,2,OS Billing Gold
+13/10/2026,18:00:00,9,OS Billing Gold
+14/10/2026,18:00:00,9,OS Billing Gold
+15/10/2026,18:00:00,7,OS Billing Gold
+16/10/2026,18:00:00,4,OS Billing Gold
+17/10/2026,18:00:00,4,OS Billing Gold
+18/10/2026,18:00:00,1,OS Billing Gold
+19/10/2026,18:00:00,3,OS Billing Gold
+20/10/2026,18:00:00,3,OS Billing Gold
+21/10/2026,18:00:00,1,OS Billing Gold
+22/10/2026,18:00:00,0,OS Billing Gold
+23/10/2026,18:00:00,6,OS Billing Gold
+24/10/2026,18:00:00,2,OS Billing Gold
+25/10/2026,18:00:00,4,OS Billing Gold
+26/10/2026,18:00:00,4,OS Billing Gold
+27/10/2026,18:00:00,4,OS Billing Gold
+28/10/2026,18:00:00,1,OS Billing Gold
+29/10/2026,18:00:00,1,OS Billing Gold
+30/10/2026,18:00:00,6,OS Billing Gold
+31/10/2026,18:00:00,3,OS Billing Gold
+01/10/2026,18:30:00,6,OS Billing Gold
+02/10/2026,18:30:00,2,OS Billing Gold
+03/10/2026,18:30:00,5,OS Billing Gold
+04/10/2026,18:30:00,1,OS Billing Gold
+05/10/2026,18:30:00,4,OS Billing Gold
+06/10/2026,18:30:00,2,OS Billing Gold
+07/10/2026,18:30:00,3,OS Billing Gold
+08/10/2026,18:30:00,7,OS Billing Gold
+09/10/2026,18:30:00,2,OS Billing Gold
+10/10/2026,18:30:00,5,OS Billing Gold
+11/10/2026,18:30:00,3,OS Billing Gold
+12/10/2026,18:30:00,5,OS Billing Gold
+13/10/2026,18:30:00,4,OS Billing Gold
+14/10/2026,18:30:00,1,OS Billing Gold
+15/10/2026,18:30:00,2,OS Billing Gold
+16/10/2026,18:30:00,2,OS Billing Gold
+17/10/2026,18:30:00,4,OS Billing Gold
+18/10/2026,18:30:00,5,OS Billing Gold
+19/10/2026,18:30:00,3,OS Billing Gold
+20/10/2026,18:30:00,3,OS Billing Gold
+21/10/2026,18:30:00,4,OS Billing Gold
+22/10/2026,18:30:00,2,OS Billing Gold
+23/10/2026,18:30:00,2,OS Billing Gold
+24/10/2026,18:30:00,4,OS Billing Gold
+25/10/2026,18:30:00,0,OS Billing Gold
+26/10/2026,18:30:00,1,OS Billing Gold
+27/10/2026,18:30:00,10,OS Billing Gold
+28/10/2026,18:30:00,3,OS Billing Gold
+29/10/2026,18:30:00,5,OS Billing Gold
+30/10/2026,18:30:00,6,OS Billing Gold
+31/10/2026,18:30:00,1,OS Billing Gold
+01/10/2026,19:00:00,6,OS Billing Gold
+02/10/2026,19:00:00,5,OS Billing Gold
+03/10/2026,19:00:00,2,OS Billing Gold
+04/10/2026,19:00:00,2,OS Billing Gold
+05/10/2026,19:00:00,3,OS Billing Gold
+06/10/2026,19:00:00,0,OS Billing Gold
+07/10/2026,19:00:00,3,OS Billing Gold
+08/10/2026,19:00:00,1,OS Billing Gold
+09/10/2026,19:00:00,2,OS Billing Gold
+10/10/2026,19:00:00,3,OS Billing Gold
+11/10/2026,19:00:00,3,OS Billing Gold
+12/10/2026,19:00:00,5,OS Billing Gold
+13/10/2026,19:00:00,1,OS Billing Gold
+14/10/2026,19:00:00,4,OS Billing Gold
+15/10/2026,19:00:00,2,OS Billing Gold
+16/10/2026,19:00:00,7,OS Billing Gold
+17/10/2026,19:00:00,3,OS Billing Gold
+18/10/2026,19:00:00,5,OS Billing Gold
+19/10/2026,19:00:00,0,OS Billing Gold
+20/10/2026,19:00:00,3,OS Billing Gold
+21/10/2026,19:00:00,0,OS Billing Gold
+22/10/2026,19:00:00,3,OS Billing Gold
+23/10/2026,19:00:00,0,OS Billing Gold
+24/10/2026,19:00:00,3,OS Billing Gold
+25/10/2026,19:00:00,4,OS Billing Gold
+26/10/2026,19:00:00,2,OS Billing Gold
+27/10/2026,19:00:00,2,OS Billing Gold
+28/10/2026,19:00:00,0,OS Billing Gold
+29/10/2026,19:00:00,1,OS Billing Gold
+30/10/2026,19:00:00,1,OS Billing Gold
+31/10/2026,19:00:00,3,OS Billing Gold
+01/10/2026,19:30:00,4,OS Billing Gold
+02/10/2026,19:30:00,4,OS Billing Gold
+03/10/2026,19:30:00,2,OS Billing Gold
+04/10/2026,19:30:00,2,OS Billing Gold
+05/10/2026,19:30:00,0,OS Billing Gold
+06/10/2026,19:30:00,4,OS Billing Gold
+07/10/2026,19:30:00,1,OS Billing Gold
+08/10/2026,19:30:00,3,OS Billing Gold
+09/10/2026,19:30:00,5,OS Billing Gold
+10/10/2026,19:30:00,5,OS Billing Gold
+11/10/2026,19:30:00,1,OS Billing Gold
+12/10/2026,19:30:00,3,OS Billing Gold
+13/10/2026,19:30:00,4,OS Billing Gold
+14/10/2026,19:30:00,3,OS Billing Gold
+15/10/2026,19:30:00,3,OS Billing Gold
+16/10/2026,19:30:00,0,OS Billing Gold
+17/10/2026,19:30:00,0,OS Billing Gold
+18/10/2026,19:30:00,0,OS Billing Gold
+19/10/2026,19:30:00,0,OS Billing Gold
+20/10/2026,19:30:00,1,OS Billing Gold
+21/10/2026,19:30:00,1,OS Billing Gold
+22/10/2026,19:30:00,5,OS Billing Gold
+23/10/2026,19:30:00,4,OS Billing Gold
+24/10/2026,19:30:00,2,OS Billing Gold
+25/10/2026,19:30:00,1,OS Billing Gold
+26/10/2026,19:30:00,1,OS Billing Gold
+27/10/2026,19:30:00,3,OS Billing Gold
+28/10/2026,19:30:00,2,OS Billing Gold
+29/10/2026,19:30:00,2,OS Billing Gold
+30/10/2026,19:30:00,3,OS Billing Gold
+31/10/2026,19:30:00,3,OS Billing Gold
+01/10/2026,20:00:00,5,OS Billing Gold
+02/10/2026,20:00:00,4,OS Billing Gold
+03/10/2026,20:00:00,2,OS Billing Gold
+04/10/2026,20:00:00,1,OS Billing Gold
+05/10/2026,20:00:00,3,OS Billing Gold
+06/10/2026,20:00:00,1,OS Billing Gold
+07/10/2026,20:00:00,2,OS Billing Gold
+08/10/2026,20:00:00,2,OS Billing Gold
+09/10/2026,20:00:00,5,OS Billing Gold
+10/10/2026,20:00:00,1,OS Billing Gold
+11/10/2026,20:00:00,1,OS Billing Gold
+12/10/2026,20:00:00,0,OS Billing Gold
+13/10/2026,20:00:00,2,OS Billing Gold
+14/10/2026,20:00:00,4,OS Billing Gold
+15/10/2026,20:00:00,1,OS Billing Gold
+16/10/2026,20:00:00,5,OS Billing Gold
+17/10/2026,20:00:00,3,OS Billing Gold
+18/10/2026,20:00:00,5,OS Billing Gold
+19/10/2026,20:00:00,0,OS Billing Gold
+20/10/2026,20:00:00,3,OS Billing Gold
+21/10/2026,20:00:00,0,OS Billing Gold
+22/10/2026,20:00:00,7,OS Billing Gold
+23/10/2026,20:00:00,0,OS Billing Gold
+24/10/2026,20:00:00,2,OS Billing Gold
+25/10/2026,20:00:00,1,OS Billing Gold
+26/10/2026,20:00:00,0,OS Billing Gold
+27/10/2026,20:00:00,2,OS Billing Gold
+28/10/2026,20:00:00,2,OS Billing Gold
+29/10/2026,20:00:00,2,OS Billing Gold
+30/10/2026,20:00:00,0,OS Billing Gold
+31/10/2026,20:00:00,0,OS Billing Gold
+01/10/2026,20:30:00,7,OS Billing Gold
+02/10/2026,20:30:00,4,OS Billing Gold
+03/10/2026,20:30:00,2,OS Billing Gold
+04/10/2026,20:30:00,2,OS Billing Gold
+05/10/2026,20:30:00,5,OS Billing Gold
+06/10/2026,20:30:00,1,OS Billing Gold
+07/10/2026,20:30:00,0,OS Billing Gold
+08/10/2026,20:30:00,2,OS Billing Gold
+09/10/2026,20:30:00,0,OS Billing Gold
+10/10/2026,20:30:00,0,OS Billing Gold
+11/10/2026,20:30:00,6,OS Billing Gold
+12/10/2026,20:30:00,3,OS Billing Gold
+13/10/2026,20:30:00,5,OS Billing Gold
+14/10/2026,20:30:00,0,OS Billing Gold
+15/10/2026,20:30:00,4,OS Billing Gold
+16/10/2026,20:30:00,1,OS Billing Gold
+17/10/2026,20:30:00,3,OS Billing Gold
+18/10/2026,20:30:00,4,OS Billing Gold
+19/10/2026,20:30:00,3,OS Billing Gold
+20/10/2026,20:30:00,0,OS Billing Gold
+21/10/2026,20:30:00,1,OS Billing Gold
+22/10/2026,20:30:00,2,OS Billing Gold
+23/10/2026,20:30:00,0,OS Billing Gold
+24/10/2026,20:30:00,1,OS Billing Gold
+25/10/2026,20:30:00,0,OS Billing Gold
+26/10/2026,20:30:00,1,OS Billing Gold
+27/10/2026,20:30:00,1,OS Billing Gold
+28/10/2026,20:30:00,0,OS Billing Gold
+29/10/2026,20:30:00,1,OS Billing Gold
+30/10/2026,20:30:00,1,OS Billing Gold
+31/10/2026,20:30:00,0,OS Billing Gold
+01/10/2026,21:00:00,2,OS Billing Gold
+02/10/2026,21:00:00,2,OS Billing Gold
+03/10/2026,21:00:00,1,OS Billing Gold
+04/10/2026,21:00:00,1,OS Billing Gold
+05/10/2026,21:00:00,0,OS Billing Gold
+06/10/2026,21:00:00,1,OS Billing Gold
+07/10/2026,21:00:00,1,OS Billing Gold
+08/10/2026,21:00:00,2,OS Billing Gold
+09/10/2026,21:00:00,2,OS Billing Gold
+10/10/2026,21:00:00,1,OS Billing Gold
+11/10/2026,21:00:00,3,OS Billing Gold
+12/10/2026,21:00:00,2,OS Billing Gold
+13/10/2026,21:00:00,2,OS Billing Gold
+14/10/2026,21:00:00,0,OS Billing Gold
+15/10/2026,21:00:00,2,OS Billing Gold
+16/10/2026,21:00:00,2,OS Billing Gold
+17/10/2026,21:00:00,0,OS Billing Gold
+18/10/2026,21:00:00,1,OS Billing Gold
+19/10/2026,21:00:00,2,OS Billing Gold
+20/10/2026,21:00:00,1,OS Billing Gold
+21/10/2026,21:00:00,1,OS Billing Gold
+22/10/2026,21:00:00,3,OS Billing Gold
+23/10/2026,21:00:00,2,OS Billing Gold
+24/10/2026,21:00:00,2,OS Billing Gold
+25/10/2026,21:00:00,1,OS Billing Gold
+26/10/2026,21:00:00,0,OS Billing Gold
+27/10/2026,21:00:00,0,OS Billing Gold
+28/10/2026,21:00:00,0,OS Billing Gold
+29/10/2026,21:00:00,1,OS Billing Gold
+30/10/2026,21:00:00,2,OS Billing Gold
+31/10/2026,21:00:00,4,OS Billing Gold
+01/10/2026,21:30:00,4,OS Billing Gold
+02/10/2026,21:30:00,2,OS Billing Gold
+03/10/2026,21:30:00,1,OS Billing Gold
+04/10/2026,21:30:00,2,OS Billing Gold
+05/10/2026,21:30:00,3,OS Billing Gold
+06/10/2026,21:30:00,1,OS Billing Gold
+07/10/2026,21:30:00,1,OS Billing Gold
+08/10/2026,21:30:00,2,OS Billing Gold
+09/10/2026,21:30:00,3,OS Billing Gold
+10/10/2026,21:30:00,2,OS Billing Gold
+11/10/2026,21:30:00,3,OS Billing Gold
+12/10/2026,21:30:00,2,OS Billing Gold
+13/10/2026,21:30:00,4,OS Billing Gold
+14/10/2026,21:30:00,0,OS Billing Gold
+15/10/2026,21:30:00,5,OS Billing Gold
+16/10/2026,21:30:00,4,OS Billing Gold
+17/10/2026,21:30:00,0,OS Billing Gold
+18/10/2026,21:30:00,4,OS Billing Gold
+19/10/2026,21:30:00,0,OS Billing Gold
+20/10/2026,21:30:00,4,OS Billing Gold
+21/10/2026,21:30:00,4,OS Billing Gold
+22/10/2026,21:30:00,3,OS Billing Gold
+23/10/2026,21:30:00,0,OS Billing Gold
+24/10/2026,21:30:00,0,OS Billing Gold
+25/10/2026,21:30:00,1,OS Billing Gold
+26/10/2026,21:30:00,1,OS Billing Gold
+27/10/2026,21:30:00,0,OS Billing Gold
+28/10/2026,21:30:00,2,OS Billing Gold
+29/10/2026,21:30:00,1,OS Billing Gold
+30/10/2026,21:30:00,2,OS Billing Gold
+31/10/2026,21:30:00,1,OS Billing Gold
+01/10/2026,22:00:00,5,OS Billing Gold
+02/10/2026,22:00:00,5,OS Billing Gold
+03/10/2026,22:00:00,2,OS Billing Gold
+04/10/2026,22:00:00,1,OS Billing Gold
+05/10/2026,22:00:00,0,OS Billing Gold
+06/10/2026,22:00:00,4,OS Billing Gold
+07/10/2026,22:00:00,2,OS Billing Gold
+08/10/2026,22:00:00,0,OS Billing Gold
+09/10/2026,22:00:00,0,OS Billing Gold
+10/10/2026,22:00:00,1,OS Billing Gold
+11/10/2026,22:00:00,5,OS Billing Gold
+12/10/2026,22:00:00,0,OS Billing Gold
+13/10/2026,22:00:00,2,OS Billing Gold
+14/10/2026,22:00:00,1,OS Billing Gold
+15/10/2026,22:00:00,0,OS Billing Gold
+16/10/2026,22:00:00,4,OS Billing Gold
+17/10/2026,22:00:00,3,OS Billing Gold
+18/10/2026,22:00:00,0,OS Billing Gold
+19/10/2026,22:00:00,3,OS Billing Gold
+20/10/2026,22:00:00,1,OS Billing Gold
+21/10/2026,22:00:00,3,OS Billing Gold
+22/10/2026,22:00:00,0,OS Billing Gold
+23/10/2026,22:00:00,2,OS Billing Gold
+24/10/2026,22:00:00,1,OS Billing Gold
+25/10/2026,22:00:00,0,OS Billing Gold
+26/10/2026,22:00:00,1,OS Billing Gold
+27/10/2026,22:00:00,0,OS Billing Gold
+28/10/2026,22:00:00,2,OS Billing Gold
+29/10/2026,22:00:00,2,OS Billing Gold
+30/10/2026,22:00:00,0,OS Billing Gold
+31/10/2026,22:00:00,3,OS Billing Gold
+01/10/2026,22:30:00,1,OS Billing Gold
+02/10/2026,22:30:00,6,OS Billing Gold
+03/10/2026,22:30:00,0,OS Billing Gold
+04/10/2026,22:30:00,2,OS Billing Gold
+05/10/2026,22:30:00,3,OS Billing Gold
+06/10/2026,22:30:00,0,OS Billing Gold
+07/10/2026,22:30:00,0,OS Billing Gold
+08/10/2026,22:30:00,5,OS Billing Gold
+09/10/2026,22:30:00,3,OS Billing Gold
+10/10/2026,22:30:00,2,OS Billing Gold
+11/10/2026,22:30:00,0,OS Billing Gold
+12/10/2026,22:30:00,0,OS Billing Gold
+13/10/2026,22:30:00,0,OS Billing Gold
+14/10/2026,22:30:00,3,OS Billing Gold
+15/10/2026,22:30:00,0,OS Billing Gold
+16/10/2026,22:30:00,0,OS Billing Gold
+17/10/2026,22:30:00,1,OS Billing Gold
+18/10/2026,22:30:00,0,OS Billing Gold
+19/10/2026,22:30:00,2,OS Billing Gold
+20/10/2026,22:30:00,1,OS Billing Gold
+21/10/2026,22:30:00,0,OS Billing Gold
+22/10/2026,22:30:00,2,OS Billing Gold
+23/10/2026,22:30:00,0,OS Billing Gold
+24/10/2026,22:30:00,1,OS Billing Gold
+25/10/2026,22:30:00,0,OS Billing Gold
+26/10/2026,22:30:00,0,OS Billing Gold
+27/10/2026,22:30:00,0,OS Billing Gold
+28/10/2026,22:30:00,1,OS Billing Gold
+29/10/2026,22:30:00,1,OS Billing Gold
+30/10/2026,22:30:00,5,OS Billing Gold
+31/10/2026,22:30:00,0,OS Billing Gold
+01/10/2026,23:00:00,0,OS Billing Gold
+02/10/2026,23:00:00,1,OS Billing Gold
+03/10/2026,23:00:00,2,OS Billing Gold
+04/10/2026,23:00:00,1,OS Billing Gold
+05/10/2026,23:00:00,3,OS Billing Gold
+06/10/2026,23:00:00,1,OS Billing Gold
+07/10/2026,23:00:00,0,OS Billing Gold
+08/10/2026,23:00:00,0,OS Billing Gold
+09/10/2026,23:00:00,3,OS Billing Gold
+10/10/2026,23:00:00,2,OS Billing Gold
+11/10/2026,23:00:00,1,OS Billing Gold
+12/10/2026,23:00:00,3,OS Billing Gold
+13/10/2026,23:00:00,0,OS Billing Gold
+14/10/2026,23:00:00,0,OS Billing Gold
+15/10/2026,23:00:00,0,OS Billing Gold
+16/10/2026,23:00:00,1,OS Billing Gold
+17/10/2026,23:00:00,0,OS Billing Gold
+18/10/2026,23:00:00,2,OS Billing Gold
+19/10/2026,23:00:00,0,OS Billing Gold
+20/10/2026,23:00:00,3,OS Billing Gold
+21/10/2026,23:00:00,0,OS Billing Gold
+22/10/2026,23:00:00,0,OS Billing Gold
+23/10/2026,23:00:00,2,OS Billing Gold
+24/10/2026,23:00:00,0,OS Billing Gold
+25/10/2026,23:00:00,3,OS Billing Gold
+26/10/2026,23:00:00,0,OS Billing Gold
+27/10/2026,23:00:00,0,OS Billing Gold
+28/10/2026,23:00:00,0,OS Billing Gold
+29/10/2026,23:00:00,1,OS Billing Gold
+30/10/2026,23:00:00,1,OS Billing Gold
+31/10/2026,23:00:00,0,OS Billing Gold
+01/10/2026,23:30:00,4,OS Billing Gold
+02/10/2026,23:30:00,0,OS Billing Gold
+03/10/2026,23:30:00,0,OS Billing Gold
+04/10/2026,23:30:00,0,OS Billing Gold
+05/10/2026,23:30:00,0,OS Billing Gold
+06/10/2026,23:30:00,2,OS Billing Gold
+07/10/2026,23:30:00,0,OS Billing Gold
+08/10/2026,23:30:00,0,OS Billing Gold
+09/10/2026,23:30:00,3,OS Billing Gold
+10/10/2026,23:30:00,1,OS Billing Gold
+11/10/2026,23:30:00,0,OS Billing Gold
+12/10/2026,23:30:00,0,OS Billing Gold
+13/10/2026,23:30:00,0,OS Billing Gold
+14/10/2026,23:30:00,1,OS Billing Gold
+15/10/2026,23:30:00,1,OS Billing Gold
+16/10/2026,23:30:00,0,OS Billing Gold
+17/10/2026,23:30:00,1,OS Billing Gold
+18/10/2026,23:30:00,0,OS Billing Gold
+19/10/2026,23:30:00,0,OS Billing Gold
+20/10/2026,23:30:00,0,OS Billing Gold
+21/10/2026,23:30:00,0,OS Billing Gold
+22/10/2026,23:30:00,2,OS Billing Gold
+23/10/2026,23:30:00,0,OS Billing Gold
+24/10/2026,23:30:00,0,OS Billing Gold
+25/10/2026,23:30:00,1,OS Billing Gold
+26/10/2026,23:30:00,0,OS Billing Gold
+27/10/2026,23:30:00,0,OS Billing Gold
+28/10/2026,23:30:00,0,OS Billing Gold
+29/10/2026,23:30:00,0,OS Billing Gold
+30/10/2026,23:30:00,0,OS Billing Gold
+31/10/2026,23:30:00,3,OS Billing Gold
+01/10/2026,00:00:00,4,OS Tech-Gold
+02/10/2026,00:00:00,0,OS Tech-Gold
+03/10/2026,00:00:00,1,OS Tech-Gold
+04/10/2026,00:00:00,0,OS Tech-Gold
+05/10/2026,00:00:00,0,OS Tech-Gold
+06/10/2026,00:00:00,1,OS Tech-Gold
+07/10/2026,00:00:00,1,OS Tech-Gold
+08/10/2026,00:00:00,0,OS Tech-Gold
+09/10/2026,00:00:00,0,OS Tech-Gold
+10/10/2026,00:00:00,1,OS Tech-Gold
+11/10/2026,00:00:00,1,OS Tech-Gold
+12/10/2026,00:00:00,0,OS Tech-Gold
+13/10/2026,00:00:00,2,OS Tech-Gold
+14/10/2026,00:00:00,1,OS Tech-Gold
+15/10/2026,00:00:00,0,OS Tech-Gold
+16/10/2026,00:00:00,3,OS Tech-Gold
+17/10/2026,00:00:00,1,OS Tech-Gold
+18/10/2026,00:00:00,2,OS Tech-Gold
+19/10/2026,00:00:00,7,OS Tech-Gold
+20/10/2026,00:00:00,0,OS Tech-Gold
+21/10/2026,00:00:00,0,OS Tech-Gold
+22/10/2026,00:00:00,1,OS Tech-Gold
+23/10/2026,00:00:00,0,OS Tech-Gold
+24/10/2026,00:00:00,1,OS Tech-Gold
+25/10/2026,00:00:00,5,OS Tech-Gold
+26/10/2026,00:00:00,1,OS Tech-Gold
+27/10/2026,00:00:00,1,OS Tech-Gold
+28/10/2026,00:00:00,0,OS Tech-Gold
+29/10/2026,00:00:00,1,OS Tech-Gold
+30/10/2026,00:00:00,0,OS Tech-Gold
+31/10/2026,00:00:00,1,OS Tech-Gold
+01/10/2026,00:30:00,2,OS Tech-Gold
+02/10/2026,00:30:00,2,OS Tech-Gold
+03/10/2026,00:30:00,0,OS Tech-Gold
+04/10/2026,00:30:00,0,OS Tech-Gold
+05/10/2026,00:30:00,0,OS Tech-Gold
+06/10/2026,00:30:00,0,OS Tech-Gold
+07/10/2026,00:30:00,3,OS Tech-Gold
+08/10/2026,00:30:00,0,OS Tech-Gold
+09/10/2026,00:30:00,1,OS Tech-Gold
+10/10/2026,00:30:00,4,OS Tech-Gold
+11/10/2026,00:30:00,4,OS Tech-Gold
+12/10/2026,00:30:00,4,OS Tech-Gold
+13/10/2026,00:30:00,0,OS Tech-Gold
+14/10/2026,00:30:00,1,OS Tech-Gold
+15/10/2026,00:30:00,0,OS Tech-Gold
+16/10/2026,00:30:00,3,OS Tech-Gold
+17/10/2026,00:30:00,0,OS Tech-Gold
+18/10/2026,00:30:00,0,OS Tech-Gold
+19/10/2026,00:30:00,0,OS Tech-Gold
+20/10/2026,00:30:00,0,OS Tech-Gold
+21/10/2026,00:30:00,1,OS Tech-Gold
+22/10/2026,00:30:00,0,OS Tech-Gold
+23/10/2026,00:30:00,0,OS Tech-Gold
+24/10/2026,00:30:00,0,OS Tech-Gold
+25/10/2026,00:30:00,0,OS Tech-Gold
+26/10/2026,00:30:00,3,OS Tech-Gold
+27/10/2026,00:30:00,1,OS Tech-Gold
+28/10/2026,00:30:00,1,OS Tech-Gold
+29/10/2026,00:30:00,2,OS Tech-Gold
+30/10/2026,00:30:00,3,OS Tech-Gold
+31/10/2026,00:30:00,1,OS Tech-Gold
+01/10/2026,01:00:00,0,OS Tech-Gold
+02/10/2026,01:00:00,2,OS Tech-Gold
+03/10/2026,01:00:00,0,OS Tech-Gold
+04/10/2026,01:00:00,2,OS Tech-Gold
+05/10/2026,01:00:00,0,OS Tech-Gold
+06/10/2026,01:00:00,1,OS Tech-Gold
+07/10/2026,01:00:00,1,OS Tech-Gold
+08/10/2026,01:00:00,0,OS Tech-Gold
+09/10/2026,01:00:00,3,OS Tech-Gold
+10/10/2026,01:00:00,0,OS Tech-Gold
+11/10/2026,01:00:00,1,OS Tech-Gold
+12/10/2026,01:00:00,1,OS Tech-Gold
+13/10/2026,01:00:00,1,OS Tech-Gold
+14/10/2026,01:00:00,4,OS Tech-Gold
+15/10/2026,01:00:00,0,OS Tech-Gold
+16/10/2026,01:00:00,0,OS Tech-Gold
+17/10/2026,01:00:00,2,OS Tech-Gold
+18/10/2026,01:00:00,2,OS Tech-Gold
+19/10/2026,01:00:00,0,OS Tech-Gold
+20/10/2026,01:00:00,0,OS Tech-Gold
+21/10/2026,01:00:00,1,OS Tech-Gold
+22/10/2026,01:00:00,1,OS Tech-Gold
+23/10/2026,01:00:00,0,OS Tech-Gold
+24/10/2026,01:00:00,0,OS Tech-Gold
+25/10/2026,01:00:00,0,OS Tech-Gold
+26/10/2026,01:00:00,3,OS Tech-Gold
+27/10/2026,01:00:00,1,OS Tech-Gold
+28/10/2026,01:00:00,0,OS Tech-Gold
+29/10/2026,01:00:00,1,OS Tech-Gold
+30/10/2026,01:00:00,1,OS Tech-Gold
+31/10/2026,01:00:00,0,OS Tech-Gold
+01/10/2026,01:30:00,1,OS Tech-Gold
+02/10/2026,01:30:00,0,OS Tech-Gold
+03/10/2026,01:30:00,0,OS Tech-Gold
+04/10/2026,01:30:00,2,OS Tech-Gold
+05/10/2026,01:30:00,0,OS Tech-Gold
+06/10/2026,01:30:00,1,OS Tech-Gold
+07/10/2026,01:30:00,0,OS Tech-Gold
+08/10/2026,01:30:00,0,OS Tech-Gold
+09/10/2026,01:30:00,0,OS Tech-Gold
+10/10/2026,01:30:00,1,OS Tech-Gold
+11/10/2026,01:30:00,0,OS Tech-Gold
+12/10/2026,01:30:00,1,OS Tech-Gold
+13/10/2026,01:30:00,0,OS Tech-Gold
+14/10/2026,01:30:00,1,OS Tech-Gold
+15/10/2026,01:30:00,3,OS Tech-Gold
+16/10/2026,01:30:00,1,OS Tech-Gold
+17/10/2026,01:30:00,0,OS Tech-Gold
+18/10/2026,01:30:00,2,OS Tech-Gold
+19/10/2026,01:30:00,0,OS Tech-Gold
+20/10/2026,01:30:00,0,OS Tech-Gold
+21/10/2026,01:30:00,0,OS Tech-Gold
+22/10/2026,01:30:00,1,OS Tech-Gold
+23/10/2026,01:30:00,0,OS Tech-Gold
+24/10/2026,01:30:00,1,OS Tech-Gold
+25/10/2026,01:30:00,0,OS Tech-Gold
+26/10/2026,01:30:00,3,OS Tech-Gold
+27/10/2026,01:30:00,0,OS Tech-Gold
+28/10/2026,01:30:00,0,OS Tech-Gold
+29/10/2026,01:30:00,0,OS Tech-Gold
+30/10/2026,01:30:00,2,OS Tech-Gold
+31/10/2026,01:30:00,1,OS Tech-Gold
+01/10/2026,02:00:00,1,OS Tech-Gold
+02/10/2026,02:00:00,0,OS Tech-Gold
+03/10/2026,02:00:00,0,OS Tech-Gold
+04/10/2026,02:00:00,2,OS Tech-Gold
+05/10/2026,02:00:00,0,OS Tech-Gold
+06/10/2026,02:00:00,3,OS Tech-Gold
+07/10/2026,02:00:00,0,OS Tech-Gold
+08/10/2026,02:00:00,0,OS Tech-Gold
+09/10/2026,02:00:00,0,OS Tech-Gold
+10/10/2026,02:00:00,1,OS Tech-Gold
+11/10/2026,02:00:00,0,OS Tech-Gold
+12/10/2026,02:00:00,0,OS Tech-Gold
+13/10/2026,02:00:00,0,OS Tech-Gold
+14/10/2026,02:00:00,1,OS Tech-Gold
+15/10/2026,02:00:00,0,OS Tech-Gold
+16/10/2026,02:00:00,0,OS Tech-Gold
+17/10/2026,02:00:00,1,OS Tech-Gold
+18/10/2026,02:00:00,2,OS Tech-Gold
+19/10/2026,02:00:00,0,OS Tech-Gold
+20/10/2026,02:00:00,0,OS Tech-Gold
+21/10/2026,02:00:00,0,OS Tech-Gold
+22/10/2026,02:00:00,0,OS Tech-Gold
+23/10/2026,02:00:00,0,OS Tech-Gold
+24/10/2026,02:00:00,0,OS Tech-Gold
+25/10/2026,02:00:00,0,OS Tech-Gold
+26/10/2026,02:00:00,0,OS Tech-Gold
+27/10/2026,02:00:00,0,OS Tech-Gold
+28/10/2026,02:00:00,0,OS Tech-Gold
+29/10/2026,02:00:00,1,OS Tech-Gold
+30/10/2026,02:00:00,1,OS Tech-Gold
+31/10/2026,02:00:00,2,OS Tech-Gold
+01/10/2026,02:30:00,0,OS Tech-Gold
+02/10/2026,02:30:00,0,OS Tech-Gold
+03/10/2026,02:30:00,0,OS Tech-Gold
+04/10/2026,02:30:00,2,OS Tech-Gold
+05/10/2026,02:30:00,0,OS Tech-Gold
+06/10/2026,02:30:00,0,OS Tech-Gold
+07/10/2026,02:30:00,1,OS Tech-Gold
+08/10/2026,02:30:00,2,OS Tech-Gold
+09/10/2026,02:30:00,0,OS Tech-Gold
+10/10/2026,02:30:00,0,OS Tech-Gold
+11/10/2026,02:30:00,1,OS Tech-Gold
+12/10/2026,02:30:00,0,OS Tech-Gold
+13/10/2026,02:30:00,1,OS Tech-Gold
+14/10/2026,02:30:00,0,OS Tech-Gold
+15/10/2026,02:30:00,2,OS Tech-Gold
+16/10/2026,02:30:00,1,OS Tech-Gold
+17/10/2026,02:30:00,1,OS Tech-Gold
+18/10/2026,02:30:00,2,OS Tech-Gold
+19/10/2026,02:30:00,0,OS Tech-Gold
+20/10/2026,02:30:00,0,OS Tech-Gold
+21/10/2026,02:30:00,1,OS Tech-Gold
+22/10/2026,02:30:00,0,OS Tech-Gold
+23/10/2026,02:30:00,0,OS Tech-Gold
+24/10/2026,02:30:00,0,OS Tech-Gold
+25/10/2026,02:30:00,0,OS Tech-Gold
+26/10/2026,02:30:00,1,OS Tech-Gold
+27/10/2026,02:30:00,0,OS Tech-Gold
+28/10/2026,02:30:00,0,OS Tech-Gold
+29/10/2026,02:30:00,0,OS Tech-Gold
+30/10/2026,02:30:00,0,OS Tech-Gold
+31/10/2026,02:30:00,0,OS Tech-Gold
+01/10/2026,03:00:00,1,OS Tech-Gold
+02/10/2026,03:00:00,0,OS Tech-Gold
+03/10/2026,03:00:00,0,OS Tech-Gold
+04/10/2026,03:00:00,0,OS Tech-Gold
+05/10/2026,03:00:00,1,OS Tech-Gold
+06/10/2026,03:00:00,0,OS Tech-Gold
+07/10/2026,03:00:00,1,OS Tech-Gold
+08/10/2026,03:00:00,0,OS Tech-Gold
+09/10/2026,03:00:00,1,OS Tech-Gold
+10/10/2026,03:00:00,0,OS Tech-Gold
+11/10/2026,03:00:00,0,OS Tech-Gold
+12/10/2026,03:00:00,1,OS Tech-Gold
+13/10/2026,03:00:00,2,OS Tech-Gold
+14/10/2026,03:00:00,0,OS Tech-Gold
+15/10/2026,03:00:00,2,OS Tech-Gold
+16/10/2026,03:00:00,0,OS Tech-Gold
+17/10/2026,03:00:00,0,OS Tech-Gold
+18/10/2026,03:00:00,0,OS Tech-Gold
+19/10/2026,03:00:00,0,OS Tech-Gold
+20/10/2026,03:00:00,3,OS Tech-Gold
+21/10/2026,03:00:00,0,OS Tech-Gold
+22/10/2026,03:00:00,0,OS Tech-Gold
+23/10/2026,03:00:00,0,OS Tech-Gold
+24/10/2026,03:00:00,1,OS Tech-Gold
+25/10/2026,03:00:00,0,OS Tech-Gold
+26/10/2026,03:00:00,0,OS Tech-Gold
+27/10/2026,03:00:00,0,OS Tech-Gold
+28/10/2026,03:00:00,0,OS Tech-Gold
+29/10/2026,03:00:00,0,OS Tech-Gold
+30/10/2026,03:00:00,0,OS Tech-Gold
+31/10/2026,03:00:00,0,OS Tech-Gold
+01/10/2026,03:30:00,1,OS Tech-Gold
+02/10/2026,03:30:00,0,OS Tech-Gold
+03/10/2026,03:30:00,0,OS Tech-Gold
+04/10/2026,03:30:00,0,OS Tech-Gold
+05/10/2026,03:30:00,1,OS Tech-Gold
+06/10/2026,03:30:00,0,OS Tech-Gold
+07/10/2026,03:30:00,0,OS Tech-Gold
+08/10/2026,03:30:00,0,OS Tech-Gold
+09/10/2026,03:30:00,0,OS Tech-Gold
+10/10/2026,03:30:00,0,OS Tech-Gold
+11/10/2026,03:30:00,0,OS Tech-Gold
+12/10/2026,03:30:00,3,OS Tech-Gold
+13/10/2026,03:30:00,0,OS Tech-Gold
+14/10/2026,03:30:00,3,OS Tech-Gold
+15/10/2026,03:30:00,0,OS Tech-Gold
+16/10/2026,03:30:00,1,OS Tech-Gold
+17/10/2026,03:30:00,0,OS Tech-Gold
+18/10/2026,03:30:00,2,OS Tech-Gold
+19/10/2026,03:30:00,0,OS Tech-Gold
+20/10/2026,03:30:00,0,OS Tech-Gold
+21/10/2026,03:30:00,0,OS Tech-Gold
+22/10/2026,03:30:00,0,OS Tech-Gold
+23/10/2026,03:30:00,0,OS Tech-Gold
+24/10/2026,03:30:00,0,OS Tech-Gold
+25/10/2026,03:30:00,0,OS Tech-Gold
+26/10/2026,03:30:00,1,OS Tech-Gold
+27/10/2026,03:30:00,0,OS Tech-Gold
+28/10/2026,03:30:00,0,OS Tech-Gold
+29/10/2026,03:30:00,0,OS Tech-Gold
+30/10/2026,03:30:00,0,OS Tech-Gold
+31/10/2026,03:30:00,2,OS Tech-Gold
+01/10/2026,04:00:00,0,OS Tech-Gold
+02/10/2026,04:00:00,0,OS Tech-Gold
+03/10/2026,04:00:00,0,OS Tech-Gold
+04/10/2026,04:00:00,0,OS Tech-Gold
+05/10/2026,04:00:00,0,OS Tech-Gold
+06/10/2026,04:00:00,0,OS Tech-Gold
+07/10/2026,04:00:00,0,OS Tech-Gold
+08/10/2026,04:00:00,0,OS Tech-Gold
+09/10/2026,04:00:00,0,OS Tech-Gold
+10/10/2026,04:00:00,0,OS Tech-Gold
+11/10/2026,04:00:00,0,OS Tech-Gold
+12/10/2026,04:00:00,0,OS Tech-Gold
+13/10/2026,04:00:00,0,OS Tech-Gold
+14/10/2026,04:00:00,0,OS Tech-Gold
+15/10/2026,04:00:00,0,OS Tech-Gold
+16/10/2026,04:00:00,0,OS Tech-Gold
+17/10/2026,04:00:00,0,OS Tech-Gold
+18/10/2026,04:00:00,0,OS Tech-Gold
+19/10/2026,04:00:00,0,OS Tech-Gold
+20/10/2026,04:00:00,0,OS Tech-Gold
+21/10/2026,04:00:00,0,OS Tech-Gold
+22/10/2026,04:00:00,0,OS Tech-Gold
+23/10/2026,04:00:00,1,OS Tech-Gold
+24/10/2026,04:00:00,0,OS Tech-Gold
+25/10/2026,04:00:00,0,OS Tech-Gold
+26/10/2026,04:00:00,1,OS Tech-Gold
+27/10/2026,04:00:00,0,OS Tech-Gold
+28/10/2026,04:00:00,0,OS Tech-Gold
+29/10/2026,04:00:00,0,OS Tech-Gold
+30/10/2026,04:00:00,1,OS Tech-Gold
+31/10/2026,04:00:00,1,OS Tech-Gold
+01/10/2026,04:30:00,0,OS Tech-Gold
+02/10/2026,04:30:00,1,OS Tech-Gold
+03/10/2026,04:30:00,0,OS Tech-Gold
+04/10/2026,04:30:00,0,OS Tech-Gold
+05/10/2026,04:30:00,0,OS Tech-Gold
+06/10/2026,04:30:00,1,OS Tech-Gold
+07/10/2026,04:30:00,1,OS Tech-Gold
+08/10/2026,04:30:00,0,OS Tech-Gold
+09/10/2026,04:30:00,1,OS Tech-Gold
+10/10/2026,04:30:00,0,OS Tech-Gold
+11/10/2026,04:30:00,0,OS Tech-Gold
+12/10/2026,04:30:00,0,OS Tech-Gold
+13/10/2026,04:30:00,0,OS Tech-Gold
+14/10/2026,04:30:00,0,OS Tech-Gold
+15/10/2026,04:30:00,0,OS Tech-Gold
+16/10/2026,04:30:00,0,OS Tech-Gold
+17/10/2026,04:30:00,1,OS Tech-Gold
+18/10/2026,04:30:00,0,OS Tech-Gold
+19/10/2026,04:30:00,0,OS Tech-Gold
+20/10/2026,04:30:00,0,OS Tech-Gold
+21/10/2026,04:30:00,0,OS Tech-Gold
+22/10/2026,04:30:00,0,OS Tech-Gold
+23/10/2026,04:30:00,1,OS Tech-Gold
+24/10/2026,04:30:00,0,OS Tech-Gold
+25/10/2026,04:30:00,0,OS Tech-Gold
+26/10/2026,04:30:00,1,OS Tech-Gold
+27/10/2026,04:30:00,0,OS Tech-Gold
+28/10/2026,04:30:00,0,OS Tech-Gold
+29/10/2026,04:30:00,1,OS Tech-Gold
+30/10/2026,04:30:00,0,OS Tech-Gold
+31/10/2026,04:30:00,1,OS Tech-Gold
+01/10/2026,05:00:00,1,OS Tech-Gold
+02/10/2026,05:00:00,0,OS Tech-Gold
+03/10/2026,05:00:00,0,OS Tech-Gold
+04/10/2026,05:00:00,0,OS Tech-Gold
+05/10/2026,05:00:00,1,OS Tech-Gold
+06/10/2026,05:00:00,0,OS Tech-Gold
+07/10/2026,05:00:00,0,OS Tech-Gold
+08/10/2026,05:00:00,0,OS Tech-Gold
+09/10/2026,05:00:00,1,OS Tech-Gold
+10/10/2026,05:00:00,0,OS Tech-Gold
+11/10/2026,05:00:00,0,OS Tech-Gold
+12/10/2026,05:00:00,0,OS Tech-Gold
+13/10/2026,05:00:00,0,OS Tech-Gold
+14/10/2026,05:00:00,0,OS Tech-Gold
+15/10/2026,05:00:00,0,OS Tech-Gold
+16/10/2026,05:00:00,0,OS Tech-Gold
+17/10/2026,05:00:00,0,OS Tech-Gold
+18/10/2026,05:00:00,0,OS Tech-Gold
+19/10/2026,05:00:00,0,OS Tech-Gold
+20/10/2026,05:00:00,0,OS Tech-Gold
+21/10/2026,05:00:00,0,OS Tech-Gold
+22/10/2026,05:00:00,0,OS Tech-Gold
+23/10/2026,05:00:00,1,OS Tech-Gold
+24/10/2026,05:00:00,0,OS Tech-Gold
+25/10/2026,05:00:00,0,OS Tech-Gold
+26/10/2026,05:00:00,0,OS Tech-Gold
+27/10/2026,05:00:00,1,OS Tech-Gold
+28/10/2026,05:00:00,0,OS Tech-Gold
+29/10/2026,05:00:00,0,OS Tech-Gold
+30/10/2026,05:00:00,1,OS Tech-Gold
+31/10/2026,05:00:00,1,OS Tech-Gold
+01/10/2026,05:30:00,0,OS Tech-Gold
+02/10/2026,05:30:00,0,OS Tech-Gold
+03/10/2026,05:30:00,0,OS Tech-Gold
+04/10/2026,05:30:00,0,OS Tech-Gold
+05/10/2026,05:30:00,0,OS Tech-Gold
+06/10/2026,05:30:00,0,OS Tech-Gold
+07/10/2026,05:30:00,0,OS Tech-Gold
+08/10/2026,05:30:00,0,OS Tech-Gold
+09/10/2026,05:30:00,0,OS Tech-Gold
+10/10/2026,05:30:00,1,OS Tech-Gold
+11/10/2026,05:30:00,0,OS Tech-Gold
+12/10/2026,05:30:00,0,OS Tech-Gold
+13/10/2026,05:30:00,0,OS Tech-Gold
+14/10/2026,05:30:00,0,OS Tech-Gold
+15/10/2026,05:30:00,0,OS Tech-Gold
+16/10/2026,05:30:00,0,OS Tech-Gold
+17/10/2026,05:30:00,0,OS Tech-Gold
+18/10/2026,05:30:00,0,OS Tech-Gold
+19/10/2026,05:30:00,0,OS Tech-Gold
+20/10/2026,05:30:00,0,OS Tech-Gold
+21/10/2026,05:30:00,0,OS Tech-Gold
+22/10/2026,05:30:00,0,OS Tech-Gold
+23/10/2026,05:30:00,0,OS Tech-Gold
+24/10/2026,05:30:00,0,OS Tech-Gold
+25/10/2026,05:30:00,0,OS Tech-Gold
+26/10/2026,05:30:00,0,OS Tech-Gold
+27/10/2026,05:30:00,0,OS Tech-Gold
+28/10/2026,05:30:00,0,OS Tech-Gold
+29/10/2026,05:30:00,2,OS Tech-Gold
+30/10/2026,05:30:00,0,OS Tech-Gold
+31/10/2026,05:30:00,1,OS Tech-Gold
+01/10/2026,06:00:00,0,OS Tech-Gold
+02/10/2026,06:00:00,0,OS Tech-Gold
+03/10/2026,06:00:00,0,OS Tech-Gold
+04/10/2026,06:00:00,0,OS Tech-Gold
+05/10/2026,06:00:00,0,OS Tech-Gold
+06/10/2026,06:00:00,0,OS Tech-Gold
+07/10/2026,06:00:00,0,OS Tech-Gold
+08/10/2026,06:00:00,0,OS Tech-Gold
+09/10/2026,06:00:00,0,OS Tech-Gold
+10/10/2026,06:00:00,0,OS Tech-Gold
+11/10/2026,06:00:00,0,OS Tech-Gold
+12/10/2026,06:00:00,0,OS Tech-Gold
+13/10/2026,06:00:00,1,OS Tech-Gold
+14/10/2026,06:00:00,0,OS Tech-Gold
+15/10/2026,06:00:00,0,OS Tech-Gold
+16/10/2026,06:00:00,0,OS Tech-Gold
+17/10/2026,06:00:00,0,OS Tech-Gold
+18/10/2026,06:00:00,2,OS Tech-Gold
+19/10/2026,06:00:00,0,OS Tech-Gold
+20/10/2026,06:00:00,0,OS Tech-Gold
+21/10/2026,06:00:00,0,OS Tech-Gold
+22/10/2026,06:00:00,0,OS Tech-Gold
+23/10/2026,06:00:00,0,OS Tech-Gold
+24/10/2026,06:00:00,0,OS Tech-Gold
+25/10/2026,06:00:00,0,OS Tech-Gold
+26/10/2026,06:00:00,0,OS Tech-Gold
+27/10/2026,06:00:00,0,OS Tech-Gold
+28/10/2026,06:00:00,0,OS Tech-Gold
+29/10/2026,06:00:00,0,OS Tech-Gold
+30/10/2026,06:00:00,1,OS Tech-Gold
+31/10/2026,06:00:00,1,OS Tech-Gold
+01/10/2026,06:30:00,0,OS Tech-Gold
+02/10/2026,06:30:00,0,OS Tech-Gold
+03/10/2026,06:30:00,0,OS Tech-Gold
+04/10/2026,06:30:00,0,OS Tech-Gold
+05/10/2026,06:30:00,1,OS Tech-Gold
+06/10/2026,06:30:00,0,OS Tech-Gold
+07/10/2026,06:30:00,0,OS Tech-Gold
+08/10/2026,06:30:00,2,OS Tech-Gold
+09/10/2026,06:30:00,0,OS Tech-Gold
+10/10/2026,06:30:00,0,OS Tech-Gold
+11/10/2026,06:30:00,0,OS Tech-Gold
+12/10/2026,06:30:00,0,OS Tech-Gold
+13/10/2026,06:30:00,0,OS Tech-Gold
+14/10/2026,06:30:00,0,OS Tech-Gold
+15/10/2026,06:30:00,2,OS Tech-Gold
+16/10/2026,06:30:00,0,OS Tech-Gold
+17/10/2026,06:30:00,0,OS Tech-Gold
+18/10/2026,06:30:00,0,OS Tech-Gold
+19/10/2026,06:30:00,0,OS Tech-Gold
+20/10/2026,06:30:00,0,OS Tech-Gold
+21/10/2026,06:30:00,0,OS Tech-Gold
+22/10/2026,06:30:00,0,OS Tech-Gold
+23/10/2026,06:30:00,3,OS Tech-Gold
+24/10/2026,06:30:00,3,OS Tech-Gold
+25/10/2026,06:30:00,2,OS Tech-Gold
+26/10/2026,06:30:00,0,OS Tech-Gold
+27/10/2026,06:30:00,1,OS Tech-Gold
+28/10/2026,06:30:00,0,OS Tech-Gold
+29/10/2026,06:30:00,0,OS Tech-Gold
+30/10/2026,06:30:00,0,OS Tech-Gold
+31/10/2026,06:30:00,1,OS Tech-Gold
+01/10/2026,07:00:00,2,OS Tech-Gold
+02/10/2026,07:00:00,2,OS Tech-Gold
+03/10/2026,07:00:00,0,OS Tech-Gold
+04/10/2026,07:00:00,0,OS Tech-Gold
+05/10/2026,07:00:00,0,OS Tech-Gold
+06/10/2026,07:00:00,0,OS Tech-Gold
+07/10/2026,07:00:00,0,OS Tech-Gold
+08/10/2026,07:00:00,0,OS Tech-Gold
+09/10/2026,07:00:00,0,OS Tech-Gold
+10/10/2026,07:00:00,1,OS Tech-Gold
+11/10/2026,07:00:00,0,OS Tech-Gold
+12/10/2026,07:00:00,0,OS Tech-Gold
+13/10/2026,07:00:00,1,OS Tech-Gold
+14/10/2026,07:00:00,1,OS Tech-Gold
+15/10/2026,07:00:00,0,OS Tech-Gold
+16/10/2026,07:00:00,0,OS Tech-Gold
+17/10/2026,07:00:00,2,OS Tech-Gold
+18/10/2026,07:00:00,0,OS Tech-Gold
+19/10/2026,07:00:00,0,OS Tech-Gold
+20/10/2026,07:00:00,0,OS Tech-Gold
+21/10/2026,07:00:00,0,OS Tech-Gold
+22/10/2026,07:00:00,0,OS Tech-Gold
+23/10/2026,07:00:00,0,OS Tech-Gold
+24/10/2026,07:00:00,0,OS Tech-Gold
+25/10/2026,07:00:00,0,OS Tech-Gold
+26/10/2026,07:00:00,1,OS Tech-Gold
+27/10/2026,07:00:00,0,OS Tech-Gold
+28/10/2026,07:00:00,0,OS Tech-Gold
+29/10/2026,07:00:00,0,OS Tech-Gold
+30/10/2026,07:00:00,1,OS Tech-Gold
+31/10/2026,07:00:00,0,OS Tech-Gold
+01/10/2026,07:30:00,2,OS Tech-Gold
+02/10/2026,07:30:00,2,OS Tech-Gold
+03/10/2026,07:30:00,0,OS Tech-Gold
+04/10/2026,07:30:00,0,OS Tech-Gold
+05/10/2026,07:30:00,0,OS Tech-Gold
+06/10/2026,07:30:00,0,OS Tech-Gold
+07/10/2026,07:30:00,0,OS Tech-Gold
+08/10/2026,07:30:00,0,OS Tech-Gold
+09/10/2026,07:30:00,1,OS Tech-Gold
+10/10/2026,07:30:00,1,OS Tech-Gold
+11/10/2026,07:30:00,0,OS Tech-Gold
+12/10/2026,07:30:00,1,OS Tech-Gold
+13/10/2026,07:30:00,0,OS Tech-Gold
+14/10/2026,07:30:00,1,OS Tech-Gold
+15/10/2026,07:30:00,0,OS Tech-Gold
+16/10/2026,07:30:00,1,OS Tech-Gold
+17/10/2026,07:30:00,0,OS Tech-Gold
+18/10/2026,07:30:00,2,OS Tech-Gold
+19/10/2026,07:30:00,0,OS Tech-Gold
+20/10/2026,07:30:00,0,OS Tech-Gold
+21/10/2026,07:30:00,0,OS Tech-Gold
+22/10/2026,07:30:00,1,OS Tech-Gold
+23/10/2026,07:30:00,0,OS Tech-Gold
+24/10/2026,07:30:00,1,OS Tech-Gold
+25/10/2026,07:30:00,2,OS Tech-Gold
+26/10/2026,07:30:00,0,OS Tech-Gold
+27/10/2026,07:30:00,1,OS Tech-Gold
+28/10/2026,07:30:00,0,OS Tech-Gold
+29/10/2026,07:30:00,0,OS Tech-Gold
+30/10/2026,07:30:00,0,OS Tech-Gold
+31/10/2026,07:30:00,0,OS Tech-Gold
+01/10/2026,08:00:00,1,OS Tech-Gold
+02/10/2026,08:00:00,0,OS Tech-Gold
+03/10/2026,08:00:00,0,OS Tech-Gold
+04/10/2026,08:00:00,0,OS Tech-Gold
+05/10/2026,08:00:00,1,OS Tech-Gold
+06/10/2026,08:00:00,1,OS Tech-Gold
+07/10/2026,08:00:00,0,OS Tech-Gold
+08/10/2026,08:00:00,4,OS Tech-Gold
+09/10/2026,08:00:00,0,OS Tech-Gold
+10/10/2026,08:00:00,1,OS Tech-Gold
+11/10/2026,08:00:00,1,OS Tech-Gold
+12/10/2026,08:00:00,1,OS Tech-Gold
+13/10/2026,08:00:00,0,OS Tech-Gold
+14/10/2026,08:00:00,0,OS Tech-Gold
+15/10/2026,08:00:00,2,OS Tech-Gold
+16/10/2026,08:00:00,3,OS Tech-Gold
+17/10/2026,08:00:00,0,OS Tech-Gold
+18/10/2026,08:00:00,0,OS Tech-Gold
+19/10/2026,08:00:00,0,OS Tech-Gold
+20/10/2026,08:00:00,0,OS Tech-Gold
+21/10/2026,08:00:00,0,OS Tech-Gold
+22/10/2026,08:00:00,0,OS Tech-Gold
+23/10/2026,08:00:00,0,OS Tech-Gold
+24/10/2026,08:00:00,1,OS Tech-Gold
+25/10/2026,08:00:00,0,OS Tech-Gold
+26/10/2026,08:00:00,0,OS Tech-Gold
+27/10/2026,08:00:00,0,OS Tech-Gold
+28/10/2026,08:00:00,3,OS Tech-Gold
+29/10/2026,08:00:00,0,OS Tech-Gold
+30/10/2026,08:00:00,2,OS Tech-Gold
+31/10/2026,08:00:00,0,OS Tech-Gold
+01/10/2026,08:30:00,2,OS Tech-Gold
+02/10/2026,08:30:00,0,OS Tech-Gold
+03/10/2026,08:30:00,1,OS Tech-Gold
+04/10/2026,08:30:00,2,OS Tech-Gold
+05/10/2026,08:30:00,1,OS Tech-Gold
+06/10/2026,08:30:00,1,OS Tech-Gold
+07/10/2026,08:30:00,0,OS Tech-Gold
+08/10/2026,08:30:00,2,OS Tech-Gold
+09/10/2026,08:30:00,4,OS Tech-Gold
+10/10/2026,08:30:00,0,OS Tech-Gold
+11/10/2026,08:30:00,4,OS Tech-Gold
+12/10/2026,08:30:00,1,OS Tech-Gold
+13/10/2026,08:30:00,0,OS Tech-Gold
+14/10/2026,08:30:00,0,OS Tech-Gold
+15/10/2026,08:30:00,3,OS Tech-Gold
+16/10/2026,08:30:00,0,OS Tech-Gold
+17/10/2026,08:30:00,0,OS Tech-Gold
+18/10/2026,08:30:00,2,OS Tech-Gold
+19/10/2026,08:30:00,1,OS Tech-Gold
+20/10/2026,08:30:00,0,OS Tech-Gold
+21/10/2026,08:30:00,0,OS Tech-Gold
+22/10/2026,08:30:00,1,OS Tech-Gold
+23/10/2026,08:30:00,1,OS Tech-Gold
+24/10/2026,08:30:00,1,OS Tech-Gold
+25/10/2026,08:30:00,2,OS Tech-Gold
+26/10/2026,08:30:00,1,OS Tech-Gold
+27/10/2026,08:30:00,0,OS Tech-Gold
+28/10/2026,08:30:00,1,OS Tech-Gold
+29/10/2026,08:30:00,5,OS Tech-Gold
+30/10/2026,08:30:00,1,OS Tech-Gold
+31/10/2026,08:30:00,0,OS Tech-Gold
+01/10/2026,09:00:00,2,OS Tech-Gold
+02/10/2026,09:00:00,2,OS Tech-Gold
+03/10/2026,09:00:00,3,OS Tech-Gold
+04/10/2026,09:00:00,2,OS Tech-Gold
+05/10/2026,09:00:00,1,OS Tech-Gold
+06/10/2026,09:00:00,4,OS Tech-Gold
+07/10/2026,09:00:00,3,OS Tech-Gold
+08/10/2026,09:00:00,4,OS Tech-Gold
+09/10/2026,09:00:00,0,OS Tech-Gold
+10/10/2026,09:00:00,0,OS Tech-Gold
+11/10/2026,09:00:00,1,OS Tech-Gold
+12/10/2026,09:00:00,0,OS Tech-Gold
+13/10/2026,09:00:00,2,OS Tech-Gold
+14/10/2026,09:00:00,4,OS Tech-Gold
+15/10/2026,09:00:00,0,OS Tech-Gold
+16/10/2026,09:00:00,3,OS Tech-Gold
+17/10/2026,09:00:00,2,OS Tech-Gold
+18/10/2026,09:00:00,2,OS Tech-Gold
+19/10/2026,09:00:00,2,OS Tech-Gold
+20/10/2026,09:00:00,0,OS Tech-Gold
+21/10/2026,09:00:00,1,OS Tech-Gold
+22/10/2026,09:00:00,2,OS Tech-Gold
+23/10/2026,09:00:00,1,OS Tech-Gold
+24/10/2026,09:00:00,1,OS Tech-Gold
+25/10/2026,09:00:00,3,OS Tech-Gold
+26/10/2026,09:00:00,3,OS Tech-Gold
+27/10/2026,09:00:00,1,OS Tech-Gold
+28/10/2026,09:00:00,3,OS Tech-Gold
+29/10/2026,09:00:00,1,OS Tech-Gold
+30/10/2026,09:00:00,1,OS Tech-Gold
+31/10/2026,09:00:00,0,OS Tech-Gold
+01/10/2026,09:30:00,2,OS Tech-Gold
+02/10/2026,09:30:00,1,OS Tech-Gold
+03/10/2026,09:30:00,0,OS Tech-Gold
+04/10/2026,09:30:00,5,OS Tech-Gold
+05/10/2026,09:30:00,1,OS Tech-Gold
+06/10/2026,09:30:00,1,OS Tech-Gold
+07/10/2026,09:30:00,5,OS Tech-Gold
+08/10/2026,09:30:00,4,OS Tech-Gold
+09/10/2026,09:30:00,1,OS Tech-Gold
+10/10/2026,09:30:00,3,OS Tech-Gold
+11/10/2026,09:30:00,4,OS Tech-Gold
+12/10/2026,09:30:00,1,OS Tech-Gold
+13/10/2026,09:30:00,4,OS Tech-Gold
+14/10/2026,09:30:00,0,OS Tech-Gold
+15/10/2026,09:30:00,2,OS Tech-Gold
+16/10/2026,09:30:00,3,OS Tech-Gold
+17/10/2026,09:30:00,2,OS Tech-Gold
+18/10/2026,09:30:00,0,OS Tech-Gold
+19/10/2026,09:30:00,1,OS Tech-Gold
+20/10/2026,09:30:00,0,OS Tech-Gold
+21/10/2026,09:30:00,3,OS Tech-Gold
+22/10/2026,09:30:00,2,OS Tech-Gold
+23/10/2026,09:30:00,0,OS Tech-Gold
+24/10/2026,09:30:00,3,OS Tech-Gold
+25/10/2026,09:30:00,2,OS Tech-Gold
+26/10/2026,09:30:00,1,OS Tech-Gold
+27/10/2026,09:30:00,1,OS Tech-Gold
+28/10/2026,09:30:00,1,OS Tech-Gold
+29/10/2026,09:30:00,2,OS Tech-Gold
+30/10/2026,09:30:00,1,OS Tech-Gold
+31/10/2026,09:30:00,4,OS Tech-Gold
+01/10/2026,10:00:00,4,OS Tech-Gold
+02/10/2026,10:00:00,0,OS Tech-Gold
+03/10/2026,10:00:00,1,OS Tech-Gold
+04/10/2026,10:00:00,3,OS Tech-Gold
+05/10/2026,10:00:00,3,OS Tech-Gold
+06/10/2026,10:00:00,0,OS Tech-Gold
+07/10/2026,10:00:00,3,OS Tech-Gold
+08/10/2026,10:00:00,0,OS Tech-Gold
+09/10/2026,10:00:00,3,OS Tech-Gold
+10/10/2026,10:00:00,1,OS Tech-Gold
+11/10/2026,10:00:00,1,OS Tech-Gold
+12/10/2026,10:00:00,1,OS Tech-Gold
+13/10/2026,10:00:00,2,OS Tech-Gold
+14/10/2026,10:00:00,3,OS Tech-Gold
+15/10/2026,10:00:00,5,OS Tech-Gold
+16/10/2026,10:00:00,0,OS Tech-Gold
+17/10/2026,10:00:00,2,OS Tech-Gold
+18/10/2026,10:00:00,3,OS Tech-Gold
+19/10/2026,10:00:00,2,OS Tech-Gold
+20/10/2026,10:00:00,0,OS Tech-Gold
+21/10/2026,10:00:00,1,OS Tech-Gold
+22/10/2026,10:00:00,1,OS Tech-Gold
+23/10/2026,10:00:00,0,OS Tech-Gold
+24/10/2026,10:00:00,1,OS Tech-Gold
+25/10/2026,10:00:00,0,OS Tech-Gold
+26/10/2026,10:00:00,1,OS Tech-Gold
+27/10/2026,10:00:00,3,OS Tech-Gold
+28/10/2026,10:00:00,8,OS Tech-Gold
+29/10/2026,10:00:00,2,OS Tech-Gold
+30/10/2026,10:00:00,0,OS Tech-Gold
+31/10/2026,10:00:00,5,OS Tech-Gold
+01/10/2026,10:30:00,8,OS Tech-Gold
+02/10/2026,10:30:00,2,OS Tech-Gold
+03/10/2026,10:30:00,6,OS Tech-Gold
+04/10/2026,10:30:00,6,OS Tech-Gold
+05/10/2026,10:30:00,1,OS Tech-Gold
+06/10/2026,10:30:00,4,OS Tech-Gold
+07/10/2026,10:30:00,6,OS Tech-Gold
+08/10/2026,10:30:00,9,OS Tech-Gold
+09/10/2026,10:30:00,1,OS Tech-Gold
+10/10/2026,10:30:00,6,OS Tech-Gold
+11/10/2026,10:30:00,8,OS Tech-Gold
+12/10/2026,10:30:00,4,OS Tech-Gold
+13/10/2026,10:30:00,2,OS Tech-Gold
+14/10/2026,10:30:00,3,OS Tech-Gold
+15/10/2026,10:30:00,0,OS Tech-Gold
+16/10/2026,10:30:00,4,OS Tech-Gold
+17/10/2026,10:30:00,4,OS Tech-Gold
+18/10/2026,10:30:00,0,OS Tech-Gold
+19/10/2026,10:30:00,1,OS Tech-Gold
+20/10/2026,10:30:00,1,OS Tech-Gold
+21/10/2026,10:30:00,9,OS Tech-Gold
+22/10/2026,10:30:00,4,OS Tech-Gold
+23/10/2026,10:30:00,4,OS Tech-Gold
+24/10/2026,10:30:00,3,OS Tech-Gold
+25/10/2026,10:30:00,2,OS Tech-Gold
+26/10/2026,10:30:00,6,OS Tech-Gold
+27/10/2026,10:30:00,0,OS Tech-Gold
+28/10/2026,10:30:00,3,OS Tech-Gold
+29/10/2026,10:30:00,1,OS Tech-Gold
+30/10/2026,10:30:00,3,OS Tech-Gold
+31/10/2026,10:30:00,1,OS Tech-Gold
+01/10/2026,11:00:00,5,OS Tech-Gold
+02/10/2026,11:00:00,7,OS Tech-Gold
+03/10/2026,11:00:00,0,OS Tech-Gold
+04/10/2026,11:00:00,2,OS Tech-Gold
+05/10/2026,11:00:00,4,OS Tech-Gold
+06/10/2026,11:00:00,4,OS Tech-Gold
+07/10/2026,11:00:00,5,OS Tech-Gold
+08/10/2026,11:00:00,4,OS Tech-Gold
+09/10/2026,11:00:00,1,OS Tech-Gold
+10/10/2026,11:00:00,5,OS Tech-Gold
+11/10/2026,11:00:00,1,OS Tech-Gold
+12/10/2026,11:00:00,5,OS Tech-Gold
+13/10/2026,11:00:00,2,OS Tech-Gold
+14/10/2026,11:00:00,4,OS Tech-Gold
+15/10/2026,11:00:00,5,OS Tech-Gold
+16/10/2026,11:00:00,1,OS Tech-Gold
+17/10/2026,11:00:00,1,OS Tech-Gold
+18/10/2026,11:00:00,5,OS Tech-Gold
+19/10/2026,11:00:00,4,OS Tech-Gold
+20/10/2026,11:00:00,7,OS Tech-Gold
+21/10/2026,11:00:00,7,OS Tech-Gold
+22/10/2026,11:00:00,5,OS Tech-Gold
+23/10/2026,11:00:00,4,OS Tech-Gold
+24/10/2026,11:00:00,4,OS Tech-Gold
+25/10/2026,11:00:00,5,OS Tech-Gold
+26/10/2026,11:00:00,4,OS Tech-Gold
+27/10/2026,11:00:00,3,OS Tech-Gold
+28/10/2026,11:00:00,7,OS Tech-Gold
+29/10/2026,11:00:00,0,OS Tech-Gold
+30/10/2026,11:00:00,1,OS Tech-Gold
+31/10/2026,11:00:00,4,OS Tech-Gold
+01/10/2026,11:30:00,4,OS Tech-Gold
+02/10/2026,11:30:00,3,OS Tech-Gold
+03/10/2026,11:30:00,3,OS Tech-Gold
+04/10/2026,11:30:00,6,OS Tech-Gold
+05/10/2026,11:30:00,6,OS Tech-Gold
+06/10/2026,11:30:00,4,OS Tech-Gold
+07/10/2026,11:30:00,3,OS Tech-Gold
+08/10/2026,11:30:00,7,OS Tech-Gold
+09/10/2026,11:30:00,11,OS Tech-Gold
+10/10/2026,11:30:00,4,OS Tech-Gold
+11/10/2026,11:30:00,9,OS Tech-Gold
+12/10/2026,11:30:00,4,OS Tech-Gold
+13/10/2026,11:30:00,1,OS Tech-Gold
+14/10/2026,11:30:00,4,OS Tech-Gold
+15/10/2026,11:30:00,2,OS Tech-Gold
+16/10/2026,11:30:00,3,OS Tech-Gold
+17/10/2026,11:30:00,1,OS Tech-Gold
+18/10/2026,11:30:00,3,OS Tech-Gold
+19/10/2026,11:30:00,2,OS Tech-Gold
+20/10/2026,11:30:00,3,OS Tech-Gold
+21/10/2026,11:30:00,7,OS Tech-Gold
+22/10/2026,11:30:00,5,OS Tech-Gold
+23/10/2026,11:30:00,1,OS Tech-Gold
+24/10/2026,11:30:00,1,OS Tech-Gold
+25/10/2026,11:30:00,5,OS Tech-Gold
+26/10/2026,11:30:00,4,OS Tech-Gold
+27/10/2026,11:30:00,3,OS Tech-Gold
+28/10/2026,11:30:00,1,OS Tech-Gold
+29/10/2026,11:30:00,2,OS Tech-Gold
+30/10/2026,11:30:00,4,OS Tech-Gold
+31/10/2026,11:30:00,2,OS Tech-Gold
+01/10/2026,12:00:00,7,OS Tech-Gold
+02/10/2026,12:00:00,6,OS Tech-Gold
+03/10/2026,12:00:00,0,OS Tech-Gold
+04/10/2026,12:00:00,3,OS Tech-Gold
+05/10/2026,12:00:00,6,OS Tech-Gold
+06/10/2026,12:00:00,8,OS Tech-Gold
+07/10/2026,12:00:00,4,OS Tech-Gold
+08/10/2026,12:00:00,5,OS Tech-Gold
+09/10/2026,12:00:00,1,OS Tech-Gold
+10/10/2026,12:00:00,4,OS Tech-Gold
+11/10/2026,12:00:00,6,OS Tech-Gold
+12/10/2026,12:00:00,9,OS Tech-Gold
+13/10/2026,12:00:00,2,OS Tech-Gold
+14/10/2026,12:00:00,5,OS Tech-Gold
+15/10/2026,12:00:00,6,OS Tech-Gold
+16/10/2026,12:00:00,1,OS Tech-Gold
+17/10/2026,12:00:00,4,OS Tech-Gold
+18/10/2026,12:00:00,3,OS Tech-Gold
+19/10/2026,12:00:00,2,OS Tech-Gold
+20/10/2026,12:00:00,1,OS Tech-Gold
+21/10/2026,12:00:00,4,OS Tech-Gold
+22/10/2026,12:00:00,2,OS Tech-Gold
+23/10/2026,12:00:00,3,OS Tech-Gold
+24/10/2026,12:00:00,4,OS Tech-Gold
+25/10/2026,12:00:00,2,OS Tech-Gold
+26/10/2026,12:00:00,4,OS Tech-Gold
+27/10/2026,12:00:00,3,OS Tech-Gold
+28/10/2026,12:00:00,1,OS Tech-Gold
+29/10/2026,12:00:00,5,OS Tech-Gold
+30/10/2026,12:00:00,3,OS Tech-Gold
+31/10/2026,12:00:00,2,OS Tech-Gold
+01/10/2026,12:30:00,4,OS Tech-Gold
+02/10/2026,12:30:00,3,OS Tech-Gold
+03/10/2026,12:30:00,4,OS Tech-Gold
+04/10/2026,12:30:00,2,OS Tech-Gold
+05/10/2026,12:30:00,3,OS Tech-Gold
+06/10/2026,12:30:00,10,OS Tech-Gold
+07/10/2026,12:30:00,6,OS Tech-Gold
+08/10/2026,12:30:00,11,OS Tech-Gold
+09/10/2026,12:30:00,3,OS Tech-Gold
+10/10/2026,12:30:00,1,OS Tech-Gold
+11/10/2026,12:30:00,1,OS Tech-Gold
+12/10/2026,12:30:00,5,OS Tech-Gold
+13/10/2026,12:30:00,2,OS Tech-Gold
+14/10/2026,12:30:00,7,OS Tech-Gold
+15/10/2026,12:30:00,5,OS Tech-Gold
+16/10/2026,12:30:00,9,OS Tech-Gold
+17/10/2026,12:30:00,5,OS Tech-Gold
+18/10/2026,12:30:00,5,OS Tech-Gold
+19/10/2026,12:30:00,1,OS Tech-Gold
+20/10/2026,12:30:00,3,OS Tech-Gold
+21/10/2026,12:30:00,3,OS Tech-Gold
+22/10/2026,12:30:00,4,OS Tech-Gold
+23/10/2026,12:30:00,0,OS Tech-Gold
+24/10/2026,12:30:00,1,OS Tech-Gold
+25/10/2026,12:30:00,8,OS Tech-Gold
+26/10/2026,12:30:00,4,OS Tech-Gold
+27/10/2026,12:30:00,1,OS Tech-Gold
+28/10/2026,12:30:00,7,OS Tech-Gold
+29/10/2026,12:30:00,2,OS Tech-Gold
+30/10/2026,12:30:00,5,OS Tech-Gold
+31/10/2026,12:30:00,4,OS Tech-Gold
+01/10/2026,13:00:00,4,OS Tech-Gold
+02/10/2026,13:00:00,2,OS Tech-Gold
+03/10/2026,13:00:00,7,OS Tech-Gold
+04/10/2026,13:00:00,2,OS Tech-Gold
+05/10/2026,13:00:00,0,OS Tech-Gold
+06/10/2026,13:00:00,5,OS Tech-Gold
+07/10/2026,13:00:00,4,OS Tech-Gold
+08/10/2026,13:00:00,5,OS Tech-Gold
+09/10/2026,13:00:00,7,OS Tech-Gold
+10/10/2026,13:00:00,1,OS Tech-Gold
+11/10/2026,13:00:00,8,OS Tech-Gold
+12/10/2026,13:00:00,5,OS Tech-Gold
+13/10/2026,13:00:00,4,OS Tech-Gold
+14/10/2026,13:00:00,5,OS Tech-Gold
+15/10/2026,13:00:00,3,OS Tech-Gold
+16/10/2026,13:00:00,1,OS Tech-Gold
+17/10/2026,13:00:00,1,OS Tech-Gold
+18/10/2026,13:00:00,3,OS Tech-Gold
+19/10/2026,13:00:00,2,OS Tech-Gold
+20/10/2026,13:00:00,3,OS Tech-Gold
+21/10/2026,13:00:00,4,OS Tech-Gold
+22/10/2026,13:00:00,2,OS Tech-Gold
+23/10/2026,13:00:00,4,OS Tech-Gold
+24/10/2026,13:00:00,0,OS Tech-Gold
+25/10/2026,13:00:00,5,OS Tech-Gold
+26/10/2026,13:00:00,0,OS Tech-Gold
+27/10/2026,13:00:00,6,OS Tech-Gold
+28/10/2026,13:00:00,6,OS Tech-Gold
+29/10/2026,13:00:00,5,OS Tech-Gold
+30/10/2026,13:00:00,2,OS Tech-Gold
+31/10/2026,13:00:00,2,OS Tech-Gold
+01/10/2026,13:30:00,8,OS Tech-Gold
+02/10/2026,13:30:00,0,OS Tech-Gold
+03/10/2026,13:30:00,1,OS Tech-Gold
+04/10/2026,13:30:00,6,OS Tech-Gold
+05/10/2026,13:30:00,7,OS Tech-Gold
+06/10/2026,13:30:00,6,OS Tech-Gold
+07/10/2026,13:30:00,10,OS Tech-Gold
+08/10/2026,13:30:00,2,OS Tech-Gold
+09/10/2026,13:30:00,5,OS Tech-Gold
+10/10/2026,13:30:00,5,OS Tech-Gold
+11/10/2026,13:30:00,1,OS Tech-Gold
+12/10/2026,13:30:00,11,OS Tech-Gold
+13/10/2026,13:30:00,6,OS Tech-Gold
+14/10/2026,13:30:00,4,OS Tech-Gold
+15/10/2026,13:30:00,6,OS Tech-Gold
+16/10/2026,13:30:00,0,OS Tech-Gold
+17/10/2026,13:30:00,1,OS Tech-Gold
+18/10/2026,13:30:00,2,OS Tech-Gold
+19/10/2026,13:30:00,2,OS Tech-Gold
+20/10/2026,13:30:00,1,OS Tech-Gold
+21/10/2026,13:30:00,3,OS Tech-Gold
+22/10/2026,13:30:00,2,OS Tech-Gold
+23/10/2026,13:30:00,4,OS Tech-Gold
+24/10/2026,13:30:00,8,OS Tech-Gold
+25/10/2026,13:30:00,2,OS Tech-Gold
+26/10/2026,13:30:00,1,OS Tech-Gold
+27/10/2026,13:30:00,5,OS Tech-Gold
+28/10/2026,13:30:00,0,OS Tech-Gold
+29/10/2026,13:30:00,2,OS Tech-Gold
+30/10/2026,13:30:00,4,OS Tech-Gold
+31/10/2026,13:30:00,10,OS Tech-Gold
+01/10/2026,14:00:00,3,OS Tech-Gold
+02/10/2026,14:00:00,5,OS Tech-Gold
+03/10/2026,14:00:00,6,OS Tech-Gold
+04/10/2026,14:00:00,2,OS Tech-Gold
+05/10/2026,14:00:00,4,OS Tech-Gold
+06/10/2026,14:00:00,5,OS Tech-Gold
+07/10/2026,14:00:00,6,OS Tech-Gold
+08/10/2026,14:00:00,7,OS Tech-Gold
+09/10/2026,14:00:00,1,OS Tech-Gold
+10/10/2026,14:00:00,4,OS Tech-Gold
+11/10/2026,14:00:00,1,OS Tech-Gold
+12/10/2026,14:00:00,0,OS Tech-Gold
+13/10/2026,14:00:00,6,OS Tech-Gold
+14/10/2026,14:00:00,0,OS Tech-Gold
+15/10/2026,14:00:00,3,OS Tech-Gold
+16/10/2026,14:00:00,4,OS Tech-Gold
+17/10/2026,14:00:00,7,OS Tech-Gold
+18/10/2026,14:00:00,5,OS Tech-Gold
+19/10/2026,14:00:00,5,OS Tech-Gold
+20/10/2026,14:00:00,3,OS Tech-Gold
+21/10/2026,14:00:00,6,OS Tech-Gold
+22/10/2026,14:00:00,0,OS Tech-Gold
+23/10/2026,14:00:00,7,OS Tech-Gold
+24/10/2026,14:00:00,1,OS Tech-Gold
+25/10/2026,14:00:00,5,OS Tech-Gold
+26/10/2026,14:00:00,3,OS Tech-Gold
+27/10/2026,14:00:00,4,OS Tech-Gold
+28/10/2026,14:00:00,0,OS Tech-Gold
+29/10/2026,14:00:00,5,OS Tech-Gold
+30/10/2026,14:00:00,3,OS Tech-Gold
+31/10/2026,14:00:00,0,OS Tech-Gold
+01/10/2026,14:30:00,2,OS Tech-Gold
+02/10/2026,14:30:00,3,OS Tech-Gold
+03/10/2026,14:30:00,4,OS Tech-Gold
+04/10/2026,14:30:00,5,OS Tech-Gold
+05/10/2026,14:30:00,4,OS Tech-Gold
+06/10/2026,14:30:00,6,OS Tech-Gold
+07/10/2026,14:30:00,4,OS Tech-Gold
+08/10/2026,14:30:00,9,OS Tech-Gold
+09/10/2026,14:30:00,1,OS Tech-Gold
+10/10/2026,14:30:00,5,OS Tech-Gold
+11/10/2026,14:30:00,4,OS Tech-Gold
+12/10/2026,14:30:00,5,OS Tech-Gold
+13/10/2026,14:30:00,6,OS Tech-Gold
+14/10/2026,14:30:00,4,OS Tech-Gold
+15/10/2026,14:30:00,3,OS Tech-Gold
+16/10/2026,14:30:00,3,OS Tech-Gold
+17/10/2026,14:30:00,2,OS Tech-Gold
+18/10/2026,14:30:00,2,OS Tech-Gold
+19/10/2026,14:30:00,4,OS Tech-Gold
+20/10/2026,14:30:00,4,OS Tech-Gold
+21/10/2026,14:30:00,3,OS Tech-Gold
+22/10/2026,14:30:00,7,OS Tech-Gold
+23/10/2026,14:30:00,5,OS Tech-Gold
+24/10/2026,14:30:00,5,OS Tech-Gold
+25/10/2026,14:30:00,8,OS Tech-Gold
+26/10/2026,14:30:00,1,OS Tech-Gold
+27/10/2026,14:30:00,5,OS Tech-Gold
+28/10/2026,14:30:00,6,OS Tech-Gold
+29/10/2026,14:30:00,2,OS Tech-Gold
+30/10/2026,14:30:00,7,OS Tech-Gold
+31/10/2026,14:30:00,4,OS Tech-Gold
+01/10/2026,15:00:00,2,OS Tech-Gold
+02/10/2026,15:00:00,5,OS Tech-Gold
+03/10/2026,15:00:00,1,OS Tech-Gold
+04/10/2026,15:00:00,5,OS Tech-Gold
+05/10/2026,15:00:00,4,OS Tech-Gold
+06/10/2026,15:00:00,6,OS Tech-Gold
+07/10/2026,15:00:00,4,OS Tech-Gold
+08/10/2026,15:00:00,4,OS Tech-Gold
+09/10/2026,15:00:00,3,OS Tech-Gold
+10/10/2026,15:00:00,5,OS Tech-Gold
+11/10/2026,15:00:00,3,OS Tech-Gold
+12/10/2026,15:00:00,1,OS Tech-Gold
+13/10/2026,15:00:00,4,OS Tech-Gold
+14/10/2026,15:00:00,5,OS Tech-Gold
+15/10/2026,15:00:00,8,OS Tech-Gold
+16/10/2026,15:00:00,0,OS Tech-Gold
+17/10/2026,15:00:00,6,OS Tech-Gold
+18/10/2026,15:00:00,2,OS Tech-Gold
+19/10/2026,15:00:00,1,OS Tech-Gold
+20/10/2026,15:00:00,5,OS Tech-Gold
+21/10/2026,15:00:00,3,OS Tech-Gold
+22/10/2026,15:00:00,7,OS Tech-Gold
+23/10/2026,15:00:00,1,OS Tech-Gold
+24/10/2026,15:00:00,5,OS Tech-Gold
+25/10/2026,15:00:00,2,OS Tech-Gold
+26/10/2026,15:00:00,7,OS Tech-Gold
+27/10/2026,15:00:00,3,OS Tech-Gold
+28/10/2026,15:00:00,1,OS Tech-Gold
+29/10/2026,15:00:00,5,OS Tech-Gold
+30/10/2026,15:00:00,2,OS Tech-Gold
+31/10/2026,15:00:00,2,OS Tech-Gold
+01/10/2026,15:30:00,6,OS Tech-Gold
+02/10/2026,15:30:00,6,OS Tech-Gold
+03/10/2026,15:30:00,7,OS Tech-Gold
+04/10/2026,15:30:00,9,OS Tech-Gold
+05/10/2026,15:30:00,4,OS Tech-Gold
+06/10/2026,15:30:00,8,OS Tech-Gold
+07/10/2026,15:30:00,4,OS Tech-Gold
+08/10/2026,15:30:00,7,OS Tech-Gold
+09/10/2026,15:30:00,8,OS Tech-Gold
+10/10/2026,15:30:00,4,OS Tech-Gold
+11/10/2026,15:30:00,1,OS Tech-Gold
+12/10/2026,15:30:00,5,OS Tech-Gold
+13/10/2026,15:30:00,4,OS Tech-Gold
+14/10/2026,15:30:00,5,OS Tech-Gold
+15/10/2026,15:30:00,3,OS Tech-Gold
+16/10/2026,15:30:00,4,OS Tech-Gold
+17/10/2026,15:30:00,5,OS Tech-Gold
+18/10/2026,15:30:00,2,OS Tech-Gold
+19/10/2026,15:30:00,7,OS Tech-Gold
+20/10/2026,15:30:00,5,OS Tech-Gold
+21/10/2026,15:30:00,4,OS Tech-Gold
+22/10/2026,15:30:00,1,OS Tech-Gold
+23/10/2026,15:30:00,3,OS Tech-Gold
+24/10/2026,15:30:00,1,OS Tech-Gold
+25/10/2026,15:30:00,5,OS Tech-Gold
+26/10/2026,15:30:00,4,OS Tech-Gold
+27/10/2026,15:30:00,13,OS Tech-Gold
+28/10/2026,15:30:00,6,OS Tech-Gold
+29/10/2026,15:30:00,5,OS Tech-Gold
+30/10/2026,15:30:00,7,OS Tech-Gold
+31/10/2026,15:30:00,4,OS Tech-Gold
+01/10/2026,16:00:00,7,OS Tech-Gold
+02/10/2026,16:00:00,9,OS Tech-Gold
+03/10/2026,16:00:00,4,OS Tech-Gold
+04/10/2026,16:00:00,9,OS Tech-Gold
+05/10/2026,16:00:00,4,OS Tech-Gold
+06/10/2026,16:00:00,3,OS Tech-Gold
+07/10/2026,16:00:00,0,OS Tech-Gold
+08/10/2026,16:00:00,11,OS Tech-Gold
+09/10/2026,16:00:00,5,OS Tech-Gold
+10/10/2026,16:00:00,5,OS Tech-Gold
+11/10/2026,16:00:00,3,OS Tech-Gold
+12/10/2026,16:00:00,5,OS Tech-Gold
+13/10/2026,16:00:00,9,OS Tech-Gold
+14/10/2026,16:00:00,1,OS Tech-Gold
+15/10/2026,16:00:00,6,OS Tech-Gold
+16/10/2026,16:00:00,1,OS Tech-Gold
+17/10/2026,16:00:00,6,OS Tech-Gold
+18/10/2026,16:00:00,5,OS Tech-Gold
+19/10/2026,16:00:00,5,OS Tech-Gold
+20/10/2026,16:00:00,10,OS Tech-Gold
+21/10/2026,16:00:00,1,OS Tech-Gold
+22/10/2026,16:00:00,0,OS Tech-Gold
+23/10/2026,16:00:00,3,OS Tech-Gold
+24/10/2026,16:00:00,8,OS Tech-Gold
+25/10/2026,16:00:00,6,OS Tech-Gold
+26/10/2026,16:00:00,4,OS Tech-Gold
+27/10/2026,16:00:00,0,OS Tech-Gold
+28/10/2026,16:00:00,0,OS Tech-Gold
+29/10/2026,16:00:00,4,OS Tech-Gold
+30/10/2026,16:00:00,4,OS Tech-Gold
+31/10/2026,16:00:00,0,OS Tech-Gold
+01/10/2026,16:30:00,2,OS Tech-Gold
+02/10/2026,16:30:00,10,OS Tech-Gold
+03/10/2026,16:30:00,9,OS Tech-Gold
+04/10/2026,16:30:00,3,OS Tech-Gold
+05/10/2026,16:30:00,7,OS Tech-Gold
+06/10/2026,16:30:00,5,OS Tech-Gold
+07/10/2026,16:30:00,5,OS Tech-Gold
+08/10/2026,16:30:00,4,OS Tech-Gold
+09/10/2026,16:30:00,4,OS Tech-Gold
+10/10/2026,16:30:00,3,OS Tech-Gold
+11/10/2026,16:30:00,3,OS Tech-Gold
+12/10/2026,16:30:00,5,OS Tech-Gold
+13/10/2026,16:30:00,2,OS Tech-Gold
+14/10/2026,16:30:00,4,OS Tech-Gold
+15/10/2026,16:30:00,2,OS Tech-Gold
+16/10/2026,16:30:00,5,OS Tech-Gold
+17/10/2026,16:30:00,2,OS Tech-Gold
+18/10/2026,16:30:00,3,OS Tech-Gold
+19/10/2026,16:30:00,5,OS Tech-Gold
+20/10/2026,16:30:00,5,OS Tech-Gold
+21/10/2026,16:30:00,7,OS Tech-Gold
+22/10/2026,16:30:00,5,OS Tech-Gold
+23/10/2026,16:30:00,4,OS Tech-Gold
+24/10/2026,16:30:00,3,OS Tech-Gold
+25/10/2026,16:30:00,5,OS Tech-Gold
+26/10/2026,16:30:00,1,OS Tech-Gold
+27/10/2026,16:30:00,1,OS Tech-Gold
+28/10/2026,16:30:00,3,OS Tech-Gold
+29/10/2026,16:30:00,1,OS Tech-Gold
+30/10/2026,16:30:00,5,OS Tech-Gold
+31/10/2026,16:30:00,1,OS Tech-Gold
+01/10/2026,17:00:00,3,OS Tech-Gold
+02/10/2026,17:00:00,7,OS Tech-Gold
+03/10/2026,17:00:00,9,OS Tech-Gold
+04/10/2026,17:00:00,2,OS Tech-Gold
+05/10/2026,17:00:00,3,OS Tech-Gold
+06/10/2026,17:00:00,8,OS Tech-Gold
+07/10/2026,17:00:00,1,OS Tech-Gold
+08/10/2026,17:00:00,5,OS Tech-Gold
+09/10/2026,17:00:00,3,OS Tech-Gold
+10/10/2026,17:00:00,1,OS Tech-Gold
+11/10/2026,17:00:00,6,OS Tech-Gold
+12/10/2026,17:00:00,1,OS Tech-Gold
+13/10/2026,17:00:00,4,OS Tech-Gold
+14/10/2026,17:00:00,4,OS Tech-Gold
+15/10/2026,17:00:00,0,OS Tech-Gold
+16/10/2026,17:00:00,4,OS Tech-Gold
+17/10/2026,17:00:00,1,OS Tech-Gold
+18/10/2026,17:00:00,5,OS Tech-Gold
+19/10/2026,17:00:00,4,OS Tech-Gold
+20/10/2026,17:00:00,1,OS Tech-Gold
+21/10/2026,17:00:00,3,OS Tech-Gold
+22/10/2026,17:00:00,1,OS Tech-Gold
+23/10/2026,17:00:00,0,OS Tech-Gold
+24/10/2026,17:00:00,8,OS Tech-Gold
+25/10/2026,17:00:00,2,OS Tech-Gold
+26/10/2026,17:00:00,3,OS Tech-Gold
+27/10/2026,17:00:00,4,OS Tech-Gold
+28/10/2026,17:00:00,4,OS Tech-Gold
+29/10/2026,17:00:00,4,OS Tech-Gold
+30/10/2026,17:00:00,10,OS Tech-Gold
+31/10/2026,17:00:00,7,OS Tech-Gold
+01/10/2026,17:30:00,6,OS Tech-Gold
+02/10/2026,17:30:00,2,OS Tech-Gold
+03/10/2026,17:30:00,1,OS Tech-Gold
+04/10/2026,17:30:00,2,OS Tech-Gold
+05/10/2026,17:30:00,0,OS Tech-Gold
+06/10/2026,17:30:00,9,OS Tech-Gold
+07/10/2026,17:30:00,4,OS Tech-Gold
+08/10/2026,17:30:00,13,OS Tech-Gold
+09/10/2026,17:30:00,1,OS Tech-Gold
+10/10/2026,17:30:00,6,OS Tech-Gold
+11/10/2026,17:30:00,4,OS Tech-Gold
+12/10/2026,17:30:00,1,OS Tech-Gold
+13/10/2026,17:30:00,6,OS Tech-Gold
+14/10/2026,17:30:00,3,OS Tech-Gold
+15/10/2026,17:30:00,3,OS Tech-Gold
+16/10/2026,17:30:00,5,OS Tech-Gold
+17/10/2026,17:30:00,2,OS Tech-Gold
+18/10/2026,17:30:00,2,OS Tech-Gold
+19/10/2026,17:30:00,0,OS Tech-Gold
+20/10/2026,17:30:00,7,OS Tech-Gold
+21/10/2026,17:30:00,1,OS Tech-Gold
+22/10/2026,17:30:00,5,OS Tech-Gold
+23/10/2026,17:30:00,4,OS Tech-Gold
+24/10/2026,17:30:00,3,OS Tech-Gold
+25/10/2026,17:30:00,0,OS Tech-Gold
+26/10/2026,17:30:00,4,OS Tech-Gold
+27/10/2026,17:30:00,1,OS Tech-Gold
+28/10/2026,17:30:00,1,OS Tech-Gold
+29/10/2026,17:30:00,4,OS Tech-Gold
+30/10/2026,17:30:00,2,OS Tech-Gold
+31/10/2026,17:30:00,0,OS Tech-Gold
+01/10/2026,18:00:00,3,OS Tech-Gold
+02/10/2026,18:00:00,5,OS Tech-Gold
+03/10/2026,18:00:00,6,OS Tech-Gold
+04/10/2026,18:00:00,2,OS Tech-Gold
+05/10/2026,18:00:00,9,OS Tech-Gold
+06/10/2026,18:00:00,1,OS Tech-Gold
+07/10/2026,18:00:00,4,OS Tech-Gold
+08/10/2026,18:00:00,9,OS Tech-Gold
+09/10/2026,18:00:00,7,OS Tech-Gold
+10/10/2026,18:00:00,11,OS Tech-Gold
+11/10/2026,18:00:00,3,OS Tech-Gold
+12/10/2026,18:00:00,7,OS Tech-Gold
+13/10/2026,18:00:00,0,OS Tech-Gold
+14/10/2026,18:00:00,3,OS Tech-Gold
+15/10/2026,18:00:00,5,OS Tech-Gold
+16/10/2026,18:00:00,5,OS Tech-Gold
+17/10/2026,18:00:00,6,OS Tech-Gold
+18/10/2026,18:00:00,5,OS Tech-Gold
+19/10/2026,18:00:00,2,OS Tech-Gold
+20/10/2026,18:00:00,4,OS Tech-Gold
+21/10/2026,18:00:00,9,OS Tech-Gold
+22/10/2026,18:00:00,6,OS Tech-Gold
+23/10/2026,18:00:00,3,OS Tech-Gold
+24/10/2026,18:00:00,4,OS Tech-Gold
+25/10/2026,18:00:00,3,OS Tech-Gold
+26/10/2026,18:00:00,1,OS Tech-Gold
+27/10/2026,18:00:00,5,OS Tech-Gold
+28/10/2026,18:00:00,1,OS Tech-Gold
+29/10/2026,18:00:00,7,OS Tech-Gold
+30/10/2026,18:00:00,11,OS Tech-Gold
+31/10/2026,18:00:00,7,OS Tech-Gold
+01/10/2026,18:30:00,5,OS Tech-Gold
+02/10/2026,18:30:00,7,OS Tech-Gold
+03/10/2026,18:30:00,7,OS Tech-Gold
+04/10/2026,18:30:00,5,OS Tech-Gold
+05/10/2026,18:30:00,7,OS Tech-Gold
+06/10/2026,18:30:00,4,OS Tech-Gold
+07/10/2026,18:30:00,3,OS Tech-Gold
+08/10/2026,18:30:00,13,OS Tech-Gold
+09/10/2026,18:30:00,7,OS Tech-Gold
+10/10/2026,18:30:00,5,OS Tech-Gold
+11/10/2026,18:30:00,1,OS Tech-Gold
+12/10/2026,18:30:00,7,OS Tech-Gold
+13/10/2026,18:30:00,4,OS Tech-Gold
+14/10/2026,18:30:00,5,OS Tech-Gold
+15/10/2026,18:30:00,3,OS Tech-Gold
+16/10/2026,18:30:00,1,OS Tech-Gold
+17/10/2026,18:30:00,4,OS Tech-Gold
+18/10/2026,18:30:00,3,OS Tech-Gold
+19/10/2026,18:30:00,4,OS Tech-Gold
+20/10/2026,18:30:00,4,OS Tech-Gold
+21/10/2026,18:30:00,4,OS Tech-Gold
+22/10/2026,18:30:00,4,OS Tech-Gold
+23/10/2026,18:30:00,4,OS Tech-Gold
+24/10/2026,18:30:00,3,OS Tech-Gold
+25/10/2026,18:30:00,2,OS Tech-Gold
+26/10/2026,18:30:00,1,OS Tech-Gold
+27/10/2026,18:30:00,4,OS Tech-Gold
+28/10/2026,18:30:00,1,OS Tech-Gold
+29/10/2026,18:30:00,9,OS Tech-Gold
+30/10/2026,18:30:00,7,OS Tech-Gold
+31/10/2026,18:30:00,5,OS Tech-Gold
+01/10/2026,19:00:00,8,OS Tech-Gold
+02/10/2026,19:00:00,5,OS Tech-Gold
+03/10/2026,19:00:00,4,OS Tech-Gold
+04/10/2026,19:00:00,0,OS Tech-Gold
+05/10/2026,19:00:00,1,OS Tech-Gold
+06/10/2026,19:00:00,4,OS Tech-Gold
+07/10/2026,19:00:00,1,OS Tech-Gold
+08/10/2026,19:00:00,4,OS Tech-Gold
+09/10/2026,19:00:00,1,OS Tech-Gold
+10/10/2026,19:00:00,3,OS Tech-Gold
+11/10/2026,19:00:00,3,OS Tech-Gold
+12/10/2026,19:00:00,1,OS Tech-Gold
+13/10/2026,19:00:00,0,OS Tech-Gold
+14/10/2026,19:00:00,3,OS Tech-Gold
+15/10/2026,19:00:00,3,OS Tech-Gold
+16/10/2026,19:00:00,3,OS Tech-Gold
+17/10/2026,19:00:00,4,OS Tech-Gold
+18/10/2026,19:00:00,7,OS Tech-Gold
+19/10/2026,19:00:00,2,OS Tech-Gold
+20/10/2026,19:00:00,10,OS Tech-Gold
+21/10/2026,19:00:00,7,OS Tech-Gold
+22/10/2026,19:00:00,1,OS Tech-Gold
+23/10/2026,19:00:00,1,OS Tech-Gold
+24/10/2026,19:00:00,4,OS Tech-Gold
+25/10/2026,19:00:00,0,OS Tech-Gold
+26/10/2026,19:00:00,1,OS Tech-Gold
+27/10/2026,19:00:00,1,OS Tech-Gold
+28/10/2026,19:00:00,4,OS Tech-Gold
+29/10/2026,19:00:00,2,OS Tech-Gold
+30/10/2026,19:00:00,1,OS Tech-Gold
+31/10/2026,19:00:00,4,OS Tech-Gold
+01/10/2026,19:30:00,2,OS Tech-Gold
+02/10/2026,19:30:00,1,OS Tech-Gold
+03/10/2026,19:30:00,7,OS Tech-Gold
+04/10/2026,19:30:00,0,OS Tech-Gold
+05/10/2026,19:30:00,6,OS Tech-Gold
+06/10/2026,19:30:00,1,OS Tech-Gold
+07/10/2026,19:30:00,4,OS Tech-Gold
+08/10/2026,19:30:00,7,OS Tech-Gold
+09/10/2026,19:30:00,1,OS Tech-Gold
+10/10/2026,19:30:00,4,OS Tech-Gold
+11/10/2026,19:30:00,3,OS Tech-Gold
+12/10/2026,19:30:00,3,OS Tech-Gold
+13/10/2026,19:30:00,2,OS Tech-Gold
+14/10/2026,19:30:00,1,OS Tech-Gold
+15/10/2026,19:30:00,0,OS Tech-Gold
+16/10/2026,19:30:00,3,OS Tech-Gold
+17/10/2026,19:30:00,1,OS Tech-Gold
+18/10/2026,19:30:00,0,OS Tech-Gold
+19/10/2026,19:30:00,1,OS Tech-Gold
+20/10/2026,19:30:00,3,OS Tech-Gold
+21/10/2026,19:30:00,1,OS Tech-Gold
+22/10/2026,19:30:00,6,OS Tech-Gold
+23/10/2026,19:30:00,4,OS Tech-Gold
+24/10/2026,19:30:00,4,OS Tech-Gold
+25/10/2026,19:30:00,5,OS Tech-Gold
+26/10/2026,19:30:00,4,OS Tech-Gold
+27/10/2026,19:30:00,3,OS Tech-Gold
+28/10/2026,19:30:00,3,OS Tech-Gold
+29/10/2026,19:30:00,5,OS Tech-Gold
+30/10/2026,19:30:00,2,OS Tech-Gold
+31/10/2026,19:30:00,10,OS Tech-Gold
+01/10/2026,20:00:00,7,OS Tech-Gold
+02/10/2026,20:00:00,6,OS Tech-Gold
+03/10/2026,20:00:00,3,OS Tech-Gold
+04/10/2026,20:00:00,3,OS Tech-Gold
+05/10/2026,20:00:00,7,OS Tech-Gold
+06/10/2026,20:00:00,3,OS Tech-Gold
+07/10/2026,20:00:00,5,OS Tech-Gold
+08/10/2026,20:00:00,5,OS Tech-Gold
+09/10/2026,20:00:00,4,OS Tech-Gold
+10/10/2026,20:00:00,4,OS Tech-Gold
+11/10/2026,20:00:00,4,OS Tech-Gold
+12/10/2026,20:00:00,3,OS Tech-Gold
+13/10/2026,20:00:00,4,OS Tech-Gold
+14/10/2026,20:00:00,0,OS Tech-Gold
+15/10/2026,20:00:00,5,OS Tech-Gold
+16/10/2026,20:00:00,3,OS Tech-Gold
+17/10/2026,20:00:00,2,OS Tech-Gold
+18/10/2026,20:00:00,3,OS Tech-Gold
+19/10/2026,20:00:00,8,OS Tech-Gold
+20/10/2026,20:00:00,1,OS Tech-Gold
+21/10/2026,20:00:00,3,OS Tech-Gold
+22/10/2026,20:00:00,5,OS Tech-Gold
+23/10/2026,20:00:00,5,OS Tech-Gold
+24/10/2026,20:00:00,3,OS Tech-Gold
+25/10/2026,20:00:00,9,OS Tech-Gold
+26/10/2026,20:00:00,6,OS Tech-Gold
+27/10/2026,20:00:00,4,OS Tech-Gold
+28/10/2026,20:00:00,1,OS Tech-Gold
+29/10/2026,20:00:00,5,OS Tech-Gold
+30/10/2026,20:00:00,5,OS Tech-Gold
+31/10/2026,20:00:00,5,OS Tech-Gold
+01/10/2026,20:30:00,4,OS Tech-Gold
+02/10/2026,20:30:00,3,OS Tech-Gold
+03/10/2026,20:30:00,3,OS Tech-Gold
+04/10/2026,20:30:00,5,OS Tech-Gold
+05/10/2026,20:30:00,1,OS Tech-Gold
+06/10/2026,20:30:00,3,OS Tech-Gold
+07/10/2026,20:30:00,1,OS Tech-Gold
+08/10/2026,20:30:00,7,OS Tech-Gold
+09/10/2026,20:30:00,0,OS Tech-Gold
+10/10/2026,20:30:00,3,OS Tech-Gold
+11/10/2026,20:30:00,5,OS Tech-Gold
+12/10/2026,20:30:00,1,OS Tech-Gold
+13/10/2026,20:30:00,1,OS Tech-Gold
+14/10/2026,20:30:00,3,OS Tech-Gold
+15/10/2026,20:30:00,0,OS Tech-Gold
+16/10/2026,20:30:00,8,OS Tech-Gold
+17/10/2026,20:30:00,4,OS Tech-Gold
+18/10/2026,20:30:00,2,OS Tech-Gold
+19/10/2026,20:30:00,4,OS Tech-Gold
+20/10/2026,20:30:00,7,OS Tech-Gold
+21/10/2026,20:30:00,4,OS Tech-Gold
+22/10/2026,20:30:00,4,OS Tech-Gold
+23/10/2026,20:30:00,0,OS Tech-Gold
+24/10/2026,20:30:00,1,OS Tech-Gold
+25/10/2026,20:30:00,5,OS Tech-Gold
+26/10/2026,20:30:00,1,OS Tech-Gold
+27/10/2026,20:30:00,6,OS Tech-Gold
+28/10/2026,20:30:00,8,OS Tech-Gold
+29/10/2026,20:30:00,1,OS Tech-Gold
+30/10/2026,20:30:00,3,OS Tech-Gold
+31/10/2026,20:30:00,4,OS Tech-Gold
+01/10/2026,21:00:00,4,OS Tech-Gold
+02/10/2026,21:00:00,5,OS Tech-Gold
+03/10/2026,21:00:00,6,OS Tech-Gold
+04/10/2026,21:00:00,6,OS Tech-Gold
+05/10/2026,21:00:00,4,OS Tech-Gold
+06/10/2026,21:00:00,5,OS Tech-Gold
+07/10/2026,21:00:00,3,OS Tech-Gold
+08/10/2026,21:00:00,0,OS Tech-Gold
+09/10/2026,21:00:00,7,OS Tech-Gold
+10/10/2026,21:00:00,5,OS Tech-Gold
+11/10/2026,21:00:00,1,OS Tech-Gold
+12/10/2026,21:00:00,1,OS Tech-Gold
+13/10/2026,21:00:00,4,OS Tech-Gold
+14/10/2026,21:00:00,0,OS Tech-Gold
+15/10/2026,21:00:00,3,OS Tech-Gold
+16/10/2026,21:00:00,1,OS Tech-Gold
+17/10/2026,21:00:00,4,OS Tech-Gold
+18/10/2026,21:00:00,3,OS Tech-Gold
+19/10/2026,21:00:00,4,OS Tech-Gold
+20/10/2026,21:00:00,4,OS Tech-Gold
+21/10/2026,21:00:00,4,OS Tech-Gold
+22/10/2026,21:00:00,2,OS Tech-Gold
+23/10/2026,21:00:00,1,OS Tech-Gold
+24/10/2026,21:00:00,4,OS Tech-Gold
+25/10/2026,21:00:00,3,OS Tech-Gold
+26/10/2026,21:00:00,7,OS Tech-Gold
+27/10/2026,21:00:00,4,OS Tech-Gold
+28/10/2026,21:00:00,3,OS Tech-Gold
+29/10/2026,21:00:00,4,OS Tech-Gold
+30/10/2026,21:00:00,3,OS Tech-Gold
+31/10/2026,21:00:00,1,OS Tech-Gold
+01/10/2026,21:30:00,4,OS Tech-Gold
+02/10/2026,21:30:00,6,OS Tech-Gold
+03/10/2026,21:30:00,3,OS Tech-Gold
+04/10/2026,21:30:00,8,OS Tech-Gold
+05/10/2026,21:30:00,3,OS Tech-Gold
+06/10/2026,21:30:00,3,OS Tech-Gold
+07/10/2026,21:30:00,1,OS Tech-Gold
+08/10/2026,21:30:00,5,OS Tech-Gold
+09/10/2026,21:30:00,4,OS Tech-Gold
+10/10/2026,21:30:00,3,OS Tech-Gold
+11/10/2026,21:30:00,6,OS Tech-Gold
+12/10/2026,21:30:00,0,OS Tech-Gold
+13/10/2026,21:30:00,2,OS Tech-Gold
+14/10/2026,21:30:00,1,OS Tech-Gold
+15/10/2026,21:30:00,5,OS Tech-Gold
+16/10/2026,21:30:00,3,OS Tech-Gold
+17/10/2026,21:30:00,5,OS Tech-Gold
+18/10/2026,21:30:00,2,OS Tech-Gold
+19/10/2026,21:30:00,4,OS Tech-Gold
+20/10/2026,21:30:00,5,OS Tech-Gold
+21/10/2026,21:30:00,3,OS Tech-Gold
+22/10/2026,21:30:00,1,OS Tech-Gold
+23/10/2026,21:30:00,4,OS Tech-Gold
+24/10/2026,21:30:00,1,OS Tech-Gold
+25/10/2026,21:30:00,5,OS Tech-Gold
+26/10/2026,21:30:00,3,OS Tech-Gold
+27/10/2026,21:30:00,5,OS Tech-Gold
+28/10/2026,21:30:00,3,OS Tech-Gold
+29/10/2026,21:30:00,7,OS Tech-Gold
+30/10/2026,21:30:00,2,OS Tech-Gold
+31/10/2026,21:30:00,4,OS Tech-Gold
+01/10/2026,22:00:00,2,OS Tech-Gold
+02/10/2026,22:00:00,6,OS Tech-Gold
+03/10/2026,22:00:00,3,OS Tech-Gold
+04/10/2026,22:00:00,5,OS Tech-Gold
+05/10/2026,22:00:00,1,OS Tech-Gold
+06/10/2026,22:00:00,3,OS Tech-Gold
+07/10/2026,22:00:00,4,OS Tech-Gold
+08/10/2026,22:00:00,5,OS Tech-Gold
+09/10/2026,22:00:00,3,OS Tech-Gold
+10/10/2026,22:00:00,3,OS Tech-Gold
+11/10/2026,22:00:00,1,OS Tech-Gold
+12/10/2026,22:00:00,1,OS Tech-Gold
+13/10/2026,22:00:00,5,OS Tech-Gold
+14/10/2026,22:00:00,1,OS Tech-Gold
+15/10/2026,22:00:00,0,OS Tech-Gold
+16/10/2026,22:00:00,1,OS Tech-Gold
+17/10/2026,22:00:00,4,OS Tech-Gold
+18/10/2026,22:00:00,2,OS Tech-Gold
+19/10/2026,22:00:00,1,OS Tech-Gold
+20/10/2026,22:00:00,0,OS Tech-Gold
+21/10/2026,22:00:00,0,OS Tech-Gold
+22/10/2026,22:00:00,2,OS Tech-Gold
+23/10/2026,22:00:00,0,OS Tech-Gold
+24/10/2026,22:00:00,4,OS Tech-Gold
+25/10/2026,22:00:00,3,OS Tech-Gold
+26/10/2026,22:00:00,3,OS Tech-Gold
+27/10/2026,22:00:00,1,OS Tech-Gold
+28/10/2026,22:00:00,6,OS Tech-Gold
+29/10/2026,22:00:00,6,OS Tech-Gold
+30/10/2026,22:00:00,5,OS Tech-Gold
+31/10/2026,22:00:00,2,OS Tech-Gold
+01/10/2026,22:30:00,2,OS Tech-Gold
+02/10/2026,22:30:00,1,OS Tech-Gold
+03/10/2026,22:30:00,3,OS Tech-Gold
+04/10/2026,22:30:00,0,OS Tech-Gold
+05/10/2026,22:30:00,4,OS Tech-Gold
+06/10/2026,22:30:00,0,OS Tech-Gold
+07/10/2026,22:30:00,0,OS Tech-Gold
+08/10/2026,22:30:00,4,OS Tech-Gold
+09/10/2026,22:30:00,1,OS Tech-Gold
+10/10/2026,22:30:00,4,OS Tech-Gold
+11/10/2026,22:30:00,4,OS Tech-Gold
+12/10/2026,22:30:00,3,OS Tech-Gold
+13/10/2026,22:30:00,1,OS Tech-Gold
+14/10/2026,22:30:00,3,OS Tech-Gold
+15/10/2026,22:30:00,0,OS Tech-Gold
+16/10/2026,22:30:00,1,OS Tech-Gold
+17/10/2026,22:30:00,2,OS Tech-Gold
+18/10/2026,22:30:00,2,OS Tech-Gold
+19/10/2026,22:30:00,4,OS Tech-Gold
+20/10/2026,22:30:00,4,OS Tech-Gold
+21/10/2026,22:30:00,3,OS Tech-Gold
+22/10/2026,22:30:00,2,OS Tech-Gold
+23/10/2026,22:30:00,1,OS Tech-Gold
+24/10/2026,22:30:00,1,OS Tech-Gold
+25/10/2026,22:30:00,5,OS Tech-Gold
+26/10/2026,22:30:00,1,OS Tech-Gold
+27/10/2026,22:30:00,3,OS Tech-Gold
+28/10/2026,22:30:00,6,OS Tech-Gold
+29/10/2026,22:30:00,2,OS Tech-Gold
+30/10/2026,22:30:00,2,OS Tech-Gold
+31/10/2026,22:30:00,1,OS Tech-Gold
+01/10/2026,23:00:00,0,OS Tech-Gold
+02/10/2026,23:00:00,0,OS Tech-Gold
+03/10/2026,23:00:00,6,OS Tech-Gold
+04/10/2026,23:00:00,2,OS Tech-Gold
+05/10/2026,23:00:00,3,OS Tech-Gold
+06/10/2026,23:00:00,3,OS Tech-Gold
+07/10/2026,23:00:00,1,OS Tech-Gold
+08/10/2026,23:00:00,7,OS Tech-Gold
+09/10/2026,23:00:00,5,OS Tech-Gold
+10/10/2026,23:00:00,1,OS Tech-Gold
+11/10/2026,23:00:00,0,OS Tech-Gold
+12/10/2026,23:00:00,0,OS Tech-Gold
+13/10/2026,23:00:00,1,OS Tech-Gold
+14/10/2026,23:00:00,1,OS Tech-Gold
+15/10/2026,23:00:00,0,OS Tech-Gold
+16/10/2026,23:00:00,3,OS Tech-Gold
+17/10/2026,23:00:00,2,OS Tech-Gold
+18/10/2026,23:00:00,2,OS Tech-Gold
+19/10/2026,23:00:00,0,OS Tech-Gold
+20/10/2026,23:00:00,0,OS Tech-Gold
+21/10/2026,23:00:00,1,OS Tech-Gold
+22/10/2026,23:00:00,1,OS Tech-Gold
+23/10/2026,23:00:00,1,OS Tech-Gold
+24/10/2026,23:00:00,0,OS Tech-Gold
+25/10/2026,23:00:00,0,OS Tech-Gold
+26/10/2026,23:00:00,1,OS Tech-Gold
+27/10/2026,23:00:00,1,OS Tech-Gold
+28/10/2026,23:00:00,3,OS Tech-Gold
+29/10/2026,23:00:00,5,OS Tech-Gold
+30/10/2026,23:00:00,0,OS Tech-Gold
+31/10/2026,23:00:00,1,OS Tech-Gold
+01/10/2026,23:30:00,1,OS Tech-Gold
+02/10/2026,23:30:00,2,OS Tech-Gold
+03/10/2026,23:30:00,1,OS Tech-Gold
+04/10/2026,23:30:00,2,OS Tech-Gold
+05/10/2026,23:30:00,4,OS Tech-Gold
+06/10/2026,23:30:00,3,OS Tech-Gold
+07/10/2026,23:30:00,3,OS Tech-Gold
+08/10/2026,23:30:00,2,OS Tech-Gold
+09/10/2026,23:30:00,0,OS Tech-Gold
+10/10/2026,23:30:00,1,OS Tech-Gold
+11/10/2026,23:30:00,1,OS Tech-Gold
+12/10/2026,23:30:00,3,OS Tech-Gold
+13/10/2026,23:30:00,0,OS Tech-Gold
+14/10/2026,23:30:00,0,OS Tech-Gold
+15/10/2026,23:30:00,0,OS Tech-Gold
+16/10/2026,23:30:00,1,OS Tech-Gold
+17/10/2026,23:30:00,2,OS Tech-Gold
+18/10/2026,23:30:00,2,OS Tech-Gold
+19/10/2026,23:30:00,0,OS Tech-Gold
+20/10/2026,23:30:00,1,OS Tech-Gold
+21/10/2026,23:30:00,0,OS Tech-Gold
+22/10/2026,23:30:00,1,OS Tech-Gold
+23/10/2026,23:30:00,3,OS Tech-Gold
+24/10/2026,23:30:00,3,OS Tech-Gold
+25/10/2026,23:30:00,3,OS Tech-Gold
+26/10/2026,23:30:00,0,OS Tech-Gold
+27/10/2026,23:30:00,1,OS Tech-Gold
+28/10/2026,23:30:00,1,OS Tech-Gold
+29/10/2026,23:30:00,0,OS Tech-Gold
+30/10/2026,23:30:00,2,OS Tech-Gold
+31/10/2026,23:30:00,5,OS Tech-Gold
+01/10/2026,00:00:00,9,OS Billing Others
+02/10/2026,00:00:00,7,OS Billing Others
+03/10/2026,00:00:00,5,OS Billing Others
+04/10/2026,00:00:00,5,OS Billing Others
+05/10/2026,00:00:00,6,OS Billing Others
+06/10/2026,00:00:00,0,OS Billing Others
+07/10/2026,00:00:00,4,OS Billing Others
+08/10/2026,00:00:00,1,OS Billing Others
+09/10/2026,00:00:00,9,OS Billing Others
+10/10/2026,00:00:00,0,OS Billing Others
+11/10/2026,00:00:00,0,OS Billing Others
+12/10/2026,00:00:00,1,OS Billing Others
+13/10/2026,00:00:00,1,OS Billing Others
+14/10/2026,00:00:00,1,OS Billing Others
+15/10/2026,00:00:00,2,OS Billing Others
+16/10/2026,00:00:00,5,OS Billing Others
+17/10/2026,00:00:00,2,OS Billing Others
+18/10/2026,00:00:00,1,OS Billing Others
+19/10/2026,00:00:00,4,OS Billing Others
+20/10/2026,00:00:00,0,OS Billing Others
+21/10/2026,00:00:00,2,OS Billing Others
+22/10/2026,00:00:00,0,OS Billing Others
+23/10/2026,00:00:00,2,OS Billing Others
+24/10/2026,00:00:00,5,OS Billing Others
+25/10/2026,00:00:00,1,OS Billing Others
+26/10/2026,00:00:00,4,OS Billing Others
+27/10/2026,00:00:00,4,OS Billing Others
+28/10/2026,00:00:00,1,OS Billing Others
+29/10/2026,00:00:00,1,OS Billing Others
+30/10/2026,00:00:00,1,OS Billing Others
+31/10/2026,00:00:00,5,OS Billing Others
+01/10/2026,00:30:00,0,OS Billing Others
+02/10/2026,00:30:00,4,OS Billing Others
+03/10/2026,00:30:00,1,OS Billing Others
+04/10/2026,00:30:00,1,OS Billing Others
+05/10/2026,00:30:00,5,OS Billing Others
+06/10/2026,00:30:00,5,OS Billing Others
+07/10/2026,00:30:00,2,OS Billing Others
+08/10/2026,00:30:00,1,OS Billing Others
+09/10/2026,00:30:00,1,OS Billing Others
+10/10/2026,00:30:00,0,OS Billing Others
+11/10/2026,00:30:00,4,OS Billing Others
+12/10/2026,00:30:00,0,OS Billing Others
+13/10/2026,00:30:00,2,OS Billing Others
+14/10/2026,00:30:00,1,OS Billing Others
+15/10/2026,00:30:00,0,OS Billing Others
+16/10/2026,00:30:00,0,OS Billing Others
+17/10/2026,00:30:00,2,OS Billing Others
+18/10/2026,00:30:00,2,OS Billing Others
+19/10/2026,00:30:00,0,OS Billing Others
+20/10/2026,00:30:00,0,OS Billing Others
+21/10/2026,00:30:00,0,OS Billing Others
+22/10/2026,00:30:00,1,OS Billing Others
+23/10/2026,00:30:00,2,OS Billing Others
+24/10/2026,00:30:00,1,OS Billing Others
+25/10/2026,00:30:00,0,OS Billing Others
+26/10/2026,00:30:00,1,OS Billing Others
+27/10/2026,00:30:00,1,OS Billing Others
+28/10/2026,00:30:00,4,OS Billing Others
+29/10/2026,00:30:00,2,OS Billing Others
+30/10/2026,00:30:00,0,OS Billing Others
+31/10/2026,00:30:00,6,OS Billing Others
+01/10/2026,01:00:00,1,OS Billing Others
+02/10/2026,01:00:00,5,OS Billing Others
+03/10/2026,01:00:00,4,OS Billing Others
+04/10/2026,01:00:00,2,OS Billing Others
+05/10/2026,01:00:00,1,OS Billing Others
+06/10/2026,01:00:00,0,OS Billing Others
+07/10/2026,01:00:00,5,OS Billing Others
+08/10/2026,01:00:00,1,OS Billing Others
+09/10/2026,01:00:00,1,OS Billing Others
+10/10/2026,01:00:00,2,OS Billing Others
+11/10/2026,01:00:00,4,OS Billing Others
+12/10/2026,01:00:00,0,OS Billing Others
+13/10/2026,01:00:00,0,OS Billing Others
+14/10/2026,01:00:00,2,OS Billing Others
+15/10/2026,01:00:00,0,OS Billing Others
+16/10/2026,01:00:00,0,OS Billing Others
+17/10/2026,01:00:00,0,OS Billing Others
+18/10/2026,01:00:00,0,OS Billing Others
+19/10/2026,01:00:00,4,OS Billing Others
+20/10/2026,01:00:00,0,OS Billing Others
+21/10/2026,01:00:00,0,OS Billing Others
+22/10/2026,01:00:00,1,OS Billing Others
+23/10/2026,01:00:00,1,OS Billing Others
+24/10/2026,01:00:00,0,OS Billing Others
+25/10/2026,01:00:00,2,OS Billing Others
+26/10/2026,01:00:00,1,OS Billing Others
+27/10/2026,01:00:00,4,OS Billing Others
+28/10/2026,01:00:00,2,OS Billing Others
+29/10/2026,01:00:00,0,OS Billing Others
+30/10/2026,01:00:00,0,OS Billing Others
+31/10/2026,01:00:00,2,OS Billing Others
+01/10/2026,01:30:00,1,OS Billing Others
+02/10/2026,01:30:00,2,OS Billing Others
+03/10/2026,01:30:00,0,OS Billing Others
+04/10/2026,01:30:00,2,OS Billing Others
+05/10/2026,01:30:00,2,OS Billing Others
+06/10/2026,01:30:00,1,OS Billing Others
+07/10/2026,01:30:00,1,OS Billing Others
+08/10/2026,01:30:00,1,OS Billing Others
+09/10/2026,01:30:00,4,OS Billing Others
+10/10/2026,01:30:00,2,OS Billing Others
+11/10/2026,01:30:00,4,OS Billing Others
+12/10/2026,01:30:00,0,OS Billing Others
+13/10/2026,01:30:00,0,OS Billing Others
+14/10/2026,01:30:00,1,OS Billing Others
+15/10/2026,01:30:00,1,OS Billing Others
+16/10/2026,01:30:00,0,OS Billing Others
+17/10/2026,01:30:00,4,OS Billing Others
+18/10/2026,01:30:00,0,OS Billing Others
+19/10/2026,01:30:00,1,OS Billing Others
+20/10/2026,01:30:00,0,OS Billing Others
+21/10/2026,01:30:00,2,OS Billing Others
+22/10/2026,01:30:00,0,OS Billing Others
+23/10/2026,01:30:00,0,OS Billing Others
+24/10/2026,01:30:00,2,OS Billing Others
+25/10/2026,01:30:00,1,OS Billing Others
+26/10/2026,01:30:00,2,OS Billing Others
+27/10/2026,01:30:00,4,OS Billing Others
+28/10/2026,01:30:00,1,OS Billing Others
+29/10/2026,01:30:00,1,OS Billing Others
+30/10/2026,01:30:00,0,OS Billing Others
+31/10/2026,01:30:00,0,OS Billing Others
+01/10/2026,02:00:00,4,OS Billing Others
+02/10/2026,02:00:00,1,OS Billing Others
+03/10/2026,02:00:00,1,OS Billing Others
+04/10/2026,02:00:00,0,OS Billing Others
+05/10/2026,02:00:00,0,OS Billing Others
+06/10/2026,02:00:00,0,OS Billing Others
+07/10/2026,02:00:00,0,OS Billing Others
+08/10/2026,02:00:00,0,OS Billing Others
+09/10/2026,02:00:00,1,OS Billing Others
+10/10/2026,02:00:00,0,OS Billing Others
+11/10/2026,02:00:00,1,OS Billing Others
+12/10/2026,02:00:00,0,OS Billing Others
+13/10/2026,02:00:00,1,OS Billing Others
+14/10/2026,02:00:00,0,OS Billing Others
+15/10/2026,02:00:00,0,OS Billing Others
+16/10/2026,02:00:00,0,OS Billing Others
+17/10/2026,02:00:00,0,OS Billing Others
+18/10/2026,02:00:00,1,OS Billing Others
+19/10/2026,02:00:00,0,OS Billing Others
+20/10/2026,02:00:00,0,OS Billing Others
+21/10/2026,02:00:00,1,OS Billing Others
+22/10/2026,02:00:00,0,OS Billing Others
+23/10/2026,02:00:00,0,OS Billing Others
+24/10/2026,02:00:00,0,OS Billing Others
+25/10/2026,02:00:00,1,OS Billing Others
+26/10/2026,02:00:00,2,OS Billing Others
+27/10/2026,02:00:00,4,OS Billing Others
+28/10/2026,02:00:00,0,OS Billing Others
+29/10/2026,02:00:00,0,OS Billing Others
+30/10/2026,02:00:00,2,OS Billing Others
+31/10/2026,02:00:00,1,OS Billing Others
+01/10/2026,02:30:00,4,OS Billing Others
+02/10/2026,02:30:00,1,OS Billing Others
+03/10/2026,02:30:00,2,OS Billing Others
+04/10/2026,02:30:00,1,OS Billing Others
+05/10/2026,02:30:00,0,OS Billing Others
+06/10/2026,02:30:00,2,OS Billing Others
+07/10/2026,02:30:00,0,OS Billing Others
+08/10/2026,02:30:00,0,OS Billing Others
+09/10/2026,02:30:00,1,OS Billing Others
+10/10/2026,02:30:00,1,OS Billing Others
+11/10/2026,02:30:00,0,OS Billing Others
+12/10/2026,02:30:00,1,OS Billing Others
+13/10/2026,02:30:00,0,OS Billing Others
+14/10/2026,02:30:00,0,OS Billing Others
+15/10/2026,02:30:00,0,OS Billing Others
+16/10/2026,02:30:00,1,OS Billing Others
+17/10/2026,02:30:00,0,OS Billing Others
+18/10/2026,02:30:00,0,OS Billing Others
+19/10/2026,02:30:00,1,OS Billing Others
+20/10/2026,02:30:00,0,OS Billing Others
+21/10/2026,02:30:00,0,OS Billing Others
+22/10/2026,02:30:00,0,OS Billing Others
+23/10/2026,02:30:00,0,OS Billing Others
+24/10/2026,02:30:00,1,OS Billing Others
+25/10/2026,02:30:00,1,OS Billing Others
+26/10/2026,02:30:00,0,OS Billing Others
+27/10/2026,02:30:00,1,OS Billing Others
+28/10/2026,02:30:00,0,OS Billing Others
+29/10/2026,02:30:00,0,OS Billing Others
+30/10/2026,02:30:00,0,OS Billing Others
+31/10/2026,02:30:00,0,OS Billing Others
+01/10/2026,03:00:00,4,OS Billing Others
+02/10/2026,03:00:00,0,OS Billing Others
+03/10/2026,03:00:00,0,OS Billing Others
+04/10/2026,03:00:00,1,OS Billing Others
+05/10/2026,03:00:00,1,OS Billing Others
+06/10/2026,03:00:00,0,OS Billing Others
+07/10/2026,03:00:00,0,OS Billing Others
+08/10/2026,03:00:00,0,OS Billing Others
+09/10/2026,03:00:00,1,OS Billing Others
+10/10/2026,03:00:00,0,OS Billing Others
+11/10/2026,03:00:00,0,OS Billing Others
+12/10/2026,03:00:00,0,OS Billing Others
+13/10/2026,03:00:00,0,OS Billing Others
+14/10/2026,03:00:00,1,OS Billing Others
+15/10/2026,03:00:00,1,OS Billing Others
+16/10/2026,03:00:00,0,OS Billing Others
+17/10/2026,03:00:00,0,OS Billing Others
+18/10/2026,03:00:00,2,OS Billing Others
+19/10/2026,03:00:00,0,OS Billing Others
+20/10/2026,03:00:00,1,OS Billing Others
+21/10/2026,03:00:00,0,OS Billing Others
+22/10/2026,03:00:00,0,OS Billing Others
+23/10/2026,03:00:00,0,OS Billing Others
+24/10/2026,03:00:00,0,OS Billing Others
+25/10/2026,03:00:00,0,OS Billing Others
+26/10/2026,03:00:00,0,OS Billing Others
+27/10/2026,03:00:00,1,OS Billing Others
+28/10/2026,03:00:00,0,OS Billing Others
+29/10/2026,03:00:00,1,OS Billing Others
+30/10/2026,03:00:00,1,OS Billing Others
+31/10/2026,03:00:00,2,OS Billing Others
+01/10/2026,03:30:00,2,OS Billing Others
+02/10/2026,03:30:00,0,OS Billing Others
+03/10/2026,03:30:00,0,OS Billing Others
+04/10/2026,03:30:00,2,OS Billing Others
+05/10/2026,03:30:00,0,OS Billing Others
+06/10/2026,03:30:00,1,OS Billing Others
+07/10/2026,03:30:00,0,OS Billing Others
+08/10/2026,03:30:00,0,OS Billing Others
+09/10/2026,03:30:00,0,OS Billing Others
+10/10/2026,03:30:00,0,OS Billing Others
+11/10/2026,03:30:00,0,OS Billing Others
+12/10/2026,03:30:00,0,OS Billing Others
+13/10/2026,03:30:00,0,OS Billing Others
+14/10/2026,03:30:00,1,OS Billing Others
+15/10/2026,03:30:00,0,OS Billing Others
+16/10/2026,03:30:00,0,OS Billing Others
+17/10/2026,03:30:00,0,OS Billing Others
+18/10/2026,03:30:00,1,OS Billing Others
+19/10/2026,03:30:00,0,OS Billing Others
+20/10/2026,03:30:00,1,OS Billing Others
+21/10/2026,03:30:00,1,OS Billing Others
+22/10/2026,03:30:00,0,OS Billing Others
+23/10/2026,03:30:00,0,OS Billing Others
+24/10/2026,03:30:00,0,OS Billing Others
+25/10/2026,03:30:00,0,OS Billing Others
+26/10/2026,03:30:00,0,OS Billing Others
+27/10/2026,03:30:00,1,OS Billing Others
+28/10/2026,03:30:00,0,OS Billing Others
+29/10/2026,03:30:00,1,OS Billing Others
+30/10/2026,03:30:00,0,OS Billing Others
+31/10/2026,03:30:00,0,OS Billing Others
+01/10/2026,04:00:00,0,OS Billing Others
+02/10/2026,04:00:00,1,OS Billing Others
+03/10/2026,04:00:00,1,OS Billing Others
+04/10/2026,04:00:00,1,OS Billing Others
+05/10/2026,04:00:00,0,OS Billing Others
+06/10/2026,04:00:00,1,OS Billing Others
+07/10/2026,04:00:00,0,OS Billing Others
+08/10/2026,04:00:00,1,OS Billing Others
+09/10/2026,04:00:00,0,OS Billing Others
+10/10/2026,04:00:00,0,OS Billing Others
+11/10/2026,04:00:00,0,OS Billing Others
+12/10/2026,04:00:00,0,OS Billing Others
+13/10/2026,04:00:00,0,OS Billing Others
+14/10/2026,04:00:00,0,OS Billing Others
+15/10/2026,04:00:00,1,OS Billing Others
+16/10/2026,04:00:00,0,OS Billing Others
+17/10/2026,04:00:00,0,OS Billing Others
+18/10/2026,04:00:00,1,OS Billing Others
+19/10/2026,04:00:00,0,OS Billing Others
+20/10/2026,04:00:00,0,OS Billing Others
+21/10/2026,04:00:00,0,OS Billing Others
+22/10/2026,04:00:00,1,OS Billing Others
+23/10/2026,04:00:00,0,OS Billing Others
+24/10/2026,04:00:00,0,OS Billing Others
+25/10/2026,04:00:00,0,OS Billing Others
+26/10/2026,04:00:00,0,OS Billing Others
+27/10/2026,04:00:00,0,OS Billing Others
+28/10/2026,04:00:00,0,OS Billing Others
+29/10/2026,04:00:00,0,OS Billing Others
+30/10/2026,04:00:00,0,OS Billing Others
+31/10/2026,04:00:00,1,OS Billing Others
+01/10/2026,04:30:00,1,OS Billing Others
+02/10/2026,04:30:00,0,OS Billing Others
+03/10/2026,04:30:00,0,OS Billing Others
+04/10/2026,04:30:00,0,OS Billing Others
+05/10/2026,04:30:00,1,OS Billing Others
+06/10/2026,04:30:00,0,OS Billing Others
+07/10/2026,04:30:00,1,OS Billing Others
+08/10/2026,04:30:00,1,OS Billing Others
+09/10/2026,04:30:00,0,OS Billing Others
+10/10/2026,04:30:00,0,OS Billing Others
+11/10/2026,04:30:00,0,OS Billing Others
+12/10/2026,04:30:00,1,OS Billing Others
+13/10/2026,04:30:00,1,OS Billing Others
+14/10/2026,04:30:00,2,OS Billing Others
+15/10/2026,04:30:00,0,OS Billing Others
+16/10/2026,04:30:00,0,OS Billing Others
+17/10/2026,04:30:00,0,OS Billing Others
+18/10/2026,04:30:00,0,OS Billing Others
+19/10/2026,04:30:00,0,OS Billing Others
+20/10/2026,04:30:00,0,OS Billing Others
+21/10/2026,04:30:00,0,OS Billing Others
+22/10/2026,04:30:00,0,OS Billing Others
+23/10/2026,04:30:00,0,OS Billing Others
+24/10/2026,04:30:00,0,OS Billing Others
+25/10/2026,04:30:00,0,OS Billing Others
+26/10/2026,04:30:00,0,OS Billing Others
+27/10/2026,04:30:00,0,OS Billing Others
+28/10/2026,04:30:00,0,OS Billing Others
+29/10/2026,04:30:00,0,OS Billing Others
+30/10/2026,04:30:00,1,OS Billing Others
+31/10/2026,04:30:00,1,OS Billing Others
+01/10/2026,05:00:00,0,OS Billing Others
+02/10/2026,05:00:00,4,OS Billing Others
+03/10/2026,05:00:00,2,OS Billing Others
+04/10/2026,05:00:00,0,OS Billing Others
+05/10/2026,05:00:00,0,OS Billing Others
+06/10/2026,05:00:00,0,OS Billing Others
+07/10/2026,05:00:00,0,OS Billing Others
+08/10/2026,05:00:00,0,OS Billing Others
+09/10/2026,05:00:00,0,OS Billing Others
+10/10/2026,05:00:00,0,OS Billing Others
+11/10/2026,05:00:00,0,OS Billing Others
+12/10/2026,05:00:00,1,OS Billing Others
+13/10/2026,05:00:00,0,OS Billing Others
+14/10/2026,05:00:00,0,OS Billing Others
+15/10/2026,05:00:00,1,OS Billing Others
+16/10/2026,05:00:00,0,OS Billing Others
+17/10/2026,05:00:00,0,OS Billing Others
+18/10/2026,05:00:00,0,OS Billing Others
+19/10/2026,05:00:00,1,OS Billing Others
+20/10/2026,05:00:00,0,OS Billing Others
+21/10/2026,05:00:00,0,OS Billing Others
+22/10/2026,05:00:00,0,OS Billing Others
+23/10/2026,05:00:00,0,OS Billing Others
+24/10/2026,05:00:00,0,OS Billing Others
+25/10/2026,05:00:00,0,OS Billing Others
+26/10/2026,05:00:00,1,OS Billing Others
+27/10/2026,05:00:00,0,OS Billing Others
+28/10/2026,05:00:00,1,OS Billing Others
+29/10/2026,05:00:00,0,OS Billing Others
+30/10/2026,05:00:00,0,OS Billing Others
+31/10/2026,05:00:00,0,OS Billing Others
+01/10/2026,05:30:00,1,OS Billing Others
+02/10/2026,05:30:00,1,OS Billing Others
+03/10/2026,05:30:00,0,OS Billing Others
+04/10/2026,05:30:00,0,OS Billing Others
+05/10/2026,05:30:00,0,OS Billing Others
+06/10/2026,05:30:00,0,OS Billing Others
+07/10/2026,05:30:00,0,OS Billing Others
+08/10/2026,05:30:00,0,OS Billing Others
+09/10/2026,05:30:00,1,OS Billing Others
+10/10/2026,05:30:00,0,OS Billing Others
+11/10/2026,05:30:00,0,OS Billing Others
+12/10/2026,05:30:00,0,OS Billing Others
+13/10/2026,05:30:00,1,OS Billing Others
+14/10/2026,05:30:00,0,OS Billing Others
+15/10/2026,05:30:00,0,OS Billing Others
+16/10/2026,05:30:00,2,OS Billing Others
+17/10/2026,05:30:00,0,OS Billing Others
+18/10/2026,05:30:00,0,OS Billing Others
+19/10/2026,05:30:00,0,OS Billing Others
+20/10/2026,05:30:00,0,OS Billing Others
+21/10/2026,05:30:00,0,OS Billing Others
+22/10/2026,05:30:00,0,OS Billing Others
+23/10/2026,05:30:00,0,OS Billing Others
+24/10/2026,05:30:00,1,OS Billing Others
+25/10/2026,05:30:00,0,OS Billing Others
+26/10/2026,05:30:00,1,OS Billing Others
+27/10/2026,05:30:00,0,OS Billing Others
+28/10/2026,05:30:00,0,OS Billing Others
+29/10/2026,05:30:00,0,OS Billing Others
+30/10/2026,05:30:00,0,OS Billing Others
+31/10/2026,05:30:00,0,OS Billing Others
+01/10/2026,06:00:00,0,OS Billing Others
+02/10/2026,06:00:00,2,OS Billing Others
+03/10/2026,06:00:00,1,OS Billing Others
+04/10/2026,06:00:00,0,OS Billing Others
+05/10/2026,06:00:00,1,OS Billing Others
+06/10/2026,06:00:00,0,OS Billing Others
+07/10/2026,06:00:00,1,OS Billing Others
+08/10/2026,06:00:00,0,OS Billing Others
+09/10/2026,06:00:00,1,OS Billing Others
+10/10/2026,06:00:00,2,OS Billing Others
+11/10/2026,06:00:00,0,OS Billing Others
+12/10/2026,06:00:00,1,OS Billing Others
+13/10/2026,06:00:00,0,OS Billing Others
+14/10/2026,06:00:00,1,OS Billing Others
+15/10/2026,06:00:00,0,OS Billing Others
+16/10/2026,06:00:00,0,OS Billing Others
+17/10/2026,06:00:00,0,OS Billing Others
+18/10/2026,06:00:00,0,OS Billing Others
+19/10/2026,06:00:00,0,OS Billing Others
+20/10/2026,06:00:00,0,OS Billing Others
+21/10/2026,06:00:00,0,OS Billing Others
+22/10/2026,06:00:00,0,OS Billing Others
+23/10/2026,06:00:00,1,OS Billing Others
+24/10/2026,06:00:00,0,OS Billing Others
+25/10/2026,06:00:00,0,OS Billing Others
+26/10/2026,06:00:00,0,OS Billing Others
+27/10/2026,06:00:00,0,OS Billing Others
+28/10/2026,06:00:00,0,OS Billing Others
+29/10/2026,06:00:00,1,OS Billing Others
+30/10/2026,06:00:00,0,OS Billing Others
+31/10/2026,06:00:00,0,OS Billing Others
+01/10/2026,06:30:00,5,OS Billing Others
+02/10/2026,06:30:00,1,OS Billing Others
+03/10/2026,06:30:00,4,OS Billing Others
+04/10/2026,06:30:00,1,OS Billing Others
+05/10/2026,06:30:00,2,OS Billing Others
+06/10/2026,06:30:00,2,OS Billing Others
+07/10/2026,06:30:00,1,OS Billing Others
+08/10/2026,06:30:00,1,OS Billing Others
+09/10/2026,06:30:00,0,OS Billing Others
+10/10/2026,06:30:00,0,OS Billing Others
+11/10/2026,06:30:00,0,OS Billing Others
+12/10/2026,06:30:00,0,OS Billing Others
+13/10/2026,06:30:00,0,OS Billing Others
+14/10/2026,06:30:00,1,OS Billing Others
+15/10/2026,06:30:00,1,OS Billing Others
+16/10/2026,06:30:00,1,OS Billing Others
+17/10/2026,06:30:00,0,OS Billing Others
+18/10/2026,06:30:00,0,OS Billing Others
+19/10/2026,06:30:00,0,OS Billing Others
+20/10/2026,06:30:00,0,OS Billing Others
+21/10/2026,06:30:00,2,OS Billing Others
+22/10/2026,06:30:00,0,OS Billing Others
+23/10/2026,06:30:00,0,OS Billing Others
+24/10/2026,06:30:00,0,OS Billing Others
+25/10/2026,06:30:00,0,OS Billing Others
+26/10/2026,06:30:00,0,OS Billing Others
+27/10/2026,06:30:00,1,OS Billing Others
+28/10/2026,06:30:00,0,OS Billing Others
+29/10/2026,06:30:00,2,OS Billing Others
+30/10/2026,06:30:00,0,OS Billing Others
+31/10/2026,06:30:00,0,OS Billing Others
+01/10/2026,07:00:00,1,OS Billing Others
+02/10/2026,07:00:00,1,OS Billing Others
+03/10/2026,07:00:00,1,OS Billing Others
+04/10/2026,07:00:00,1,OS Billing Others
+05/10/2026,07:00:00,1,OS Billing Others
+06/10/2026,07:00:00,1,OS Billing Others
+07/10/2026,07:00:00,0,OS Billing Others
+08/10/2026,07:00:00,0,OS Billing Others
+09/10/2026,07:00:00,2,OS Billing Others
+10/10/2026,07:00:00,0,OS Billing Others
+11/10/2026,07:00:00,0,OS Billing Others
+12/10/2026,07:00:00,0,OS Billing Others
+13/10/2026,07:00:00,1,OS Billing Others
+14/10/2026,07:00:00,1,OS Billing Others
+15/10/2026,07:00:00,0,OS Billing Others
+16/10/2026,07:00:00,1,OS Billing Others
+17/10/2026,07:00:00,1,OS Billing Others
+18/10/2026,07:00:00,1,OS Billing Others
+19/10/2026,07:00:00,0,OS Billing Others
+20/10/2026,07:00:00,0,OS Billing Others
+21/10/2026,07:00:00,0,OS Billing Others
+22/10/2026,07:00:00,0,OS Billing Others
+23/10/2026,07:00:00,0,OS Billing Others
+24/10/2026,07:00:00,0,OS Billing Others
+25/10/2026,07:00:00,0,OS Billing Others
+26/10/2026,07:00:00,0,OS Billing Others
+27/10/2026,07:00:00,0,OS Billing Others
+28/10/2026,07:00:00,0,OS Billing Others
+29/10/2026,07:00:00,2,OS Billing Others
+30/10/2026,07:00:00,0,OS Billing Others
+31/10/2026,07:00:00,0,OS Billing Others
+01/10/2026,07:30:00,2,OS Billing Others
+02/10/2026,07:30:00,1,OS Billing Others
+03/10/2026,07:30:00,1,OS Billing Others
+04/10/2026,07:30:00,0,OS Billing Others
+05/10/2026,07:30:00,0,OS Billing Others
+06/10/2026,07:30:00,2,OS Billing Others
+07/10/2026,07:30:00,0,OS Billing Others
+08/10/2026,07:30:00,0,OS Billing Others
+09/10/2026,07:30:00,0,OS Billing Others
+10/10/2026,07:30:00,0,OS Billing Others
+11/10/2026,07:30:00,0,OS Billing Others
+12/10/2026,07:30:00,0,OS Billing Others
+13/10/2026,07:30:00,2,OS Billing Others
+14/10/2026,07:30:00,2,OS Billing Others
+15/10/2026,07:30:00,1,OS Billing Others
+16/10/2026,07:30:00,1,OS Billing Others
+17/10/2026,07:30:00,0,OS Billing Others
+18/10/2026,07:30:00,0,OS Billing Others
+19/10/2026,07:30:00,1,OS Billing Others
+20/10/2026,07:30:00,2,OS Billing Others
+21/10/2026,07:30:00,1,OS Billing Others
+22/10/2026,07:30:00,0,OS Billing Others
+23/10/2026,07:30:00,1,OS Billing Others
+24/10/2026,07:30:00,1,OS Billing Others
+25/10/2026,07:30:00,1,OS Billing Others
+26/10/2026,07:30:00,0,OS Billing Others
+27/10/2026,07:30:00,0,OS Billing Others
+28/10/2026,07:30:00,2,OS Billing Others
+29/10/2026,07:30:00,0,OS Billing Others
+30/10/2026,07:30:00,1,OS Billing Others
+31/10/2026,07:30:00,1,OS Billing Others
+01/10/2026,08:00:00,1,OS Billing Others
+02/10/2026,08:00:00,5,OS Billing Others
+03/10/2026,08:00:00,2,OS Billing Others
+04/10/2026,08:00:00,2,OS Billing Others
+05/10/2026,08:00:00,7,OS Billing Others
+06/10/2026,08:00:00,1,OS Billing Others
+07/10/2026,08:00:00,1,OS Billing Others
+08/10/2026,08:00:00,4,OS Billing Others
+09/10/2026,08:00:00,2,OS Billing Others
+10/10/2026,08:00:00,2,OS Billing Others
+11/10/2026,08:00:00,2,OS Billing Others
+12/10/2026,08:00:00,1,OS Billing Others
+13/10/2026,08:00:00,2,OS Billing Others
+14/10/2026,08:00:00,1,OS Billing Others
+15/10/2026,08:00:00,0,OS Billing Others
+16/10/2026,08:00:00,2,OS Billing Others
+17/10/2026,08:00:00,2,OS Billing Others
+18/10/2026,08:00:00,0,OS Billing Others
+19/10/2026,08:00:00,0,OS Billing Others
+20/10/2026,08:00:00,1,OS Billing Others
+21/10/2026,08:00:00,2,OS Billing Others
+22/10/2026,08:00:00,2,OS Billing Others
+23/10/2026,08:00:00,2,OS Billing Others
+24/10/2026,08:00:00,1,OS Billing Others
+25/10/2026,08:00:00,0,OS Billing Others
+26/10/2026,08:00:00,1,OS Billing Others
+27/10/2026,08:00:00,0,OS Billing Others
+28/10/2026,08:00:00,2,OS Billing Others
+29/10/2026,08:00:00,0,OS Billing Others
+30/10/2026,08:00:00,1,OS Billing Others
+31/10/2026,08:00:00,0,OS Billing Others
+01/10/2026,08:30:00,7,OS Billing Others
+02/10/2026,08:30:00,9,OS Billing Others
+03/10/2026,08:30:00,7,OS Billing Others
+04/10/2026,08:30:00,2,OS Billing Others
+05/10/2026,08:30:00,2,OS Billing Others
+06/10/2026,08:30:00,0,OS Billing Others
+07/10/2026,08:30:00,1,OS Billing Others
+08/10/2026,08:30:00,2,OS Billing Others
+09/10/2026,08:30:00,2,OS Billing Others
+10/10/2026,08:30:00,4,OS Billing Others
+11/10/2026,08:30:00,5,OS Billing Others
+12/10/2026,08:30:00,2,OS Billing Others
+13/10/2026,08:30:00,1,OS Billing Others
+14/10/2026,08:30:00,0,OS Billing Others
+15/10/2026,08:30:00,4,OS Billing Others
+16/10/2026,08:30:00,2,OS Billing Others
+17/10/2026,08:30:00,0,OS Billing Others
+18/10/2026,08:30:00,0,OS Billing Others
+19/10/2026,08:30:00,1,OS Billing Others
+20/10/2026,08:30:00,2,OS Billing Others
+21/10/2026,08:30:00,1,OS Billing Others
+22/10/2026,08:30:00,5,OS Billing Others
+23/10/2026,08:30:00,0,OS Billing Others
+24/10/2026,08:30:00,0,OS Billing Others
+25/10/2026,08:30:00,4,OS Billing Others
+26/10/2026,08:30:00,1,OS Billing Others
+27/10/2026,08:30:00,0,OS Billing Others
+28/10/2026,08:30:00,4,OS Billing Others
+29/10/2026,08:30:00,1,OS Billing Others
+30/10/2026,08:30:00,0,OS Billing Others
+31/10/2026,08:30:00,0,OS Billing Others
+01/10/2026,09:00:00,14,OS Billing Others
+02/10/2026,09:00:00,9,OS Billing Others
+03/10/2026,09:00:00,1,OS Billing Others
+04/10/2026,09:00:00,0,OS Billing Others
+05/10/2026,09:00:00,5,OS Billing Others
+06/10/2026,09:00:00,2,OS Billing Others
+07/10/2026,09:00:00,5,OS Billing Others
+08/10/2026,09:00:00,7,OS Billing Others
+09/10/2026,09:00:00,4,OS Billing Others
+10/10/2026,09:00:00,4,OS Billing Others
+11/10/2026,09:00:00,0,OS Billing Others
+12/10/2026,09:00:00,2,OS Billing Others
+13/10/2026,09:00:00,5,OS Billing Others
+14/10/2026,09:00:00,1,OS Billing Others
+15/10/2026,09:00:00,4,OS Billing Others
+16/10/2026,09:00:00,0,OS Billing Others
+17/10/2026,09:00:00,2,OS Billing Others
+18/10/2026,09:00:00,1,OS Billing Others
+19/10/2026,09:00:00,1,OS Billing Others
+20/10/2026,09:00:00,5,OS Billing Others
+21/10/2026,09:00:00,1,OS Billing Others
+22/10/2026,09:00:00,4,OS Billing Others
+23/10/2026,09:00:00,2,OS Billing Others
+24/10/2026,09:00:00,1,OS Billing Others
+25/10/2026,09:00:00,2,OS Billing Others
+26/10/2026,09:00:00,0,OS Billing Others
+27/10/2026,09:00:00,5,OS Billing Others
+28/10/2026,09:00:00,4,OS Billing Others
+29/10/2026,09:00:00,1,OS Billing Others
+30/10/2026,09:00:00,2,OS Billing Others
+31/10/2026,09:00:00,4,OS Billing Others
+01/10/2026,09:30:00,19,OS Billing Others
+02/10/2026,09:30:00,7,OS Billing Others
+03/10/2026,09:30:00,7,OS Billing Others
+04/10/2026,09:30:00,7,OS Billing Others
+05/10/2026,09:30:00,5,OS Billing Others
+06/10/2026,09:30:00,5,OS Billing Others
+07/10/2026,09:30:00,5,OS Billing Others
+08/10/2026,09:30:00,9,OS Billing Others
+09/10/2026,09:30:00,1,OS Billing Others
+10/10/2026,09:30:00,6,OS Billing Others
+11/10/2026,09:30:00,6,OS Billing Others
+12/10/2026,09:30:00,5,OS Billing Others
+13/10/2026,09:30:00,4,OS Billing Others
+14/10/2026,09:30:00,4,OS Billing Others
+15/10/2026,09:30:00,6,OS Billing Others
+16/10/2026,09:30:00,4,OS Billing Others
+17/10/2026,09:30:00,2,OS Billing Others
+18/10/2026,09:30:00,1,OS Billing Others
+19/10/2026,09:30:00,2,OS Billing Others
+20/10/2026,09:30:00,5,OS Billing Others
+21/10/2026,09:30:00,4,OS Billing Others
+22/10/2026,09:30:00,7,OS Billing Others
+23/10/2026,09:30:00,4,OS Billing Others
+24/10/2026,09:30:00,5,OS Billing Others
+25/10/2026,09:30:00,2,OS Billing Others
+26/10/2026,09:30:00,4,OS Billing Others
+27/10/2026,09:30:00,9,OS Billing Others
+28/10/2026,09:30:00,1,OS Billing Others
+29/10/2026,09:30:00,9,OS Billing Others
+30/10/2026,09:30:00,1,OS Billing Others
+31/10/2026,09:30:00,5,OS Billing Others
+01/10/2026,10:00:00,31,OS Billing Others
+02/10/2026,10:00:00,12,OS Billing Others
+03/10/2026,10:00:00,9,OS Billing Others
+04/10/2026,10:00:00,11,OS Billing Others
+05/10/2026,10:00:00,7,OS Billing Others
+06/10/2026,10:00:00,7,OS Billing Others
+07/10/2026,10:00:00,4,OS Billing Others
+08/10/2026,10:00:00,4,OS Billing Others
+09/10/2026,10:00:00,5,OS Billing Others
+10/10/2026,10:00:00,5,OS Billing Others
+11/10/2026,10:00:00,9,OS Billing Others
+12/10/2026,10:00:00,6,OS Billing Others
+13/10/2026,10:00:00,4,OS Billing Others
+14/10/2026,10:00:00,6,OS Billing Others
+15/10/2026,10:00:00,2,OS Billing Others
+16/10/2026,10:00:00,9,OS Billing Others
+17/10/2026,10:00:00,5,OS Billing Others
+18/10/2026,10:00:00,7,OS Billing Others
+19/10/2026,10:00:00,7,OS Billing Others
+20/10/2026,10:00:00,4,OS Billing Others
+21/10/2026,10:00:00,6,OS Billing Others
+22/10/2026,10:00:00,7,OS Billing Others
+23/10/2026,10:00:00,9,OS Billing Others
+24/10/2026,10:00:00,6,OS Billing Others
+25/10/2026,10:00:00,6,OS Billing Others
+26/10/2026,10:00:00,4,OS Billing Others
+27/10/2026,10:00:00,11,OS Billing Others
+28/10/2026,10:00:00,12,OS Billing Others
+29/10/2026,10:00:00,9,OS Billing Others
+30/10/2026,10:00:00,2,OS Billing Others
+31/10/2026,10:00:00,4,OS Billing Others
+01/10/2026,10:30:00,29,OS Billing Others
+02/10/2026,10:30:00,21,OS Billing Others
+03/10/2026,10:30:00,10,OS Billing Others
+04/10/2026,10:30:00,6,OS Billing Others
+05/10/2026,10:30:00,21,OS Billing Others
+06/10/2026,10:30:00,15,OS Billing Others
+07/10/2026,10:30:00,14,OS Billing Others
+08/10/2026,10:30:00,11,OS Billing Others
+09/10/2026,10:30:00,17,OS Billing Others
+10/10/2026,10:30:00,7,OS Billing Others
+11/10/2026,10:30:00,15,OS Billing Others
+12/10/2026,10:30:00,4,OS Billing Others
+13/10/2026,10:30:00,10,OS Billing Others
+14/10/2026,10:30:00,11,OS Billing Others
+15/10/2026,10:30:00,11,OS Billing Others
+16/10/2026,10:30:00,6,OS Billing Others
+17/10/2026,10:30:00,6,OS Billing Others
+18/10/2026,10:30:00,11,OS Billing Others
+19/10/2026,10:30:00,2,OS Billing Others
+20/10/2026,10:30:00,10,OS Billing Others
+21/10/2026,10:30:00,4,OS Billing Others
+22/10/2026,10:30:00,15,OS Billing Others
+23/10/2026,10:30:00,7,OS Billing Others
+24/10/2026,10:30:00,6,OS Billing Others
+25/10/2026,10:30:00,12,OS Billing Others
+26/10/2026,10:30:00,12,OS Billing Others
+27/10/2026,10:30:00,7,OS Billing Others
+28/10/2026,10:30:00,7,OS Billing Others
+29/10/2026,10:30:00,10,OS Billing Others
+30/10/2026,10:30:00,7,OS Billing Others
+31/10/2026,10:30:00,6,OS Billing Others
+01/10/2026,11:00:00,25,OS Billing Others
+02/10/2026,11:00:00,16,OS Billing Others
+03/10/2026,11:00:00,12,OS Billing Others
+04/10/2026,11:00:00,29,OS Billing Others
+05/10/2026,11:00:00,20,OS Billing Others
+06/10/2026,11:00:00,10,OS Billing Others
+07/10/2026,11:00:00,19,OS Billing Others
+08/10/2026,11:00:00,21,OS Billing Others
+09/10/2026,11:00:00,22,OS Billing Others
+10/10/2026,11:00:00,14,OS Billing Others
+11/10/2026,11:00:00,21,OS Billing Others
+12/10/2026,11:00:00,9,OS Billing Others
+13/10/2026,11:00:00,7,OS Billing Others
+14/10/2026,11:00:00,14,OS Billing Others
+15/10/2026,11:00:00,9,OS Billing Others
+16/10/2026,11:00:00,16,OS Billing Others
+17/10/2026,11:00:00,14,OS Billing Others
+18/10/2026,11:00:00,5,OS Billing Others
+19/10/2026,11:00:00,4,OS Billing Others
+20/10/2026,11:00:00,7,OS Billing Others
+21/10/2026,11:00:00,11,OS Billing Others
+22/10/2026,11:00:00,15,OS Billing Others
+23/10/2026,11:00:00,6,OS Billing Others
+24/10/2026,11:00:00,9,OS Billing Others
+25/10/2026,11:00:00,9,OS Billing Others
+26/10/2026,11:00:00,20,OS Billing Others
+27/10/2026,11:00:00,12,OS Billing Others
+28/10/2026,11:00:00,10,OS Billing Others
+29/10/2026,11:00:00,10,OS Billing Others
+30/10/2026,11:00:00,10,OS Billing Others
+31/10/2026,11:00:00,15,OS Billing Others
+01/10/2026,11:30:00,29,OS Billing Others
+02/10/2026,11:30:00,21,OS Billing Others
+03/10/2026,11:30:00,17,OS Billing Others
+04/10/2026,11:30:00,15,OS Billing Others
+05/10/2026,11:30:00,15,OS Billing Others
+06/10/2026,11:30:00,16,OS Billing Others
+07/10/2026,11:30:00,19,OS Billing Others
+08/10/2026,11:30:00,15,OS Billing Others
+09/10/2026,11:30:00,9,OS Billing Others
+10/10/2026,11:30:00,9,OS Billing Others
+11/10/2026,11:30:00,11,OS Billing Others
+12/10/2026,11:30:00,10,OS Billing Others
+13/10/2026,11:30:00,11,OS Billing Others
+14/10/2026,11:30:00,15,OS Billing Others
+15/10/2026,11:30:00,14,OS Billing Others
+16/10/2026,11:30:00,11,OS Billing Others
+17/10/2026,11:30:00,17,OS Billing Others
+18/10/2026,11:30:00,14,OS Billing Others
+19/10/2026,11:30:00,10,OS Billing Others
+20/10/2026,11:30:00,12,OS Billing Others
+21/10/2026,11:30:00,19,OS Billing Others
+22/10/2026,11:30:00,11,OS Billing Others
+23/10/2026,11:30:00,20,OS Billing Others
+24/10/2026,11:30:00,4,OS Billing Others
+25/10/2026,11:30:00,10,OS Billing Others
+26/10/2026,11:30:00,6,OS Billing Others
+27/10/2026,11:30:00,7,OS Billing Others
+28/10/2026,11:30:00,15,OS Billing Others
+29/10/2026,11:30:00,6,OS Billing Others
+30/10/2026,11:30:00,11,OS Billing Others
+31/10/2026,11:30:00,15,OS Billing Others
+01/10/2026,12:00:00,27,OS Billing Others
+02/10/2026,12:00:00,17,OS Billing Others
+03/10/2026,12:00:00,17,OS Billing Others
+04/10/2026,12:00:00,26,OS Billing Others
+05/10/2026,12:00:00,14,OS Billing Others
+06/10/2026,12:00:00,15,OS Billing Others
+07/10/2026,12:00:00,17,OS Billing Others
+08/10/2026,12:00:00,19,OS Billing Others
+09/10/2026,12:00:00,15,OS Billing Others
+10/10/2026,12:00:00,11,OS Billing Others
+11/10/2026,12:00:00,10,OS Billing Others
+12/10/2026,12:00:00,6,OS Billing Others
+13/10/2026,12:00:00,12,OS Billing Others
+14/10/2026,12:00:00,15,OS Billing Others
+15/10/2026,12:00:00,17,OS Billing Others
+16/10/2026,12:00:00,11,OS Billing Others
+17/10/2026,12:00:00,15,OS Billing Others
+18/10/2026,12:00:00,10,OS Billing Others
+19/10/2026,12:00:00,10,OS Billing Others
+20/10/2026,12:00:00,16,OS Billing Others
+21/10/2026,12:00:00,16,OS Billing Others
+22/10/2026,12:00:00,17,OS Billing Others
+23/10/2026,12:00:00,5,OS Billing Others
+24/10/2026,12:00:00,5,OS Billing Others
+25/10/2026,12:00:00,12,OS Billing Others
+26/10/2026,12:00:00,7,OS Billing Others
+27/10/2026,12:00:00,20,OS Billing Others
+28/10/2026,12:00:00,17,OS Billing Others
+29/10/2026,12:00:00,10,OS Billing Others
+30/10/2026,12:00:00,7,OS Billing Others
+31/10/2026,12:00:00,20,OS Billing Others
+01/10/2026,12:30:00,25,OS Billing Others
+02/10/2026,12:30:00,14,OS Billing Others
+03/10/2026,12:30:00,11,OS Billing Others
+04/10/2026,12:30:00,21,OS Billing Others
+05/10/2026,12:30:00,17,OS Billing Others
+06/10/2026,12:30:00,14,OS Billing Others
+07/10/2026,12:30:00,16,OS Billing Others
+08/10/2026,12:30:00,17,OS Billing Others
+09/10/2026,12:30:00,15,OS Billing Others
+10/10/2026,12:30:00,14,OS Billing Others
+11/10/2026,12:30:00,19,OS Billing Others
+12/10/2026,12:30:00,14,OS Billing Others
+13/10/2026,12:30:00,10,OS Billing Others
+14/10/2026,12:30:00,11,OS Billing Others
+15/10/2026,12:30:00,11,OS Billing Others
+16/10/2026,12:30:00,16,OS Billing Others
+17/10/2026,12:30:00,10,OS Billing Others
+18/10/2026,12:30:00,19,OS Billing Others
+19/10/2026,12:30:00,6,OS Billing Others
+20/10/2026,12:30:00,17,OS Billing Others
+21/10/2026,12:30:00,12,OS Billing Others
+22/10/2026,12:30:00,15,OS Billing Others
+23/10/2026,12:30:00,12,OS Billing Others
+24/10/2026,12:30:00,6,OS Billing Others
+25/10/2026,12:30:00,17,OS Billing Others
+26/10/2026,12:30:00,10,OS Billing Others
+27/10/2026,12:30:00,11,OS Billing Others
+28/10/2026,12:30:00,5,OS Billing Others
+29/10/2026,12:30:00,11,OS Billing Others
+30/10/2026,12:30:00,6,OS Billing Others
+31/10/2026,12:30:00,11,OS Billing Others
+01/10/2026,13:00:00,29,OS Billing Others
+02/10/2026,13:00:00,33,OS Billing Others
+03/10/2026,13:00:00,10,OS Billing Others
+04/10/2026,13:00:00,12,OS Billing Others
+05/10/2026,13:00:00,25,OS Billing Others
+06/10/2026,13:00:00,21,OS Billing Others
+07/10/2026,13:00:00,14,OS Billing Others
+08/10/2026,13:00:00,20,OS Billing Others
+09/10/2026,13:00:00,4,OS Billing Others
+10/10/2026,13:00:00,14,OS Billing Others
+11/10/2026,13:00:00,24,OS Billing Others
+12/10/2026,13:00:00,14,OS Billing Others
+13/10/2026,13:00:00,10,OS Billing Others
+14/10/2026,13:00:00,16,OS Billing Others
+15/10/2026,13:00:00,10,OS Billing Others
+16/10/2026,13:00:00,20,OS Billing Others
+17/10/2026,13:00:00,7,OS Billing Others
+18/10/2026,13:00:00,10,OS Billing Others
+19/10/2026,13:00:00,6,OS Billing Others
+20/10/2026,13:00:00,15,OS Billing Others
+21/10/2026,13:00:00,9,OS Billing Others
+22/10/2026,13:00:00,11,OS Billing Others
+23/10/2026,13:00:00,19,OS Billing Others
+24/10/2026,13:00:00,14,OS Billing Others
+25/10/2026,13:00:00,21,OS Billing Others
+26/10/2026,13:00:00,10,OS Billing Others
+27/10/2026,13:00:00,15,OS Billing Others
+28/10/2026,13:00:00,5,OS Billing Others
+29/10/2026,13:00:00,16,OS Billing Others
+30/10/2026,13:00:00,9,OS Billing Others
+31/10/2026,13:00:00,15,OS Billing Others
+01/10/2026,13:30:00,20,OS Billing Others
+02/10/2026,13:30:00,35,OS Billing Others
+03/10/2026,13:30:00,15,OS Billing Others
+04/10/2026,13:30:00,17,OS Billing Others
+05/10/2026,13:30:00,21,OS Billing Others
+06/10/2026,13:30:00,11,OS Billing Others
+07/10/2026,13:30:00,14,OS Billing Others
+08/10/2026,13:30:00,15,OS Billing Others
+09/10/2026,13:30:00,7,OS Billing Others
+10/10/2026,13:30:00,15,OS Billing Others
+11/10/2026,13:30:00,12,OS Billing Others
+12/10/2026,13:30:00,14,OS Billing Others
+13/10/2026,13:30:00,27,OS Billing Others
+14/10/2026,13:30:00,17,OS Billing Others
+15/10/2026,13:30:00,12,OS Billing Others
+16/10/2026,13:30:00,17,OS Billing Others
+17/10/2026,13:30:00,9,OS Billing Others
+18/10/2026,13:30:00,12,OS Billing Others
+19/10/2026,13:30:00,15,OS Billing Others
+20/10/2026,13:30:00,12,OS Billing Others
+21/10/2026,13:30:00,9,OS Billing Others
+22/10/2026,13:30:00,19,OS Billing Others
+23/10/2026,13:30:00,12,OS Billing Others
+24/10/2026,13:30:00,6,OS Billing Others
+25/10/2026,13:30:00,15,OS Billing Others
+26/10/2026,13:30:00,12,OS Billing Others
+27/10/2026,13:30:00,17,OS Billing Others
+28/10/2026,13:30:00,16,OS Billing Others
+29/10/2026,13:30:00,20,OS Billing Others
+30/10/2026,13:30:00,9,OS Billing Others
+31/10/2026,13:30:00,14,OS Billing Others
+01/10/2026,14:00:00,52,OS Billing Others
+02/10/2026,14:00:00,22,OS Billing Others
+03/10/2026,14:00:00,17,OS Billing Others
+04/10/2026,14:00:00,22,OS Billing Others
+05/10/2026,14:00:00,10,OS Billing Others
+06/10/2026,14:00:00,17,OS Billing Others
+07/10/2026,14:00:00,21,OS Billing Others
+08/10/2026,14:00:00,16,OS Billing Others
+09/10/2026,14:00:00,16,OS Billing Others
+10/10/2026,14:00:00,11,OS Billing Others
+11/10/2026,14:00:00,19,OS Billing Others
+12/10/2026,14:00:00,15,OS Billing Others
+13/10/2026,14:00:00,27,OS Billing Others
+14/10/2026,14:00:00,15,OS Billing Others
+15/10/2026,14:00:00,6,OS Billing Others
+16/10/2026,14:00:00,17,OS Billing Others
+17/10/2026,14:00:00,11,OS Billing Others
+18/10/2026,14:00:00,10,OS Billing Others
+19/10/2026,14:00:00,16,OS Billing Others
+20/10/2026,14:00:00,11,OS Billing Others
+21/10/2026,14:00:00,21,OS Billing Others
+22/10/2026,14:00:00,17,OS Billing Others
+23/10/2026,14:00:00,7,OS Billing Others
+24/10/2026,14:00:00,12,OS Billing Others
+25/10/2026,14:00:00,26,OS Billing Others
+26/10/2026,14:00:00,20,OS Billing Others
+27/10/2026,14:00:00,16,OS Billing Others
+28/10/2026,14:00:00,10,OS Billing Others
+29/10/2026,14:00:00,15,OS Billing Others
+30/10/2026,14:00:00,14,OS Billing Others
+31/10/2026,14:00:00,9,OS Billing Others
+01/10/2026,14:30:00,41,OS Billing Others
+02/10/2026,14:30:00,26,OS Billing Others
+03/10/2026,14:30:00,22,OS Billing Others
+04/10/2026,14:30:00,24,OS Billing Others
+05/10/2026,14:30:00,10,OS Billing Others
+06/10/2026,14:30:00,20,OS Billing Others
+07/10/2026,14:30:00,20,OS Billing Others
+08/10/2026,14:30:00,24,OS Billing Others
+09/10/2026,14:30:00,20,OS Billing Others
+10/10/2026,14:30:00,11,OS Billing Others
+11/10/2026,14:30:00,14,OS Billing Others
+12/10/2026,14:30:00,10,OS Billing Others
+13/10/2026,14:30:00,20,OS Billing Others
+14/10/2026,14:30:00,12,OS Billing Others
+15/10/2026,14:30:00,17,OS Billing Others
+16/10/2026,14:30:00,22,OS Billing Others
+17/10/2026,14:30:00,7,OS Billing Others
+18/10/2026,14:30:00,14,OS Billing Others
+19/10/2026,14:30:00,19,OS Billing Others
+20/10/2026,14:30:00,14,OS Billing Others
+21/10/2026,14:30:00,20,OS Billing Others
+22/10/2026,14:30:00,15,OS Billing Others
+23/10/2026,14:30:00,14,OS Billing Others
+24/10/2026,14:30:00,9,OS Billing Others
+25/10/2026,14:30:00,24,OS Billing Others
+26/10/2026,14:30:00,12,OS Billing Others
+27/10/2026,14:30:00,15,OS Billing Others
+28/10/2026,14:30:00,12,OS Billing Others
+29/10/2026,14:30:00,12,OS Billing Others
+30/10/2026,14:30:00,5,OS Billing Others
+31/10/2026,14:30:00,16,OS Billing Others
+01/10/2026,15:00:00,36,OS Billing Others
+02/10/2026,15:00:00,25,OS Billing Others
+03/10/2026,15:00:00,16,OS Billing Others
+04/10/2026,15:00:00,30,OS Billing Others
+05/10/2026,15:00:00,12,OS Billing Others
+06/10/2026,15:00:00,25,OS Billing Others
+07/10/2026,15:00:00,24,OS Billing Others
+08/10/2026,15:00:00,19,OS Billing Others
+09/10/2026,15:00:00,16,OS Billing Others
+10/10/2026,15:00:00,9,OS Billing Others
+11/10/2026,15:00:00,15,OS Billing Others
+12/10/2026,15:00:00,11,OS Billing Others
+13/10/2026,15:00:00,29,OS Billing Others
+14/10/2026,15:00:00,9,OS Billing Others
+15/10/2026,15:00:00,14,OS Billing Others
+16/10/2026,15:00:00,11,OS Billing Others
+17/10/2026,15:00:00,27,OS Billing Others
+18/10/2026,15:00:00,19,OS Billing Others
+19/10/2026,15:00:00,12,OS Billing Others
+20/10/2026,15:00:00,24,OS Billing Others
+21/10/2026,15:00:00,12,OS Billing Others
+22/10/2026,15:00:00,21,OS Billing Others
+23/10/2026,15:00:00,6,OS Billing Others
+24/10/2026,15:00:00,14,OS Billing Others
+25/10/2026,15:00:00,22,OS Billing Others
+26/10/2026,15:00:00,19,OS Billing Others
+27/10/2026,15:00:00,11,OS Billing Others
+28/10/2026,15:00:00,9,OS Billing Others
+29/10/2026,15:00:00,15,OS Billing Others
+30/10/2026,15:00:00,15,OS Billing Others
+31/10/2026,15:00:00,19,OS Billing Others
+01/10/2026,15:30:00,30,OS Billing Others
+02/10/2026,15:30:00,21,OS Billing Others
+03/10/2026,15:30:00,30,OS Billing Others
+04/10/2026,15:30:00,12,OS Billing Others
+05/10/2026,15:30:00,20,OS Billing Others
+06/10/2026,15:30:00,6,OS Billing Others
+07/10/2026,15:30:00,19,OS Billing Others
+08/10/2026,15:30:00,16,OS Billing Others
+09/10/2026,15:30:00,17,OS Billing Others
+10/10/2026,15:30:00,11,OS Billing Others
+11/10/2026,15:30:00,15,OS Billing Others
+12/10/2026,15:30:00,10,OS Billing Others
+13/10/2026,15:30:00,20,OS Billing Others
+14/10/2026,15:30:00,9,OS Billing Others
+15/10/2026,15:30:00,21,OS Billing Others
+16/10/2026,15:30:00,14,OS Billing Others
+17/10/2026,15:30:00,14,OS Billing Others
+18/10/2026,15:30:00,11,OS Billing Others
+19/10/2026,15:30:00,10,OS Billing Others
+20/10/2026,15:30:00,9,OS Billing Others
+21/10/2026,15:30:00,12,OS Billing Others
+22/10/2026,15:30:00,12,OS Billing Others
+23/10/2026,15:30:00,21,OS Billing Others
+24/10/2026,15:30:00,5,OS Billing Others
+25/10/2026,15:30:00,15,OS Billing Others
+26/10/2026,15:30:00,12,OS Billing Others
+27/10/2026,15:30:00,11,OS Billing Others
+28/10/2026,15:30:00,16,OS Billing Others
+29/10/2026,15:30:00,7,OS Billing Others
+30/10/2026,15:30:00,10,OS Billing Others
+31/10/2026,15:30:00,31,OS Billing Others
+01/10/2026,16:00:00,30,OS Billing Others
+02/10/2026,16:00:00,24,OS Billing Others
+03/10/2026,16:00:00,25,OS Billing Others
+04/10/2026,16:00:00,17,OS Billing Others
+05/10/2026,16:00:00,21,OS Billing Others
+06/10/2026,16:00:00,17,OS Billing Others
+07/10/2026,16:00:00,12,OS Billing Others
+08/10/2026,16:00:00,16,OS Billing Others
+09/10/2026,16:00:00,12,OS Billing Others
+10/10/2026,16:00:00,24,OS Billing Others
+11/10/2026,16:00:00,9,OS Billing Others
+12/10/2026,16:00:00,10,OS Billing Others
+13/10/2026,16:00:00,25,OS Billing Others
+14/10/2026,16:00:00,19,OS Billing Others
+15/10/2026,16:00:00,14,OS Billing Others
+16/10/2026,16:00:00,17,OS Billing Others
+17/10/2026,16:00:00,11,OS Billing Others
+18/10/2026,16:00:00,19,OS Billing Others
+19/10/2026,16:00:00,9,OS Billing Others
+20/10/2026,16:00:00,20,OS Billing Others
+21/10/2026,16:00:00,9,OS Billing Others
+22/10/2026,16:00:00,16,OS Billing Others
+23/10/2026,16:00:00,12,OS Billing Others
+24/10/2026,16:00:00,16,OS Billing Others
+25/10/2026,16:00:00,14,OS Billing Others
+26/10/2026,16:00:00,15,OS Billing Others
+27/10/2026,16:00:00,14,OS Billing Others
+28/10/2026,16:00:00,12,OS Billing Others
+29/10/2026,16:00:00,15,OS Billing Others
+30/10/2026,16:00:00,16,OS Billing Others
+31/10/2026,16:00:00,12,OS Billing Others
+01/10/2026,16:30:00,35,OS Billing Others
+02/10/2026,16:30:00,31,OS Billing Others
+03/10/2026,16:30:00,22,OS Billing Others
+04/10/2026,16:30:00,15,OS Billing Others
+05/10/2026,16:30:00,20,OS Billing Others
+06/10/2026,16:30:00,22,OS Billing Others
+07/10/2026,16:30:00,16,OS Billing Others
+08/10/2026,16:30:00,17,OS Billing Others
+09/10/2026,16:30:00,19,OS Billing Others
+10/10/2026,16:30:00,14,OS Billing Others
+11/10/2026,16:30:00,9,OS Billing Others
+12/10/2026,16:30:00,16,OS Billing Others
+13/10/2026,16:30:00,19,OS Billing Others
+14/10/2026,16:30:00,21,OS Billing Others
+15/10/2026,16:30:00,20,OS Billing Others
+16/10/2026,16:30:00,15,OS Billing Others
+17/10/2026,16:30:00,15,OS Billing Others
+18/10/2026,16:30:00,19,OS Billing Others
+19/10/2026,16:30:00,10,OS Billing Others
+20/10/2026,16:30:00,15,OS Billing Others
+21/10/2026,16:30:00,16,OS Billing Others
+22/10/2026,16:30:00,17,OS Billing Others
+23/10/2026,16:30:00,17,OS Billing Others
+24/10/2026,16:30:00,16,OS Billing Others
+25/10/2026,16:30:00,9,OS Billing Others
+26/10/2026,16:30:00,10,OS Billing Others
+27/10/2026,16:30:00,20,OS Billing Others
+28/10/2026,16:30:00,12,OS Billing Others
+29/10/2026,16:30:00,10,OS Billing Others
+30/10/2026,16:30:00,26,OS Billing Others
+31/10/2026,16:30:00,16,OS Billing Others
+01/10/2026,17:00:00,47,OS Billing Others
+02/10/2026,17:00:00,35,OS Billing Others
+03/10/2026,17:00:00,25,OS Billing Others
+04/10/2026,17:00:00,19,OS Billing Others
+05/10/2026,17:00:00,16,OS Billing Others
+06/10/2026,17:00:00,21,OS Billing Others
+07/10/2026,17:00:00,12,OS Billing Others
+08/10/2026,17:00:00,11,OS Billing Others
+09/10/2026,17:00:00,19,OS Billing Others
+10/10/2026,17:00:00,16,OS Billing Others
+11/10/2026,17:00:00,20,OS Billing Others
+12/10/2026,17:00:00,15,OS Billing Others
+13/10/2026,17:00:00,15,OS Billing Others
+14/10/2026,17:00:00,15,OS Billing Others
+15/10/2026,17:00:00,21,OS Billing Others
+16/10/2026,17:00:00,12,OS Billing Others
+17/10/2026,17:00:00,15,OS Billing Others
+18/10/2026,17:00:00,21,OS Billing Others
+19/10/2026,17:00:00,9,OS Billing Others
+20/10/2026,17:00:00,12,OS Billing Others
+21/10/2026,17:00:00,9,OS Billing Others
+22/10/2026,17:00:00,14,OS Billing Others
+23/10/2026,17:00:00,14,OS Billing Others
+24/10/2026,17:00:00,17,OS Billing Others
+25/10/2026,17:00:00,12,OS Billing Others
+26/10/2026,17:00:00,12,OS Billing Others
+27/10/2026,17:00:00,22,OS Billing Others
+28/10/2026,17:00:00,12,OS Billing Others
+29/10/2026,17:00:00,17,OS Billing Others
+30/10/2026,17:00:00,21,OS Billing Others
+31/10/2026,17:00:00,12,OS Billing Others
+01/10/2026,17:30:00,37,OS Billing Others
+02/10/2026,17:30:00,26,OS Billing Others
+03/10/2026,17:30:00,12,OS Billing Others
+04/10/2026,17:30:00,19,OS Billing Others
+05/10/2026,17:30:00,15,OS Billing Others
+06/10/2026,17:30:00,20,OS Billing Others
+07/10/2026,17:30:00,14,OS Billing Others
+08/10/2026,17:30:00,12,OS Billing Others
+09/10/2026,17:30:00,15,OS Billing Others
+10/10/2026,17:30:00,20,OS Billing Others
+11/10/2026,17:30:00,16,OS Billing Others
+12/10/2026,17:30:00,11,OS Billing Others
+13/10/2026,17:30:00,17,OS Billing Others
+14/10/2026,17:30:00,17,OS Billing Others
+15/10/2026,17:30:00,25,OS Billing Others
+16/10/2026,17:30:00,17,OS Billing Others
+17/10/2026,17:30:00,15,OS Billing Others
+18/10/2026,17:30:00,16,OS Billing Others
+19/10/2026,17:30:00,6,OS Billing Others
+20/10/2026,17:30:00,12,OS Billing Others
+21/10/2026,17:30:00,14,OS Billing Others
+22/10/2026,17:30:00,11,OS Billing Others
+23/10/2026,17:30:00,12,OS Billing Others
+24/10/2026,17:30:00,19,OS Billing Others
+25/10/2026,17:30:00,21,OS Billing Others
+26/10/2026,17:30:00,9,OS Billing Others
+27/10/2026,17:30:00,19,OS Billing Others
+28/10/2026,17:30:00,7,OS Billing Others
+29/10/2026,17:30:00,16,OS Billing Others
+30/10/2026,17:30:00,14,OS Billing Others
+31/10/2026,17:30:00,12,OS Billing Others
+01/10/2026,18:00:00,36,OS Billing Others
+02/10/2026,18:00:00,22,OS Billing Others
+03/10/2026,18:00:00,20,OS Billing Others
+04/10/2026,18:00:00,16,OS Billing Others
+05/10/2026,18:00:00,12,OS Billing Others
+06/10/2026,18:00:00,16,OS Billing Others
+07/10/2026,18:00:00,12,OS Billing Others
+08/10/2026,18:00:00,21,OS Billing Others
+09/10/2026,18:00:00,24,OS Billing Others
+10/10/2026,18:00:00,14,OS Billing Others
+11/10/2026,18:00:00,14,OS Billing Others
+12/10/2026,18:00:00,7,OS Billing Others
+13/10/2026,18:00:00,12,OS Billing Others
+14/10/2026,18:00:00,22,OS Billing Others
+15/10/2026,18:00:00,17,OS Billing Others
+16/10/2026,18:00:00,4,OS Billing Others
+17/10/2026,18:00:00,14,OS Billing Others
+18/10/2026,18:00:00,20,OS Billing Others
+19/10/2026,18:00:00,14,OS Billing Others
+20/10/2026,18:00:00,11,OS Billing Others
+21/10/2026,18:00:00,16,OS Billing Others
+22/10/2026,18:00:00,9,OS Billing Others
+23/10/2026,18:00:00,12,OS Billing Others
+24/10/2026,18:00:00,10,OS Billing Others
+25/10/2026,18:00:00,11,OS Billing Others
+26/10/2026,18:00:00,10,OS Billing Others
+27/10/2026,18:00:00,14,OS Billing Others
+28/10/2026,18:00:00,12,OS Billing Others
+29/10/2026,18:00:00,21,OS Billing Others
+30/10/2026,18:00:00,22,OS Billing Others
+31/10/2026,18:00:00,16,OS Billing Others
+01/10/2026,18:30:00,20,OS Billing Others
+02/10/2026,18:30:00,24,OS Billing Others
+03/10/2026,18:30:00,25,OS Billing Others
+04/10/2026,18:30:00,11,OS Billing Others
+05/10/2026,18:30:00,14,OS Billing Others
+06/10/2026,18:30:00,16,OS Billing Others
+07/10/2026,18:30:00,11,OS Billing Others
+08/10/2026,18:30:00,15,OS Billing Others
+09/10/2026,18:30:00,9,OS Billing Others
+10/10/2026,18:30:00,10,OS Billing Others
+11/10/2026,18:30:00,9,OS Billing Others
+12/10/2026,18:30:00,6,OS Billing Others
+13/10/2026,18:30:00,16,OS Billing Others
+14/10/2026,18:30:00,20,OS Billing Others
+15/10/2026,18:30:00,10,OS Billing Others
+16/10/2026,18:30:00,6,OS Billing Others
+17/10/2026,18:30:00,9,OS Billing Others
+18/10/2026,18:30:00,14,OS Billing Others
+19/10/2026,18:30:00,14,OS Billing Others
+20/10/2026,18:30:00,17,OS Billing Others
+21/10/2026,18:30:00,9,OS Billing Others
+22/10/2026,18:30:00,7,OS Billing Others
+23/10/2026,18:30:00,11,OS Billing Others
+24/10/2026,18:30:00,11,OS Billing Others
+25/10/2026,18:30:00,12,OS Billing Others
+26/10/2026,18:30:00,12,OS Billing Others
+27/10/2026,18:30:00,12,OS Billing Others
+28/10/2026,18:30:00,12,OS Billing Others
+29/10/2026,18:30:00,17,OS Billing Others
+30/10/2026,18:30:00,9,OS Billing Others
+31/10/2026,18:30:00,12,OS Billing Others
+01/10/2026,19:00:00,25,OS Billing Others
+02/10/2026,19:00:00,15,OS Billing Others
+03/10/2026,19:00:00,19,OS Billing Others
+04/10/2026,19:00:00,16,OS Billing Others
+05/10/2026,19:00:00,6,OS Billing Others
+06/10/2026,19:00:00,15,OS Billing Others
+07/10/2026,19:00:00,9,OS Billing Others
+08/10/2026,19:00:00,14,OS Billing Others
+09/10/2026,19:00:00,10,OS Billing Others
+10/10/2026,19:00:00,11,OS Billing Others
+11/10/2026,19:00:00,12,OS Billing Others
+12/10/2026,19:00:00,10,OS Billing Others
+13/10/2026,19:00:00,12,OS Billing Others
+14/10/2026,19:00:00,14,OS Billing Others
+15/10/2026,19:00:00,7,OS Billing Others
+16/10/2026,19:00:00,9,OS Billing Others
+17/10/2026,19:00:00,15,OS Billing Others
+18/10/2026,19:00:00,4,OS Billing Others
+19/10/2026,19:00:00,14,OS Billing Others
+20/10/2026,19:00:00,9,OS Billing Others
+21/10/2026,19:00:00,6,OS Billing Others
+22/10/2026,19:00:00,5,OS Billing Others
+23/10/2026,19:00:00,15,OS Billing Others
+24/10/2026,19:00:00,14,OS Billing Others
+25/10/2026,19:00:00,11,OS Billing Others
+26/10/2026,19:00:00,14,OS Billing Others
+27/10/2026,19:00:00,16,OS Billing Others
+28/10/2026,19:00:00,6,OS Billing Others
+29/10/2026,19:00:00,9,OS Billing Others
+30/10/2026,19:00:00,20,OS Billing Others
+31/10/2026,19:00:00,11,OS Billing Others
+01/10/2026,19:30:00,33,OS Billing Others
+02/10/2026,19:30:00,21,OS Billing Others
+03/10/2026,19:30:00,10,OS Billing Others
+04/10/2026,19:30:00,6,OS Billing Others
+05/10/2026,19:30:00,11,OS Billing Others
+06/10/2026,19:30:00,17,OS Billing Others
+07/10/2026,19:30:00,14,OS Billing Others
+08/10/2026,19:30:00,15,OS Billing Others
+09/10/2026,19:30:00,6,OS Billing Others
+10/10/2026,19:30:00,9,OS Billing Others
+11/10/2026,19:30:00,5,OS Billing Others
+12/10/2026,19:30:00,11,OS Billing Others
+13/10/2026,19:30:00,14,OS Billing Others
+14/10/2026,19:30:00,15,OS Billing Others
+15/10/2026,19:30:00,10,OS Billing Others
+16/10/2026,19:30:00,9,OS Billing Others
+17/10/2026,19:30:00,6,OS Billing Others
+18/10/2026,19:30:00,9,OS Billing Others
+19/10/2026,19:30:00,17,OS Billing Others
+20/10/2026,19:30:00,9,OS Billing Others
+21/10/2026,19:30:00,9,OS Billing Others
+22/10/2026,19:30:00,19,OS Billing Others
+23/10/2026,19:30:00,9,OS Billing Others
+24/10/2026,19:30:00,10,OS Billing Others
+25/10/2026,19:30:00,10,OS Billing Others
+26/10/2026,19:30:00,1,OS Billing Others
+27/10/2026,19:30:00,15,OS Billing Others
+28/10/2026,19:30:00,9,OS Billing Others
+29/10/2026,19:30:00,9,OS Billing Others
+30/10/2026,19:30:00,7,OS Billing Others
+31/10/2026,19:30:00,12,OS Billing Others
+01/10/2026,20:00:00,17,OS Billing Others
+02/10/2026,20:00:00,19,OS Billing Others
+03/10/2026,20:00:00,16,OS Billing Others
+04/10/2026,20:00:00,10,OS Billing Others
+05/10/2026,20:00:00,12,OS Billing Others
+06/10/2026,20:00:00,12,OS Billing Others
+07/10/2026,20:00:00,7,OS Billing Others
+08/10/2026,20:00:00,9,OS Billing Others
+09/10/2026,20:00:00,14,OS Billing Others
+10/10/2026,20:00:00,7,OS Billing Others
+11/10/2026,20:00:00,10,OS Billing Others
+12/10/2026,20:00:00,11,OS Billing Others
+13/10/2026,20:00:00,21,OS Billing Others
+14/10/2026,20:00:00,9,OS Billing Others
+15/10/2026,20:00:00,5,OS Billing Others
+16/10/2026,20:00:00,5,OS Billing Others
+17/10/2026,20:00:00,6,OS Billing Others
+18/10/2026,20:00:00,11,OS Billing Others
+19/10/2026,20:00:00,11,OS Billing Others
+20/10/2026,20:00:00,5,OS Billing Others
+21/10/2026,20:00:00,5,OS Billing Others
+22/10/2026,20:00:00,10,OS Billing Others
+23/10/2026,20:00:00,4,OS Billing Others
+24/10/2026,20:00:00,10,OS Billing Others
+25/10/2026,20:00:00,9,OS Billing Others
+26/10/2026,20:00:00,14,OS Billing Others
+27/10/2026,20:00:00,11,OS Billing Others
+28/10/2026,20:00:00,6,OS Billing Others
+29/10/2026,20:00:00,7,OS Billing Others
+30/10/2026,20:00:00,16,OS Billing Others
+31/10/2026,20:00:00,11,OS Billing Others
+01/10/2026,20:30:00,15,OS Billing Others
+02/10/2026,20:30:00,14,OS Billing Others
+03/10/2026,20:30:00,22,OS Billing Others
+04/10/2026,20:30:00,6,OS Billing Others
+05/10/2026,20:30:00,11,OS Billing Others
+06/10/2026,20:30:00,16,OS Billing Others
+07/10/2026,20:30:00,11,OS Billing Others
+08/10/2026,20:30:00,11,OS Billing Others
+09/10/2026,20:30:00,14,OS Billing Others
+10/10/2026,20:30:00,10,OS Billing Others
+11/10/2026,20:30:00,9,OS Billing Others
+12/10/2026,20:30:00,9,OS Billing Others
+13/10/2026,20:30:00,14,OS Billing Others
+14/10/2026,20:30:00,5,OS Billing Others
+15/10/2026,20:30:00,14,OS Billing Others
+16/10/2026,20:30:00,9,OS Billing Others
+17/10/2026,20:30:00,14,OS Billing Others
+18/10/2026,20:30:00,5,OS Billing Others
+19/10/2026,20:30:00,5,OS Billing Others
+20/10/2026,20:30:00,10,OS Billing Others
+21/10/2026,20:30:00,5,OS Billing Others
+22/10/2026,20:30:00,7,OS Billing Others
+23/10/2026,20:30:00,5,OS Billing Others
+24/10/2026,20:30:00,6,OS Billing Others
+25/10/2026,20:30:00,12,OS Billing Others
+26/10/2026,20:30:00,6,OS Billing Others
+27/10/2026,20:30:00,10,OS Billing Others
+28/10/2026,20:30:00,11,OS Billing Others
+29/10/2026,20:30:00,7,OS Billing Others
+30/10/2026,20:30:00,5,OS Billing Others
+31/10/2026,20:30:00,6,OS Billing Others
+01/10/2026,21:00:00,24,OS Billing Others
+02/10/2026,21:00:00,20,OS Billing Others
+03/10/2026,21:00:00,14,OS Billing Others
+04/10/2026,21:00:00,2,OS Billing Others
+05/10/2026,21:00:00,1,OS Billing Others
+06/10/2026,21:00:00,9,OS Billing Others
+07/10/2026,21:00:00,2,OS Billing Others
+08/10/2026,21:00:00,10,OS Billing Others
+09/10/2026,21:00:00,7,OS Billing Others
+10/10/2026,21:00:00,9,OS Billing Others
+11/10/2026,21:00:00,7,OS Billing Others
+12/10/2026,21:00:00,4,OS Billing Others
+13/10/2026,21:00:00,10,OS Billing Others
+14/10/2026,21:00:00,7,OS Billing Others
+15/10/2026,21:00:00,14,OS Billing Others
+16/10/2026,21:00:00,9,OS Billing Others
+17/10/2026,21:00:00,7,OS Billing Others
+18/10/2026,21:00:00,9,OS Billing Others
+19/10/2026,21:00:00,6,OS Billing Others
+20/10/2026,21:00:00,10,OS Billing Others
+21/10/2026,21:00:00,10,OS Billing Others
+22/10/2026,21:00:00,7,OS Billing Others
+23/10/2026,21:00:00,7,OS Billing Others
+24/10/2026,21:00:00,11,OS Billing Others
+25/10/2026,21:00:00,6,OS Billing Others
+26/10/2026,21:00:00,6,OS Billing Others
+27/10/2026,21:00:00,5,OS Billing Others
+28/10/2026,21:00:00,5,OS Billing Others
+29/10/2026,21:00:00,14,OS Billing Others
+30/10/2026,21:00:00,12,OS Billing Others
+31/10/2026,21:00:00,11,OS Billing Others
+01/10/2026,21:30:00,14,OS Billing Others
+02/10/2026,21:30:00,14,OS Billing Others
+03/10/2026,21:30:00,14,OS Billing Others
+04/10/2026,21:30:00,6,OS Billing Others
+05/10/2026,21:30:00,5,OS Billing Others
+06/10/2026,21:30:00,5,OS Billing Others
+07/10/2026,21:30:00,7,OS Billing Others
+08/10/2026,21:30:00,14,OS Billing Others
+09/10/2026,21:30:00,5,OS Billing Others
+10/10/2026,21:30:00,7,OS Billing Others
+11/10/2026,21:30:00,6,OS Billing Others
+12/10/2026,21:30:00,4,OS Billing Others
+13/10/2026,21:30:00,10,OS Billing Others
+14/10/2026,21:30:00,11,OS Billing Others
+15/10/2026,21:30:00,9,OS Billing Others
+16/10/2026,21:30:00,10,OS Billing Others
+17/10/2026,21:30:00,12,OS Billing Others
+18/10/2026,21:30:00,2,OS Billing Others
+19/10/2026,21:30:00,5,OS Billing Others
+20/10/2026,21:30:00,11,OS Billing Others
+21/10/2026,21:30:00,6,OS Billing Others
+22/10/2026,21:30:00,14,OS Billing Others
+23/10/2026,21:30:00,5,OS Billing Others
+24/10/2026,21:30:00,10,OS Billing Others
+25/10/2026,21:30:00,4,OS Billing Others
+26/10/2026,21:30:00,5,OS Billing Others
+27/10/2026,21:30:00,9,OS Billing Others
+28/10/2026,21:30:00,6,OS Billing Others
+29/10/2026,21:30:00,6,OS Billing Others
+30/10/2026,21:30:00,12,OS Billing Others
+31/10/2026,21:30:00,14,OS Billing Others
+01/10/2026,22:00:00,14,OS Billing Others
+02/10/2026,22:00:00,12,OS Billing Others
+03/10/2026,22:00:00,4,OS Billing Others
+04/10/2026,22:00:00,1,OS Billing Others
+05/10/2026,22:00:00,4,OS Billing Others
+06/10/2026,22:00:00,9,OS Billing Others
+07/10/2026,22:00:00,1,OS Billing Others
+08/10/2026,22:00:00,5,OS Billing Others
+09/10/2026,22:00:00,9,OS Billing Others
+10/10/2026,22:00:00,9,OS Billing Others
+11/10/2026,22:00:00,9,OS Billing Others
+12/10/2026,22:00:00,10,OS Billing Others
+13/10/2026,22:00:00,11,OS Billing Others
+14/10/2026,22:00:00,14,OS Billing Others
+15/10/2026,22:00:00,10,OS Billing Others
+16/10/2026,22:00:00,10,OS Billing Others
+17/10/2026,22:00:00,9,OS Billing Others
+18/10/2026,22:00:00,2,OS Billing Others
+19/10/2026,22:00:00,1,OS Billing Others
+20/10/2026,22:00:00,6,OS Billing Others
+21/10/2026,22:00:00,4,OS Billing Others
+22/10/2026,22:00:00,6,OS Billing Others
+23/10/2026,22:00:00,6,OS Billing Others
+24/10/2026,22:00:00,6,OS Billing Others
+25/10/2026,22:00:00,1,OS Billing Others
+26/10/2026,22:00:00,6,OS Billing Others
+27/10/2026,22:00:00,4,OS Billing Others
+28/10/2026,22:00:00,11,OS Billing Others
+29/10/2026,22:00:00,9,OS Billing Others
+30/10/2026,22:00:00,6,OS Billing Others
+31/10/2026,22:00:00,6,OS Billing Others
+01/10/2026,22:30:00,14,OS Billing Others
+02/10/2026,22:30:00,10,OS Billing Others
+03/10/2026,22:30:00,10,OS Billing Others
+04/10/2026,22:30:00,12,OS Billing Others
+05/10/2026,22:30:00,9,OS Billing Others
+06/10/2026,22:30:00,12,OS Billing Others
+07/10/2026,22:30:00,7,OS Billing Others
+08/10/2026,22:30:00,10,OS Billing Others
+09/10/2026,22:30:00,9,OS Billing Others
+10/10/2026,22:30:00,1,OS Billing Others
+11/10/2026,22:30:00,4,OS Billing Others
+12/10/2026,22:30:00,6,OS Billing Others
+13/10/2026,22:30:00,7,OS Billing Others
+14/10/2026,22:30:00,9,OS Billing Others
+15/10/2026,22:30:00,5,OS Billing Others
+16/10/2026,22:30:00,4,OS Billing Others
+17/10/2026,22:30:00,2,OS Billing Others
+18/10/2026,22:30:00,6,OS Billing Others
+19/10/2026,22:30:00,4,OS Billing Others
+20/10/2026,22:30:00,4,OS Billing Others
+21/10/2026,22:30:00,4,OS Billing Others
+22/10/2026,22:30:00,7,OS Billing Others
+23/10/2026,22:30:00,5,OS Billing Others
+24/10/2026,22:30:00,7,OS Billing Others
+25/10/2026,22:30:00,7,OS Billing Others
+26/10/2026,22:30:00,4,OS Billing Others
+27/10/2026,22:30:00,4,OS Billing Others
+28/10/2026,22:30:00,4,OS Billing Others
+29/10/2026,22:30:00,2,OS Billing Others
+30/10/2026,22:30:00,11,OS Billing Others
+31/10/2026,22:30:00,9,OS Billing Others
+01/10/2026,23:00:00,12,OS Billing Others
+02/10/2026,23:00:00,7,OS Billing Others
+03/10/2026,23:00:00,5,OS Billing Others
+04/10/2026,23:00:00,10,OS Billing Others
+05/10/2026,23:00:00,2,OS Billing Others
+06/10/2026,23:00:00,7,OS Billing Others
+07/10/2026,23:00:00,4,OS Billing Others
+08/10/2026,23:00:00,5,OS Billing Others
+09/10/2026,23:00:00,6,OS Billing Others
+10/10/2026,23:00:00,7,OS Billing Others
+11/10/2026,23:00:00,2,OS Billing Others
+12/10/2026,23:00:00,2,OS Billing Others
+13/10/2026,23:00:00,1,OS Billing Others
+14/10/2026,23:00:00,4,OS Billing Others
+15/10/2026,23:00:00,6,OS Billing Others
+16/10/2026,23:00:00,4,OS Billing Others
+17/10/2026,23:00:00,2,OS Billing Others
+18/10/2026,23:00:00,2,OS Billing Others
+19/10/2026,23:00:00,0,OS Billing Others
+20/10/2026,23:00:00,4,OS Billing Others
+21/10/2026,23:00:00,6,OS Billing Others
+22/10/2026,23:00:00,4,OS Billing Others
+23/10/2026,23:00:00,2,OS Billing Others
+24/10/2026,23:00:00,6,OS Billing Others
+25/10/2026,23:00:00,7,OS Billing Others
+26/10/2026,23:00:00,0,OS Billing Others
+27/10/2026,23:00:00,5,OS Billing Others
+28/10/2026,23:00:00,0,OS Billing Others
+29/10/2026,23:00:00,1,OS Billing Others
+30/10/2026,23:00:00,5,OS Billing Others
+31/10/2026,23:00:00,1,OS Billing Others
+01/10/2026,23:30:00,12,OS Billing Others
+02/10/2026,23:30:00,7,OS Billing Others
+03/10/2026,23:30:00,5,OS Billing Others
+04/10/2026,23:30:00,4,OS Billing Others
+05/10/2026,23:30:00,4,OS Billing Others
+06/10/2026,23:30:00,4,OS Billing Others
+07/10/2026,23:30:00,9,OS Billing Others
+08/10/2026,23:30:00,5,OS Billing Others
+09/10/2026,23:30:00,4,OS Billing Others
+10/10/2026,23:30:00,6,OS Billing Others
+11/10/2026,23:30:00,1,OS Billing Others
+12/10/2026,23:30:00,1,OS Billing Others
+13/10/2026,23:30:00,1,OS Billing Others
+14/10/2026,23:30:00,6,OS Billing Others
+15/10/2026,23:30:00,2,OS Billing Others
+16/10/2026,23:30:00,1,OS Billing Others
+17/10/2026,23:30:00,1,OS Billing Others
+18/10/2026,23:30:00,1,OS Billing Others
+19/10/2026,23:30:00,0,OS Billing Others
+20/10/2026,23:30:00,5,OS Billing Others
+21/10/2026,23:30:00,7,OS Billing Others
+22/10/2026,23:30:00,1,OS Billing Others
+23/10/2026,23:30:00,2,OS Billing Others
+24/10/2026,23:30:00,0,OS Billing Others
+25/10/2026,23:30:00,1,OS Billing Others
+26/10/2026,23:30:00,4,OS Billing Others
+27/10/2026,23:30:00,2,OS Billing Others
+28/10/2026,23:30:00,4,OS Billing Others
+29/10/2026,23:30:00,2,OS Billing Others
+30/10/2026,23:30:00,6,OS Billing Others
+31/10/2026,23:30:00,6,OS Billing Others

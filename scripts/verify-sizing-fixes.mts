@@ -48,6 +48,7 @@ import * as hcNs from '../src/utils/hc-search';
 import * as desNs from '../src/utils/des-engine';
 import { discoverAndSyncCategories, mapRawRecordsToIntervals, validateDataQuality } from '../src/utils/csv-parser';
 import { buildSampleDataset } from '../src/utils/sample-data';
+import { loadSampleFile } from './sample-files';
 import { DEFAULT_CALENDAR, DEFAULT_CATEGORIES, DEFAULT_LABOR, DEFAULT_SIM_PARAMS, DEFAULT_SLA } from '../src/utils/default-config';
 import {
   CalendarConfig,
@@ -2364,6 +2365,9 @@ console.log('\n--- Suite D38: Step 4 — "Exact minimum" reworded to "Lowest ver
   const hcSearchSrc = readFileSync(join(resolve(import.meta.dirname, '..'), 'src', 'utils', 'hc-search.ts'), 'utf-8');
   assert(!/Exact minimum/i.test(hcSearchSrc), 'D38.1 FIX VERIFIED: hc-search.ts no longer contains the unwarranted "Exact minimum" claim (monotonicity in N is undischarged — only a verified-passing N is warranted)', 'string "Exact minimum" still present');
   assert(/Lowest verified-passing N=/.test(hcSearchSrc), 'D38.2 the reworded message states exactly what was verified: lowest verified-passing N found, N-1 failed the gate', 'string "Lowest verified-passing N=" not found');
+  assert(/failed the gate/.test(hcSearchSrc) && /reached the search floor/.test(hcSearchSrc), 'D38.3 walk-down message says "N-1 failed the gate" only when a failure stopped the walk, and "reached the search floor" when it ended at floorN', 'missing "failed the gate" or "reached the search floor" wording');
+  assert(/Start N=\$\{startN\} passed; refining down/.test(hcSearchSrc), 'D38.4 floor-OFF walk-down (started from a passing startN, no leap ran) says "Start N=... passed; refining down"', 'string "Start N=${startN} passed; refining down" not found');
+  assert(/walkStartedFromStartN \? '' : ` Leap \$\{ceilingHigh\} discarded\.`/.test(hcSearchSrc), 'D38.5 "Leap ... discarded" is only emitted when a leap actually ran', 'unconditional "Leap ... discarded" text');
 }
 
 // =================================================================
@@ -3760,6 +3764,151 @@ console.log('\n--- Suite D50: roster polish at fixed HC ---');
     const tot = seeded.slaps.reduce((a, s) => a + s.agentCount, 0);
     const at240 = seeded.slaps.find((s) => s.startMinutesFromOpen === 240)?.agentCount ?? 0;
     assert(tot === 6 && at240 >= 2, 'D50.7b seeded run places exactly n agents in total and keeps the seed', JSON.stringify(seeded.slaps));
+  }
+}
+
+// =================================================================
+// Suite D49 — Sample-file guard: test_files/AJM_Only.csv at the app defaults (pooled).
+//
+// Characterisation pins, not a fix: they freeze the default-setting required-HC of the cheapest
+// sample file so any engine change that moves it fails loudly. Values are the "after" baseline in
+// docs/audit/sample-hc-after-2026-09-30.jsonl (the full 4-file x 6-cell diff is `npm run test:audit`).
+// The file is loaded through scripts/sample-files.ts, the same loader as the audit script.
+// =================================================================
+console.log('\n--- Suite D49: sample-file guard (AJM_Only.csv, defaults, pooled) ---');
+{
+  const t0 = Date.now();
+  const { intervals: iv49, categories: cats49 } = loadSampleFile('AJM_Only.csv');
+  const run49 = (laborOver: Partial<LaborConfig> = {}, slaOver: Partial<SLAPolicyConfig> = {}) =>
+    searchOptimalHC({
+      intervals: iv49, openingWIP: [], categories: cats49, calendar: DEFAULT_CALENDAR,
+      labor: { ...DEFAULT_LABOR, ...laborOver }, sla: { ...DEFAULT_SLA, ...slaOver },
+      seed: DEFAULT_SIM_PARAMS.seed, userMaxHC: DEFAULT_SIM_PARAMS.maxHCSearch,
+      replications: DEFAULT_SIM_PARAMS.replications, queueArchitecture: 'pooled',
+    });
+  const rosterStr = (r: any) => { const d = r.finalDESResult?.shiftDistributionUsed?.__POOLED__; return d ? d.slaps.map((sl: any) => `${sl.startMinutesFromOpen}:${sl.agentCount}`).join(' ') : 'uniform'; };
+
+  const ba = run49();
+  assert(ba.nMinAnalytical === 9 && ba.occupancyFeasibleFloor === 10, 'D49.1a AJM_Only BA: N_min 9, N_occ 10', `nMin=${ba.nMinAnalytical} nOcc=${ba.occupancyFeasibleFloor}`);
+  assert(ba.recommendedHC === 16 && ba.staffing?.grossHCTotal === 20, 'D49.1b AJM_Only BA: recommended HC 16, gross HC 20', `hc=${ba.recommendedHC} gross=${ba.staffing?.grossHCTotal}`);
+  assert(ba.finalDESResult?.primaryAchievedPct === 90.1 && ba.bindingConstraintType === 'statistical_primary_sla', 'D49.1c AJM_Only BA: SLA 90.1%, binding statistical_primary_sla', `sla=${ba.finalDESResult?.primaryAchievedPct} binding=${ba.bindingConstraintType}`);
+
+  const foff = run49({}, { nMinFloorEnabled: false } as Partial<SLAPolicyConfig>);
+  assert(foff.recommendedHC === 16 && foff.staffing?.grossHCTotal === 20, 'D49.2 AJM_Only FOFF (workload floor OFF): HC 16, gross 20', `hc=${foff.recommendedHC} gross=${foff.staffing?.grossHCTotal}`);
+
+  const pon = run49({ shiftPlacementEnabled: true, shiftSlapMinutes: 30 });
+  assert(pon.recommendedHC === 16 && pon.staffing?.grossHCTotal === 20, 'D49.3a AJM_Only PON (placement ON): HC 16, gross 20', `hc=${pon.recommendedHC} gross=${pon.staffing?.grossHCTotal}`);
+  assert((pon as any).rosterPolish?.status === 'kept_current_failed_gate' && rosterStr(pon) === '0:15 150:1', 'D49.3b AJM_Only PON: rosterPolish kept_current_failed_gate, winning roster 0:15 150:1', `status=${(pon as any).rosterPolish?.status} roster=${rosterStr(pon)}`);
+  console.log(`  (D49 elapsed ${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+}
+
+// =================================================================
+// Suite D51 — Stage 3b roster polish in SILOED mode (twins of D50.1 / D50.9)
+//
+// DES facts this pins (verified in des-engine.ts): the min-coverage gate is ORG-WIDE (countAgentsOnShiftNow
+// counts every agent, gated against resolveMinAgentsPerInterval(sla, totalHC)), while the seat split is
+// per category (allocateAgentsToCategories over each category's representative-case AHT minutes). The
+// polish decision therefore adds a per-category guard: adopt only if the org metric improves AND no
+// category's minOnShift decreases. Pre-fix: rosterPolish.byCategory and the exported seat-split helper
+// do not exist, so the per-category and parity asserts fail.
+// =================================================================
+console.log('\n--- Suite D51: roster polish, siloed ---');
+{
+  const cal51: CalendarConfig = { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 20 };
+  const labor51Off: LaborConfig = { ...LABOR, dailyProductiveHours: 8 };
+  const labor51On: LaborConfig = { ...labor51Off, shiftPlacementEnabled: true, shiftSlapMinutes: 30 };
+  const cats51: CategoryConfig[] = [
+    { id: 'A', name: 'A', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 },
+    { id: 'B', name: 'B', ahtMinutes: 25, shrinkagePct: 0.1, priority: 2 },
+  ];
+  const mkIv51 = (volA: (h: number) => number, volB: (h: number) => number): StandardInterval[] => {
+    const out: StandardInterval[] = [];
+    for (let day = 0; day < 5; day++) {
+      for (let h = 8; h < 20; h++) {
+        for (let m = 0; m < 60; m += 30) {
+          for (const [category, f] of [['A', volA], ['B', volB]] as Array<[string, (h: number) => number]>) {
+            out.push({ intervalIndex: out.length, start: new Date(2026, 2, 2 + day, h, m), end: new Date(2026, 2, 2 + day, h, m + 30), volume: f(h), category });
+          }
+        }
+      }
+    }
+    return out;
+  };
+  const mkSla51 = (pct: number, windowH: number): SLAPolicyConfig => ({
+    primaryPct: pct, primaryWindow: windowH, primaryUnit: 'hours', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes',
+    asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'next_open',
+    occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 90,
+  });
+  const run51 = (labor: LaborConfig, ivs: StandardInterval[], sla: SLAPolicyConfig) => ({
+    intervals: ivs, openingWIP: [] as any[], categories: cats51, calendar: cal51, labor, sla, seed: 42, userMaxHC: 60, replications: 6,
+    queueArchitecture: 'siloed' as const,
+  });
+  const distStr = (d: ShiftDistributionByCategory | undefined) => JSON.stringify(d ? Object.keys(d).sort().map((k) => [k, d[k].slaps]) : null);
+  const catGuardOk = (rp: any) => {
+    const keys = Object.keys(rp?.byCategory ?? {}).sort();
+    if (JSON.stringify(keys) !== JSON.stringify(['A', 'B'])) return false;
+    return keys.every((k) => rp.byCategory[k].polished && rp.byCategory[k].polished.minOnShift >= rp.byCategory[k].current.minOnShift);
+  };
+
+  const checkScenario = async (tag: string, ivs: StandardInterval[], sla: SLAPolicyConfig, wantStatus: 'adopted' | 'adopted_partial') => {
+    const off = searchOptimalHC(run51(labor51Off, ivs, sla));
+    const on = searchOptimalHC(run51(labor51On, ivs, sla));
+    const rp = (on as any).rosterPolish;
+    assert(rp?.status === wantStatus, `${tag}a siloed placement ON: polish ${wantStatus}`, `status=${rp?.status} reason=${rp?.reason}`);
+    assert(!!rp?.polished && (rp.polished.minOnShift > rp.current.minOnShift || (rp.polished.minOnShift === rp.current.minOnShift && rp.polished.gapAgentHours < rp.current.gapAgentHours - 1e-9)), `${tag}b org-wide coverage improves`, `cur=${JSON.stringify(rp?.current)} pol=${JSON.stringify(rp?.polished)}`);
+    assert(catGuardOk(rp), `${tag}c both categories reported and no category's minOnShift decreases`, JSON.stringify(rp?.byCategory));
+    assert(on.recommendedHC === off.recommendedHC && on.staffing?.grossHCTotal === off.staffing?.grossHCTotal && on.recommendedHC !== null, `${tag}d HC and gross HC equal placement OFF (sync)`, `off=${off.recommendedHC}/${off.staffing?.grossHCTotal} on=${on.recommendedHC}/${on.staffing?.grossHCTotal}`);
+    const onA = await searchOptimalHCAsync(run51(labor51On, ivs, sla));
+    assert(onA.recommendedHC === off.recommendedHC && onA.staffing?.grossHCTotal === off.staffing?.grossHCTotal, `${tag}e HC and gross HC equal placement OFF (async)`, `async=${onA.recommendedHC}`);
+    assert(JSON.stringify((onA as any).rosterPolish) === JSON.stringify(rp) && distStr(onA.shiftPlacement?.winningDistribution) === distStr(on.shiftPlacement?.winningDistribution), `${tag}f sync === async (rosterPolish incl. byCategory + adopted roster)`, '');
+    const on2 = searchOptimalHC(run51(labor51On, ivs, sla));
+    assert(JSON.stringify((on2 as any).rosterPolish) === JSON.stringify(rp) && distStr(on2.shiftPlacement?.winningDistribution) === distStr(on.shiftPlacement?.winningDistribution), `${tag}g deterministic across runs`, '');
+    const floor = resolveMinAgentsPerInterval(sla, on.recommendedHC ?? 0);
+    const minCov = on.finalDESResult?.minCoverageObserved ?? -1;
+    assert(floor >= 1 && minCov >= floor, `${tag}h coverage floor (org-wide gate, ${floor}) honoured in the final DES`, `minCoverageObserved=${minCov}`);
+    return { on, rp };
+  };
+
+  await checkScenario('D51.1', mkIv51((h) => (h >= 12 && h < 16 ? 14 : 3), (h) => (h >= 12 && h < 16 ? 10 : 2)), mkSla51(85, 3), 'adopted');
+  const part = await checkScenario('D51.2', mkIv51((h) => (h === 8 ? 60 : 4), (h) => (h === 8 ? 40 : 3)), mkSla51(95, 4), 'adopted_partial');
+  assert(part.rp?.movesApplied > 0 && part.rp?.movesApplied < part.rp?.movesTotal, 'D51.2i partial: 0 < k* < K', `${part.rp?.movesApplied}/${part.rp?.movesTotal}`);
+
+  // D51.3 — pooled shape unaffected: no per-category block in a pooled result.
+  {
+    const ivsP = mkIv51((h) => (h >= 12 && h < 16 ? 14 : 3), () => 0).filter((i) => i.category === 'A');
+    const r = searchOptimalHC({ intervals: ivsP, openingWIP: [], categories: [cats51[0]], calendar: cal51, labor: labor51On, sla: mkSla51(85, 3), seed: 42, userMaxHC: 40, replications: 6 });
+    assert((r as any).rosterPolish !== undefined && (r as any).rosterPolish.byCategory === undefined, 'D51.3 pooled rosterPolish carries no byCategory block', `keys=${Object.keys((r as any).rosterPolish ?? {})}`);
+  }
+
+  // D51.4 — seat-split parity: the polish split IS the DES split (same function, same weights).
+  {
+    const seatsFn = (hcNs as any).seatsByDistributionKey as ((c: any[], n: number, q: 'pooled' | 'siloed') => Map<string, number>) | undefined;
+    assert(typeof seatsFn === 'function', 'D51.4a seatsByDistributionKey is exported for the parity pin', '');
+    const ivs = mkIv51((h) => (h >= 12 && h < 16 ? 14 : 3), (h) => (h >= 12 && h < 16 ? 10 : 2));
+    const gen = generateCaseEntities({ intervals: ivs, openingWIP: [], categories: cats51, calendar: cal51, sla: mkSla51(85, 3), seed: 42 });
+    if (typeof seatsFn === 'function') {
+      let allEq = true;
+      let firstBad = '';
+      for (let n = 1; n <= 40; n++) {
+        const w = new Map<string, number>();
+        for (const c of cats51) w.set(c.name, 0);
+        for (const c of gen.cases) w.set(c.category, (w.get(c.category) || 0) + c.totalAhtMinutes);
+        const des = allocateAgentsToCategories(w, n);
+        const pol = seatsFn(gen.cases, n, 'siloed');
+        const same = [...des.entries()].every(([k, v]) => (pol.get(k) || 0) === v) && [...pol.entries()].every(([k, v]) => (des.get(k) || 0) === v);
+        if (!same) { allEq = false; firstBad ||= `n=${n} des=${JSON.stringify([...des])} pol=${JSON.stringify([...pol])}`; }
+      }
+      assert(allEq, 'D51.4b polish seat split equals the DES seat split for n=1..40', firstBad);
+      const n = 17;
+      const des = runBackofficeDES({
+        operationalHC: n, intervals: ivs, openingWIP: [], categories: cats51, calendar: cal51, labor: labor51Off, sla: mkSla51(85, 3), seed: 42,
+        queueArchitecture: 'siloed', precomputedCases: gen,
+      });
+      const seen = new Map<string, number>();
+      for (const row of des.agentFairness?.perAgent ?? []) if (row.category) seen.set(row.category, (seen.get(row.category) || 0) + 1);
+      const pol = seatsFn(gen.cases, n, 'siloed');
+      assert([...pol.entries()].every(([k, v]) => (seen.get(k) || 0) === v) && [...seen.values()].reduce((a, b) => a + b, 0) === n, 'D51.4c agents the DES actually seated per category equal the polish split', `des=${JSON.stringify([...seen])} pol=${JSON.stringify([...pol])}`);
+    }
   }
 }
 

@@ -5,6 +5,8 @@ Changes audited: Workload Floor toggle (FR-5.13), clock-start derivation (FR-5.2
 6h / 80% SLA, seed 12345, R=30). Before = frozen snapshot of `main` @ 50d2745
 (`sample-hc-baseline-2026-09-30.jsonl`); after = this branch (`sample-hc-after-2026-09-30.jsonl`).
 Regenerate: `npx tsx scripts/audit-sample-hc.mts <out.jsonl> <csv> BA,BN,WA,WN,PON,FOFF`.
+Guard: `npm run test:audit` re-runs all 24 cells and fails on any difference from the after file
+(options `--jobs`, `--files`, `--cells`); suite D49 in `npm test` pins AJM_Only on every run.
 
 Cells: BA/BN = Business Time + Arrival / Next Open · WA/WN = Wall Clock + Arrival / Next Open ·
 PON = placement ON · FOFF = Workload Floor OFF (compared with BA). "Tail" = agents on shift in
