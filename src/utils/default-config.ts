@@ -40,7 +40,8 @@ export const DEFAULT_SLA: SLAPolicyConfig = {
   boAsaUnit: 'minutes',
   asaClockBasis: 'business_window',
   clockBasis: 'business_time',
-  clockStartPolicy: 'arrival',
+  clockStartPolicy: 'next_open', // derived from clockBasis (business_time -> next_open); see resolveClockStartPolicy
+  nMinFloorEnabled: true,
   occupancyCapEnabled: false,
   occupancyCapPct: 85,
   confidenceLevelPct: 95,

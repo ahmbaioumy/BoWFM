@@ -476,7 +476,7 @@ export function ConfigFlow({
                 </div>
                 <div className="flex items-center gap-1.5 pt-1">
                   <button
-                    onClick={() => onUpdateSLA({ ...sla, clockBasis: 'business_time' })}
+                    onClick={() => onUpdateSLA({ ...sla, clockBasis: 'business_time', clockStartPolicy: 'next_open' })}
                     className={`flex-1 px-2.5 py-1.5 rounded text-xs font-semibold transition text-center ${
                       sla.clockBasis === 'business_time'
                         ? 'bg-blue-600 text-white shadow-xs'
@@ -486,7 +486,7 @@ export function ConfigFlow({
                     Business Time
                   </button>
                   <button
-                    onClick={() => onUpdateSLA({ ...sla, clockBasis: 'wall_clock' })}
+                    onClick={() => onUpdateSLA({ ...sla, clockBasis: 'wall_clock', clockStartPolicy: 'arrival' })}
                     className={`flex-1 px-2.5 py-1.5 rounded text-xs font-semibold transition text-center ${
                       sla.clockBasis === 'wall_clock'
                         ? 'bg-amber-600 text-white shadow-xs'
@@ -503,41 +503,49 @@ export function ConfigFlow({
                 </p>
               </div>
 
-              {/* 2. Clock Start Policy */}
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                    Clock Start Policy
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5 pt-1">
-                  <button
-                    onClick={() => onUpdateSLA({ ...sla, clockStartPolicy: 'arrival' })}
-                    className={`flex-1 px-2.5 py-1.5 rounded text-xs font-semibold transition text-center ${
-                      sla.clockStartPolicy === 'arrival'
-                        ? 'bg-blue-600 text-white shadow-xs'
-                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    Arrival Time
-                  </button>
-                  <button
-                    onClick={() => onUpdateSLA({ ...sla, clockStartPolicy: 'next_open' })}
-                    className={`flex-1 px-2.5 py-1.5 rounded text-xs font-semibold transition text-center ${
-                      sla.clockStartPolicy === 'next_open'
-                        ? 'bg-indigo-600 text-white shadow-xs'
-                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    Next Open
-                  </button>
-                </div>
-                <p className="text-[11px] text-slate-500 pt-1 leading-relaxed">
-                  {sla.clockStartPolicy === 'arrival'
-                    ? 'Starts immediately on arrival timestamp.'
-                    : 'After-hours arrivals snap to next open business window.'}
-                </p>
-              </div>
+              {/* 2. Clock Start Policy — derived from the clock basis (resolveClockStartPolicy) */}
+              {(() => {
+                const clockStartLocked = sla.clockBasis === 'business_time';
+                const effectiveStart = clockStartLocked ? 'next_open' : (sla.clockStartPolicy ?? 'arrival');
+                return (
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                        Clock Start Policy
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 pt-1">
+                      <button
+                        disabled={clockStartLocked}
+                        onClick={() => onUpdateSLA({ ...sla, clockStartPolicy: 'arrival' })}
+                        className={`flex-1 px-2.5 py-1.5 rounded text-xs font-semibold transition text-center ${
+                          effectiveStart === 'arrival'
+                            ? 'bg-blue-600 text-white shadow-xs'
+                            : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                        } ${clockStartLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        Arrival Time
+                      </button>
+                      <button
+                        disabled={clockStartLocked}
+                        onClick={() => onUpdateSLA({ ...sla, clockStartPolicy: 'next_open' })}
+                        className={`flex-1 px-2.5 py-1.5 rounded text-xs font-semibold transition text-center ${
+                          effectiveStart === 'next_open'
+                            ? 'bg-indigo-600 text-white shadow-xs'
+                            : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                        } ${clockStartLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      >
+                        Next Open
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-500 pt-1 leading-relaxed">
+                      {clockStartLocked
+                        ? 'Set automatically: business-time SLA starts at the next open business moment.'
+                        : 'Arrival = customer-experienced time. Use Next Open if night arrivals make the SLA infeasible.'}
+                    </p>
+                  </div>
+                );
+              })()}
 
               {/* 3. ASA Toggle & Calculation Window */}
               <div className={`p-4 rounded-xl border transition space-y-2 ${
@@ -893,7 +901,7 @@ export function ConfigFlow({
                 </span>
                 <span className="text-[11px] text-slate-500">
                   Pass when CI lower bound ≥ Primary SLA % (or sizing floor when Acceptance Slack is ON). Same CI for Primary, BO ASA, and occupancy.
-                  Re-run sizing after changing. Req HC only rises when CI binds above N_min (workload floor).
+                  Re-run sizing after changing. With the Workload Floor (N_min) ON, Req HC only rises when CI binds above that floor; with it OFF the CI gate can also stop the search below N_min.
                 </span>
               </div>
               <div className="flex items-center gap-2">
@@ -1111,6 +1119,36 @@ export function ConfigFlow({
                   className="w-24 px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded font-mono disabled:opacity-40"
                 />
                 <span className="text-xs text-slate-600">min agents/interval</span>
+              </div>
+            </div>
+
+            {/* Workload Floor (N_min) */}
+            <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                    Workload Floor (N_min)
+                  </span>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={sla.nMinFloorEnabled !== false}
+                      onChange={(e) =>
+                        onUpdateSLA({
+                          ...sla,
+                          nMinFloorEnabled: e.target.checked,
+                        })
+                      }
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                  </label>
+                </div>
+                <span className="text-[11px] text-slate-500">
+                  On (default): Req HC never goes below the steady-state workload floor N_min. Off: the
+                  search also tries fewer agents while every SLA/occupancy/coverage gate still passes —
+                  results may rely on backlog draining after the horizon ends.
+                </span>
               </div>
             </div>
           </div>

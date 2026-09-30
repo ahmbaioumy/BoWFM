@@ -184,6 +184,14 @@ export interface SLAPolicyConfig {
   minCoverageEnabled?: boolean;
   /** Minimum on-shift agents required at every open business interval; clamped [0, N]. Default 1. */
   minAgentsPerInterval?: number;
+  /**
+   * Workload floor. undefined/true (default) = N_min and N_occ are the hard search floor
+   * (frozen decision #4, byte-for-byte today's behavior). false = the search may walk below
+   * both floors while every SLA/occupancy/coverage gate still passes (approved 2026-09-30);
+   * such results can rely on backlog draining after the horizon and are flagged via
+   * HCSearchOutput.belowWorkloadFloor.
+   */
+  nMinFloorEnabled?: boolean;
 }
 
 export interface SimulationParams {
@@ -580,6 +588,11 @@ export interface HCSearchOutput {
    * floor unconditionally — these are additional, non-authoritative diagnostics.
    */
   occupancyFeasibleFloor?: number; // N_occ: smallest N whose occupancy can be ≤ cap
+  /**
+   * True iff the workload floor toggle is OFF and recommendedHC sits below max(N_min, N_occ).
+   * Such a team only clears the gates by draining backlog after the planning horizon — optimistic.
+   */
+  belowWorkloadFloor?: boolean;
   shiftPlacement?: {
     enabledForRun: boolean;
     slapMinutes: number;

@@ -21,7 +21,7 @@ import {
 import { exportToExcelCSV } from '../utils/csv-parser';
 import { AgentAnalyticsPanel } from './AgentAnalyticsPanel';
 import { formatDateTime24, getCalendarWorkingDaysInHorizon, getDailyWindowLengthHours } from '../utils/calendar';
-import { verifyAgentTimelineInvariants } from '../utils/des-engine';
+import { resolveClockStartPolicy, verifyAgentTimelineInvariants } from '../utils/des-engine';
 import { buildBreachExportRows, buildCaseExportRows, buildSliceExportRows } from '../utils/export-rows';
 import { clampConfidenceLevelPct, effectivePrimaryTarget } from '../utils/hc-search';
 import {
@@ -810,7 +810,13 @@ function ResultsFlowBody({
                       </>
                     ) : null}
                   </div>
-                  {Number.isFinite(searchOutput.nMinAnalytical) &&
+                  {searchOutput.belowWorkloadFloor && (
+                    <div className="text-[11px] text-red-800 bg-red-50 border border-red-200 rounded-lg px-2.5 py-2 leading-relaxed">
+                      Req HC {searchOutput.recommendedHC} is below the workload floor (N_min {searchOutput.nMinAnalytical}, N_occ {searchOutput.occupancyFeasibleFloor ?? 'n/a'}). This team only clears the SLA by draining backlog after the planning horizon — treat as optimistic.
+                    </div>
+                  )}
+                  {sla.nMinFloorEnabled !== false &&
+                    Number.isFinite(searchOutput.nMinAnalytical) &&
                     primaryHC === searchOutput.nMinAnalytical && (
                       <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2 leading-relaxed">
                         Req HC is held at the workload floor <strong>N_min = {searchOutput.nMinAnalytical}</strong>{searchOutput.workloadReductionAppliedPct ? ` (workload reduced ${searchOutput.workloadReductionAppliedPct}%)` : ''}.
@@ -1162,7 +1168,7 @@ function ResultsFlowBody({
                     {sla.confidenceLevelPct ?? 95}% CI Lower Bound ≥ {primaryTargetLabel}.
                   </p>
                   <div className="text-[11px] font-mono bg-white p-2 rounded border border-slate-200 text-slate-700">
-                    Final Operational Headcount: <code>N_op = max(N_min, Primary_Required) = max({rosterFloor}, {primaryHC}) = {staffing.operationalHC}</code>{searchOutput.workloadReductionAppliedPct && <span className="text-amber-700"> (whole chain sized on workload reduced {searchOutput.workloadReductionAppliedPct}%)</span>}
+                    Final Operational Headcount: {sla.nMinFloorEnabled === false ? <code>N_op = Primary_Required (workload floor OFF) = {primaryHC} = {staffing.operationalHC}</code> : <code>N_op = max(N_min, Primary_Required) = max({rosterFloor}, {primaryHC}) = {staffing.operationalHC}</code>}{searchOutput.workloadReductionAppliedPct && <span className="text-amber-700"> (whole chain sized on workload reduced {searchOutput.workloadReductionAppliedPct}%)</span>}
                   </div>
                 </div>
               </div>
@@ -2253,7 +2259,7 @@ function ResultsFlowBody({
                 </span>
                 <div>queue_architecture: {searchOutput.queueArchitecture || 'pooled'}</div>
                 <div>sla_clock_basis: {sla.clockBasis}</div>
-                <div>sla_clock_start_policy: {sla.clockStartPolicy}</div>
+                <div>sla_clock_start_policy: {resolveClockStartPolicy(sla)}</div>
                 <div>primary_sla: {sla.primaryPct}% in {sla.primaryWindow} {sla.primaryUnit}</div>
                 <div>
                   sla_acceptance_slack:{' '}
@@ -2264,6 +2270,8 @@ function ResultsFlowBody({
                   {searchOutput.workloadReductionAppliedPct ? `${searchOutput.workloadReductionAppliedPct}%` : 'off'}
                 </div>
                 <div>confidence_level_pct: {sla.confidenceLevelPct ?? 95}%</div>
+                <div>n_min_floor_enabled: {sla.nMinFloorEnabled !== false ? 'true' : 'false'}</div>
+                <div>below_workload_floor: {searchOutput.belowWorkloadFloor ? 'true' : 'false'}</div>
                 <div>n_min_analytical: {rosterFloor} agents{searchOutput.nMinBeforeReduction !== undefined && ` (before reduction: ${searchOutput.nMinBeforeReduction})`}</div>
                 <div>primary_driven_hc: {primaryHC} agents</div>
                 <div>prng_seed: {simParams.seed}</div>

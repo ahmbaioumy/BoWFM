@@ -1568,6 +1568,29 @@ function formatImpossibleCategoriesReason(
   return `The following categories can never meet their SLA at any headcount, because their AHT exceeds their own SLA window: ${names}. No amount of additional staff changes this. Even with unlimited headcount, the maximum achievable overall Primary SLA attainment is ${achievableCeilingPct.toFixed(1)}%. Reduce AHT, widen the SLA window, or exclude these categories — increasing userMaxHC will not help.`;
 }
 
+/**
+ * Search start / lower bound / baseline-vs-cap verdict — the ONE place both searchOptimalHC and
+ * searchOptimalHCAsync derive them (D11: never inline this in either).
+ *
+ * Floor ON (nMinFloorEnabled !== false, default; frozen decision #4): the search starts at
+ * max(N_min, N_occ) and never walks below it; N_min > cap is infeasible outright.
+ * Floor OFF (approved 2026-09-30): same start point, but the walk-down may go to N = 1, and the
+ * baseline is not a reason to declare infeasibility (the search decides on the gates alone).
+ * N_sla is deliberately not an input (Gap A).
+ */
+export function resolveSearchBounds(p: {
+  nMinFloorEnabled?: boolean;
+  nMinAnalytical: number;
+  occupancyFeasibleFloor: number;
+  searchCap: number;
+}): { startN: number; floorN: number; capInfeasible: boolean } {
+  const startN = Math.min(p.searchCap, Math.max(1, p.nMinAnalytical, p.occupancyFeasibleFloor));
+  if (p.nMinFloorEnabled === false) {
+    return { startN, floorN: 1, capInfeasible: false };
+  }
+  return { startN, floorN: startN, capInfeasible: p.nMinAnalytical > p.searchCap };
+}
+
 export function searchOptimalHC(params: {
   intervals: StandardInterval[];
   openingWIP: OpeningWIPCase[];
@@ -1868,7 +1891,14 @@ export function searchOptimalHC(params: {
 
   const impossibleCheck = findImpossibleCategories({ categories, intervals: validIntervals, openingWIP, sla, calendar });
   const hasImpossibleCategory = impossibleCheck.impossibleCategories.length > 0;
-  const baselineExceedsCap = nMinAnalytical > searchCap;
+  const searchBounds = resolveSearchBounds({
+    nMinFloorEnabled: sla.nMinFloorEnabled,
+    nMinAnalytical,
+    occupancyFeasibleFloor,
+    searchCap,
+  });
+  const floorEnabled = sla.nMinFloorEnabled !== false;
+  const baselineExceedsCap = searchBounds.capInfeasible;
 
   if (hasImpossibleCategory) {
     isInfeasible = true;
@@ -1908,28 +1938,30 @@ export function searchOptimalHC(params: {
     // recommended 15 — see suite D34). N_sla remains reported as
     // HCSearchOutput.shiftPlacement.placementFeasibleFloor for diagnostic/UI use — it is
     // simply never used to gate or seed the search.
-    const startN = Math.min(
-      searchCap,
-      Math.max(1, nMinAnalytical, occupancyFeasibleFloor)
-    );
+    // startN / floorN come from resolveSearchBounds (shared with the async twin). With the
+    // workload floor ON floorN === startN, so the walk-down below never goes under the start
+    // point (today's behavior); OFF lets it walk down to 1 (approved 2026-09-30).
+    const { startN, floorN } = searchBounds;
     searchStartN = startN;
     const startEval = evaluateN(startN);
 
-    if (startEval.passesAllConstraints) {
+    if (startEval.passesAllConstraints && floorN >= startN) {
       primaryDrivenHC = startN;
       primaryPassedResult = startEval;
       recommendedHC = startN;
       evalN = startN;
       isInfeasible = false;
     } else {
-      primaryFailedResult = startEval;
+      // Start passed but the floor is OFF: skip the leap and feed startN straight into the
+      // Phase-2 walk-down as the ceiling.
+      if (!startEval.passesAllConstraints) primaryFailedResult = startEval;
       let lastFail = startN;
       let step = 1;
-      let ceilingHigh: number | null = null;
+      let ceilingHigh: number | null = startEval.passesAllConstraints ? startN : null;
 
       // Phase 1 — LEAP UP (speed, find first passing candidate)
       let n = lastFail;
-      while (n < searchCap) {
+      while (ceilingHigh === null && n < searchCap) {
         n = Math.min(searchCap, n + step);
         const probeRes = evaluateN(n, Math.min(R, 5));
         if (!probeRes.passesAllConstraints) {
@@ -1955,7 +1987,6 @@ export function searchOptimalHC(params: {
         // Phase 2 — WALK DOWN BY EXACTLY −1
         let lastPass = ceilingHigh;
         let currN = ceilingHigh - 1;
-        const floorN = startN;
 
         while (currN >= floorN) {
           const res = evaluateN(currN);
@@ -2049,7 +2080,7 @@ export function searchOptimalHC(params: {
   } else if (isInfeasible) {
     bindingConstraintType = 'analytical_baseline';
     bindingConstraintDescription = `Infeasible at User Cap (N = ${searchCap})`;
-  } else if (recommendedHC !== null && searchStartN !== null && recommendedHC === searchStartN) {
+  } else if (floorEnabled && recommendedHC !== null && searchStartN !== null && recommendedHC === searchStartN) {
     // The search passed at its very first candidate, so it never had to climb above the
     // analytic capacity floor — that floor, not any DES gate, is what set this number.
     //
@@ -2162,6 +2193,8 @@ export function searchOptimalHC(params: {
     boundaryEvidence,
     searchHistory,
     occupancyFeasibleFloor,
+    belowWorkloadFloor:
+      !floorEnabled && recommendedHC !== null && recommendedHC < Math.max(nMinAnalytical, occupancyFeasibleFloor ?? 0),
     shiftPlacement: labor.shiftPlacementEnabled
       ? {
           enabledForRun: true,
@@ -2562,7 +2595,14 @@ export async function searchOptimalHCAsync(params: {
 
   const impossibleCheck = findImpossibleCategories({ categories, intervals: validIntervals, openingWIP, sla, calendar });
   const hasImpossibleCategory = impossibleCheck.impossibleCategories.length > 0;
-  const baselineExceedsCap = nMinAnalytical > searchCap;
+  const searchBounds = resolveSearchBounds({
+    nMinFloorEnabled: sla.nMinFloorEnabled,
+    nMinAnalytical,
+    occupancyFeasibleFloor,
+    searchCap,
+  });
+  const floorEnabled = sla.nMinFloorEnabled !== false;
+  const baselineExceedsCap = searchBounds.capInfeasible;
 
   if (hasImpossibleCategory) {
     isInfeasible = true;
@@ -2599,10 +2639,8 @@ export async function searchOptimalHCAsync(params: {
     // (placementFeasibleFloor) is deliberately excluded here (Gap A, fixed 2026-08-28).
     // N_min stays the frozen hard floor unconditionally; N_occ only ever raises the
     // starting point (a proven, DES-verified bound — N_sla is not).
-    const startN = Math.min(
-      searchCap,
-      Math.max(1, nMinAnalytical, occupancyFeasibleFloor)
-    );
+    // startN / floorN come from resolveSearchBounds (shared with searchOptimalHC).
+    const { startN, floorN } = searchBounds;
     searchStartN = startN;
     const startEval = await evaluateAsync(
       startN,
@@ -2610,22 +2648,24 @@ export async function searchOptimalHCAsync(params: {
       `Evaluating analytical baseline N = ${startN} across ${replications} stochastic replications...`
     );
 
-    if (startEval.passesAllConstraints) {
+    if (startEval.passesAllConstraints && floorN >= startN) {
       primaryDrivenHC = startN;
       primaryPassedResult = startEval;
       recommendedHC = startN;
       evalN = startN;
       isInfeasible = false;
     } else {
-      primaryFailedResult = startEval;
+      // Start passed but the floor is OFF: skip the leap and feed startN straight into the
+      // Phase-2 walk-down as the ceiling.
+      if (!startEval.passesAllConstraints) primaryFailedResult = startEval;
       let lastFail = startN;
       let step = 1;
-      let ceilingHigh: number | null = null;
+      let ceilingHigh: number | null = startEval.passesAllConstraints ? startN : null;
       let leapIndex = 1;
 
       // Phase 1 — LEAP UP (speed, find first passing candidate)
       let n = lastFail;
-      while (n < searchCap) {
+      while (ceilingHigh === null && n < searchCap) {
         if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
 
         n = Math.min(searchCap, n + step);
@@ -2666,7 +2706,6 @@ export async function searchOptimalHCAsync(params: {
         // Phase 2 — WALK DOWN BY EXACTLY −1
         let lastPass = ceilingHigh;
         let currN = ceilingHigh - 1;
-        const floorN = startN;
         const totalDownSteps = Math.max(1, ceilingHigh - floorN);
         let downStepIndex = 0;
 
@@ -2791,7 +2830,7 @@ export async function searchOptimalHCAsync(params: {
   } else if (isInfeasible) {
     bindingConstraintType = 'analytical_baseline';
     bindingConstraintDescription = `Infeasible at User Cap (N = ${searchCap})`;
-  } else if (recommendedHC !== null && searchStartN !== null && recommendedHC === searchStartN) {
+  } else if (floorEnabled && recommendedHC !== null && searchStartN !== null && recommendedHC === searchStartN) {
     // The search passed at its very first candidate, so it never had to climb above the
     // analytic capacity floor — that floor, not any DES gate, is what set this number.
     //
@@ -2919,6 +2958,8 @@ export async function searchOptimalHCAsync(params: {
     staffing,
     boundaryEvidence,
     occupancyFeasibleFloor,
+    belowWorkloadFloor:
+      !floorEnabled && recommendedHC !== null && recommendedHC < Math.max(nMinAnalytical, occupancyFeasibleFloor ?? 0),
     shiftPlacement: labor.shiftPlacementEnabled
       ? {
           enabledForRun: true,
