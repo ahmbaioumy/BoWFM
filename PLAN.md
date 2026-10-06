@@ -126,3 +126,23 @@ Backlog (minor, no plan yet): CAL-1..4, DES-2..7, DES-9..11, DES-13, DES-14, HC-
 Suggested order: F0 → F2 → F3 → F1 → F4 → F5, then the rest. One item per `/supervise` run.
 
 Phase 2 starts with: F0 if not yet done, then test-strength review of `scripts/verify-*.mts`, CSV ingestion, offline contract (incl. the `package.json` `dependencies` lead), and the "not audited" list in `FINDINGS.md`.
+
+---
+
+# Phase 2 — test strength, CSV ingestion, offline contract, leftover engine paths
+
+Approved by owner 2026-10-06 ("approve, continue to phase 2"). Same rules as phase 1: read-only, one agent at a time, meter read before and after each agent, no audit agent starts at or above 15.5% weekly, hard stop 20%. Meter at phase start: 9%.
+
+| # | Step | Agent | What "deep" means here |
+|---|---|---|---|
+| P2-0 | F0 — reconcile claims 19 vs 31 | `tester` | Run the claims sample with documented defaults through sync and async search; explain the 19; confirm recommended HC ≥ `N_min` with floor ON |
+| P2-1 | Test strength A — staffing maths + calendar | `tester` | Mutation test on a scratch COPY of the repo: break one frozen rule at a time (single round → ceil / per-category round; harmonic → arithmetic blend; shrinkage added to Stage 2; half-open → inclusive day count; occupancy denominator widened to drain; Webster → largest-remainder) and record which suite catches it. A mutation no test catches = an unprotected frozen decision |
+| P2-2 | Test strength B — simulation + search | `tester` | Same method: EDF order reversed/FIFO; presence = budget remaining; CI lower bound → mean; CRN broken (seed varies with N); floor ignored; SLA `<=` deadline → `<` |
+| P2-3 | `csv-parser.ts:1-560` | `sonnet-investigator` | Line by line + run against `test_files/` and hand-made bad files: delimiters, quotes, BOM, dates, 30-min interval rule, duplicates |
+| P2-4 | `csv-parser.ts:561-1121` | `sonnet-investigator` | Data-quality rules vs what PRD promises; opening WIP; silent drops/coercions; rows lost without a warning |
+| P2-5 | Leftover engine paths | `tester` | Run, not read: siloed end-to-end with hand-recomputed seats; staggered non-24x7 fuzz; holidays inside the 14-day drain; ASA gate ON; occupancy cap ON; peaky 24x7 with coverage OFF |
+| P2-6 | Offline contract + conventions | `sonnet-investigator` | Banned primitives in `src/`, `console.log`, `Math.random`, `Date.now`; `package.json` dependency split; build guards (`build-standalone.mts:34-67`); scan shipped `BoWFM.html` for remote URLs; suite D9 really enforces it |
+| P2-7 | `agent-analytics.ts`, `export-rows.ts`, `run-inputs.ts`, `wfm.ts` | `sonnet-investigator` | Display maths recomputed; export rows match on-screen values; types vs defaults consistent |
+| P2-8 | Final challenge | `challenger` | Attacks phase 2 findings |
+
+Order is risk order; steps not reached are marked "not audited" and carried to phase 3.
