@@ -293,3 +293,43 @@ Done: P4-1, P4-2, P4-3. P4-4 challenger not run (budget). All four audit phases 
 11. J1, J4, J5, H7, H8, H12, G11, G13, F7–F10 and the minor backlog.
 
 Owner decisions still open: F1/G8, F4, F6, F7, G1, G2, G3, G5, G9, G10, 30-minute rule (G11), G13 (`package.json`), H2, H4, J1.
+
+---
+
+# BUILD PLAN — H1: number fields keep what is typed (approved by owner 2026-10-06)
+
+Weekly cap raised by the owner to **25%** (hard stop). Meter at start: 18%. No new agent at a reading of 24%.
+
+**Task:** number fields on the Settings and Run screens must store exactly what the planner types; clamping happens when the field is left (blur) or Enter is pressed, never per keystroke.
+**End user:** the WFM planner opening `BoWFM.html` from disk.
+**Tier 2** (changed behaviour, several sections; no engine maths). Reviewers: `tester` + `auditor`; `user-side` folded into the tester brief (typing experience).
+**Skills:** `browser-automation` (free gate, tester); `wfm-engine-testing` not needed (no `src/utils` engine change) but the fail-first rule is kept for the new helper.
+
+## Steps (builder: `sonnet-executor`, one at a time)
+
+1. New pure helper `src/utils/number-input.ts`: `commitNumberDraft(draft: string, opts: {min, max, integer?, fallback})` → returns the committed number: parse the draft (`Number`, trimmed; reject empty, NaN, non-finite → return `fallback`, which callers pass as the CURRENT stored value, not a default), round to integer when `integer`, clamp to `[min, max]`. No `|| default`, so a legitimate 0 survives where `min` allows it.
+2. New component `src/components/NumberField.tsx`: controlled by a local draft string; shows the stored value when not focused; `onChange` only updates the draft; on blur or Enter calls `commitNumberDraft` and `onCommit(value)`; Escape restores the stored value; re-syncs the draft when the stored value changes from outside (e.g. settings import, toggle). Props: `value`, `onCommit`, `min`, `max`, `integer`, `step`, `disabled`, `className`, `ariaLabel`/pass-through attributes. No new dependency.
+3. `ConfigFlow.tsx`: replace the per-keystroke handlers with `NumberField`, same documented ranges: daily productive hours (1–24, decimal — closes UI-43: negatives rejected), adherence % (10–100, shown and stored to one decimal, closes UI-44), working days per week (1–7 integer, keep `offDaysPerWeek = 7 − value`), primary SLA % (1–100), SLA window (≥1), ASA target (≥1), per-category target %, window, ASA, confidence level (50–99.9, one decimal), slack (1–20), workload reduction (1–50), occupancy cap (50–100 integer), min agents per interval (0–999 integer), manual-override hours (≥0), AHT (≥1, decimal as today), shrinkage % (0–99, one decimal), priority (≥1 integer). Stored units unchanged (fractions where fractions today).
+4. `RunFlow.tsx`: replications (1–100 integer), search ceiling (1–5000 integer), seed (integer, 1–2147483647) through `NumberField` — adds the upper bounds the PRD already states (FR-8.2, FR-8.3; closes DOC-3, UI-54).
+5. Fail-first tests in `scripts/verify-sizing-fixes.mts` (new suite, next free D-number) for `commitNumberDraft`: "85" with min 50 → 85; "8" with min 50 → 50; "" → fallback; "abc" → fallback; "-3" with min 1 → 1; "99999" max 100 → 100; "12.5" integer → 13 (or 12 — state the rule) ; "0" with min 0 → 0; "1e9" → max. Plus a source-level guard: no `onChange` in `ConfigFlow.tsx`/`RunFlow.tsx` number inputs calls `Math.max(`/`Math.min(` on `e.target.value` (regression guard against per-keystroke clamps).
+6. Docs + artifact (Definition of Done): `PRD.md` (§5 field rows: "validated when the field is left"; bump version/date; remove nothing else), `project_context.md` (§4 file list: new helper + component; §11 recently fixed: UI-41/42/43/44/54, DOC-3), `FINDINGS.md` status line; `npm run lint && npm test && npm run build:standalone`; `npm run check:artifact`.
+
+## Scope lock
+
+May edit only: `src/utils/number-input.ts` (new), `src/components/NumberField.tsx` (new), `src/components/ConfigFlow.tsx` (number inputs and their handlers only), `src/components/RunFlow.tsx` (the three inputs only), `scripts/verify-sizing-fixes.mts` (new suite only), `PRD.md`, `project_context.md`, `BoWFM.html` (rebuild output). Nothing in `src/utils/hc-search.ts`, `des-engine.ts`, `calendar.ts`, `csv-parser.ts`, `default-config.ts`. No change to defaults, ranges, units or engine behaviour. `package.json` untouched.
+
+## Acceptance criteria and proof
+
+| # | Criterion | Proof (real key presses on the rebuilt `BoWFM.html`, `file:///`) |
+|---|---|---|
+| 1 | Occupancy cap keeps typed value | Enable cap, select all, type `8`,`5`, Tab → field 85; type `7`,`0`, Tab → 70; type `3`,`0`, Tab → 50 (clamped on leave) |
+| 2 | Adherence keeps typed value | Select all, type `8`,`5`, Tab → 85 |
+| 3 | Confidence keeps typed value | Select all, type `9`,`5`, Tab → 95 |
+| 4 | Headcount follows the typed value | Claims sample, adherence typed 85 → recommended **37**, gross **48**, `N_min` 36 (the audit's pasted-85 reference); defaults untouched → **31 / 40 / 30** |
+| 5 | Fields can be emptied while typing | Search ceiling: Backspace ×3 → empty field (no snap), type `8`,`0`, Tab → 80; empty + Tab → previous value restored |
+| 6 | Upper bounds enforced | Replications `99999` + Tab → 100; ceiling `99999` + Tab → 5000 |
+| 7 | Negative productive hours rejected | Paste `-3` + Tab → 1 (or previous value); Run gate unaffected |
+| 8 | Decimals shown as stored | Shrinkage `12.5` + Tab → field 12.5; adherence `92.5` → 92.5 |
+| 9 | No regression | `npm run lint` clean; `npm test` all green with the new suite; `npm run test:trusted-source` 164 green; `npm run test:audit` sample HCs unchanged; page loads with zero console errors; three samples still give 31/40, 27/34, 31/39 |
+| 10 | Docs and artifact in sync | `PRD.md`, `project_context.md` updated; `npm run check:artifact` passes |
+| 11 | Scope respected | `git diff <checkpoint>..HEAD --stat` lists only the scope-lock files |
