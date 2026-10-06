@@ -784,3 +784,35 @@ Backlog from the reviews (all minor, none blocking):
 - H1-c: seed field has no upper bound (values beyond the safe-integer range accepted).
 - H1-d: D54 covers the helpers and a source guard; `NumberField` behaviour itself is proven only in the browser.
 - H1-e: adherence and shrinkage arrow-key step is now 0.1 (was 1).
+
+---
+
+# J0 + FIX G12 — protective tests — BUILT, awaiting owner approval (2026-10-06)
+
+Branch `fix/g12-tests` (on top of `fix/h1-number-fields`), commit `61ba65f` (checkpoint `52315fe`).
+
+**J0 (correction of TEST-4):** mutations applied to the real dispatch functions show EDF order IS protected by `npm test` (FIFO and reversed deadlines both fail). Open gaps found instead: priority tie-break untested (TEST-9), business-calendar `latestSafeStart` untested, parked-first rule protected by one check only.
+
+**G12:** 48 new checks (suites D55-D61) in `scripts/verify-sizing-fixes.mts`; `computeStatisticalEvaluation` exported (keyword only); `npm test` now also runs the 164 trusted-source checks. Totals: 174 + 589 + 60 + 164 = 987, all green; lint clean; `check:artifact` fresh. No product behaviour changed.
+
+| Broken rule (mutation) | Caught by a new check? (independent tester, full suite) |
+|---|---|
+| Priority tie-break removed | Yes: D55.1a, 1b, 4 |
+| EDF to FIFO | Yes: D55.1-4 (now direct, not only digests) |
+| Parked-first removed / inverted | Yes: D55.3a, 3b |
+| `latestSafeStart` by wall clock (backlog site, demand site, both) | Yes: D56.1b, 1c, 2b |
+| Primary gate on mean / on upper bound | Yes: D57.1c-e |
+| Category / occupancy / ASA gate on mean | Yes: D57.3, D57.4, D57.5 |
+| Normal 1.96 instead of the t-value | Yes: D57.1b, 2a |
+| Common Random Numbers broken | Yes: D58.1, 2 |
+| Unfinished cases dropped from the SLA denominator | Yes: D59.2, 3 |
+| Gross HC by arithmetic blend / arithmetic effective shrinkage | Yes: D60.4 / D60.5 |
+| Volume round to floor | Yes: D61.1 |
+
+Closes TEST-1, TEST-4 (remaining part), TEST-5, TEST-6, TEST-7, TEST-8 (volume part), TEST-9, DOC-20, DOC-41. New tests pass under New York and UTC timezones; no tautologies found.
+
+Open after G12:
+- **G12-a (owner decision):** `scripts/verify-trusted-source.mts:75-83` aborts unless the PC timezone is `Asia/Dubai`. Now that it is part of `npm test`, `npm test` fails on any machine in another timezone (and the freshness gate after it never runs). Green on this PC (Dubai). Options: keep (team is all in Dubai), or relax the guard to a warning / force the timezone inside the script.
+- G12-b (minor): a CI lower bound exactly equal to the target (`>=` vs `>`) is not pinned by any test.
+- G12-c (minor): `CaseMinHeap.compare` ordering is untested and does not decide dispatch (DES-15); docs still name it as real dispatch (DOC-40, fix J1).
+- Stale doc lines left: `PRD.md:9` file size; `project_context.md:887`, `:938` "both suites".
