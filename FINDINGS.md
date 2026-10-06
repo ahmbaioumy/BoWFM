@@ -271,3 +271,31 @@ Does data quality catch the P2-3 issues? Comma decimal: **no**. `30 min`/`12abc`
 
 PRD FR-2.2 rule check (18 rules): 2 can never fire (#6 Interval Length, #8 Category Config); duplicates are correctly **blocked** (not summed); zero-workload, orphan-backlog, timestamp errors fire and block; no rule is computed and hidden.
 Clean: backlog ID generation deterministic; duplicate detection; zero-denominator guards; no ghost categories; export quoting and BOM.
+
+### P2-1 — test strength A: mutation test of staffing maths, calendar, apportionment (tester, scratch copy)
+
+Method: each frozen rule broken on purpose in a copy of the repo; a rule is protected only if a test then fails. Harness proven by a gross mutation (51 failures). Baseline in the copy: 174 / 518 / 164 / 60, all green.
+
+| Mutation | Rule broken | Caught? | By |
+|---|---|---|---|
+| M1 single round → ceil | decision 7 | yes | D43.13 (11 assertions) |
+| M2 per-category rounding | decision 7 | yes | D43.13, D45.2 (6) |
+| M3a/b arithmetic blend (display, or display + total) | decision 6 | yes | D7.10, D10.15, D40.6 (3) |
+| **M3c arithmetic blend in the Gross HC total only** | decisions 6–7 | **not by `npm test`** | only `verify-trusted-source` (T1_A2a, T1_A2c) — which `npm test` does not run |
+| M4 shrinkage in Stage 2 | decision 5 | yes | D12.x, BUG-OCC-ROOT (38) |
+| M5 occupancy denominator widened | decision 3 | yes | BUG-OCC-ROOT (25+) |
+| M6 occupancy clamped at 100 | decision 3 | yes | Suite 26, BUG-OCC-ROOT (13) |
+| M7 inclusive day bound | calendar half-open | yes | D1.4, D1.5 (3) |
+| M8 Webster → Hamilton | decision 10 | yes, **by one assertion** | D3.1 only |
+| M9 / M9b floor ignored | decision 4 | yes | D47.0a/b/d, D47.2, D42.10–12 |
+| M10 `N_min` floor → ceil | documented | yes | D11.4–6, BUG-J (27) |
+| M11 `N_occ` ceil → floor | — | yes | D42.12–13, D49.1a |
+| M12 extra-OFF floor removed | — | yes | D40.1, D40.2b |
+
+| ID | Severity (my verdict) | Finding | Effect | Evidence |
+|---|---|---|---|---|
+| TEST-1 | **major (tests)** | The Gross HC total can be switched to an arithmetic-blend formula and all 752 checks in `npm test` still pass (518 + 174 + 60). Only the trusted-source suite catches it, and `npm test` — the documented gate — does not run that suite. Existing checks pin only the *displayed* effective shrinkage. | Internal: frozen decisions 6–7 are unprotected at the gate the project actually runs. Two cheap fixes: add `test:trusted-source` to `npm test`; add one mixed-shrinkage total assertion (10% + 40%, HC 20 → 28, arithmetic would give 27). | M3c: sizing 518 passed, verify-fixes 174 passed, trusted-source 2 failed |
+| TEST-2 | minor (tests) | Webster apportionment is protected by a single assertion (D3.1, monotonicity sweep); no direct pin of a seat table. | Internal. | M8: 1 failure |
+| TEST-3 | minor (tests) | `verify-sizing-fixes` takes ~3.5 min alone and exceeded 400 s under parallel load. | Internal (CI timeouts). | exit 124 on M9b, M11 |
+
+All kills were behavioural (a computed number changed) — none relied on a source-text grep. 12 of 13 mutations are caught by `npm test`.
