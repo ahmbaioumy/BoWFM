@@ -933,6 +933,32 @@ Suite D64 pins this; D43.14 c247 golden digest re-pinned (HC 8, fairness OFF: SL
 
 ---
 
+### HC-15 - Confidence block and history row described the roster before polish *(fixed 2026-10-07)*
+With shift placement ON, the Stage 3b roster polish evaluates every candidate roster with the full R-replication CI evaluation on the
+shared case sets, but kept only {passes, reasons, median}. On adoption only the roster map was updated, so `primaryPassedResult` and
+`evalCache[N]` still held the PRE-polish evaluation: `primaryStatistical`, the history row for N, the occupancy/ASA binding branches
+and the representative replication index described a roster that is not the recommended one, while the headline simulation ran on the
+adopted roster. Display-only: adoption itself already required the adopted roster to pass the full CI evaluation (pooled and siloed).
+
+**Measured before** (D50 fixture: placement ON, mid-day peak, SLA 85% / 3 h, R = 6, max HC 40; N = 9, polish adopted 7/7):
+seed 42 block mean 94.3 CI [94.1, 94.5] vs adopted roster 100 CI [100, 100]; seed 7 94.2 [93.8, 94.6] -> 100; seed 99 94.4 [94.1, 94.6] -> 100.
+History row for N (seed 42): 94.3 [94.1, 94.5], BO ASA 29.9 min. Headline run showed 100, so block and headline contradicted each other.
+Siloed (D52 fixture, N = 19): block 99.9 [99.9, 100], adopted roster 99.5 [99.5, 99.6], headline 99.6 - optimistic, not pessimistic.
+
+**After:** each candidate's full evaluation is kept (pooled keyed by k, siloed by `rosterVectorKey`, the key `createParallelRosterKSearch` uses);
+`adoptedPolishEvaluation` returns the one for exactly the adopted roster and both searches assign it to `primaryPassedResult` and
+`evalCache[N]` strictly after `finalizeRosterPolish` (`rosterPolish.currentSlaPct` stays the pre-polish median). No extra simulation.
+Seed 42: block 100 CI [100, 100], history row 100 [100, 100] BO ASA 5.9 min.
+
+**Fields that can change for placement-ON runs where a roster is adopted** (the representative replication index can change):
+`primaryStatistical`; the history row for N; `finalDESResult` (headline run; seed 42 BO ASA 7.7 -> 5.9 min, SLA % 100 -> 100); the N-1 boundary run,
+`boundaryEvidence` and its `differenceSummary` (seed 42 N-1 BO ASA 14.8 -> 14.2 min); `isInfeasibleAdjacent` and its warning; and the occupancy/ASA
+binding label. The binding label did not change on the pinned fixtures (still "Primary SLA ... Target"). **Unchanged:** recommended HC, gross HC,
+the adopted roster, `rosterPolish`, every history row except N, and every result with placement OFF or polish status other than adopted /
+adopted_partial (full-result digests pinned). Suite D65 pins this (independent re-evaluation of the adopted roster, sync = async on the full output).
+
+---
+
 ## C. Retracted after measurement
 
 ### D2 — "Occupancy window mismatch" — **NOT A BUG**

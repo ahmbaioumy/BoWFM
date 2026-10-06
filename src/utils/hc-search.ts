@@ -1162,6 +1162,14 @@ export interface RosterParallelResult {
 }
 
 /**
+ * Cache key of a k-vector in the siloed parallel search (keys with no moves are ignored). Exported so the
+ * callers that keep each candidate's full evaluation (see adoptedPolishEvaluation) use the SAME key.
+ */
+export function rosterVectorKey(totals: Record<string, number>, v: Record<string, number>): string {
+  return Object.keys(totals).sort().filter((k) => totals[k] > 0).map((k) => v[k] ?? 0).join(',');
+}
+
+/**
  * Deterministic search control for the SILOED polish: "largest passing k per key", all keys in parallel.
  * Siloed queues are independent in the DES, so each key's own verdict (categoryPasses[key]) narrows its
  * own [lo, hi] (lo = 0 passes by construction) while ONE evaluation per round serves every key. Round 1
@@ -1179,7 +1187,7 @@ export function createParallelRosterKSearch(totals: Record<string, number>) {
   const hi: Record<string, number> = {};
   for (const k of keys) { lo[k] = 0; hi[k] = totals[k]; }
   const evals = new Map<string, { vector: Record<string, number>; ev: RosterParallelEval }>();
-  const idOf = (v: Record<string, number>) => keys.map((k) => v[k] ?? 0).join(',');
+  const idOf = (v: Record<string, number>) => rosterVectorKey(totals, v);
   const sumOf = (v: Record<string, number>) => keys.reduce((a, k) => a + (v[k] ?? 0), 0);
   const chosen = (): Record<string, number> => Object.fromEntries(allKeys.map((k) => [k, lo[k] ?? 0]));
   let round = 0;
@@ -1483,6 +1491,26 @@ export function finalizeRosterPolish(params: {
     },
     adoptedDistribution: adoptedRoster,
   };
+}
+
+/**
+ * The full CI evaluation of exactly the roster finalizeRosterPolish adopted, from the candidate evaluations the
+ * polish block kept (pooled: keyed String(k); siloed: keyed rosterVectorKey). Undefined when nothing was adopted
+ * or the lookup misses - the caller then keeps the pre-polish evaluation as before; nothing is ever fabricated.
+ * The caller makes it the evaluation the result reports (confidence block, history row, binding branches,
+ * representative replication) so they describe the recommended roster, not the one before polish.
+ */
+export function adoptedPolishEvaluation<T>(params: {
+  plan: RosterPolishPlan;
+  fin: { adoptedDistribution?: ShiftDistributionByCategory };
+  search?: { bestK: number };
+  parallelSearch?: RosterParallelResult;
+  candidateEvals: Map<string, T>;
+}): T | undefined {
+  const { plan, fin, search, parallelSearch, candidateEvals } = params;
+  if (!fin.adoptedDistribution || !plan.applicable) return undefined;
+  if (plan.perKey) return parallelSearch ? candidateEvals.get(rosterVectorKey(plan.perKey.totals, parallelSearch.bestVector)) : undefined;
+  return search ? candidateEvals.get(String(search.bestK)) : undefined;
 }
 
 /**
@@ -2775,6 +2803,7 @@ export function searchOptimalHC(params: {
     });
     let search: ReturnType<ReturnType<typeof createRosterKSearch>['result']> | undefined;
     let parallelSearch: RosterParallelResult | undefined;
+    const candidateEvals = new Map<string, ReturnType<typeof evaluateCandidateStatistical>>();
     if (plan.applicable && plan.improves) {
       const evalRoster = (roster: ShiftDistributionByCategory | undefined) => evaluateCandidateStatistical({
         operationalHC: recommendedHC, intervals, openingWIP, categories, calendar, labor, sla,
@@ -2783,12 +2812,17 @@ export function searchOptimalHC(params: {
       });
       if (plan.perKey) {
         const ps = createParallelRosterKSearch(plan.perKey.totals);
-        for (let v = ps.next(); v !== null; v = ps.next()) ps.record(v, toRosterParallelEval(evalRoster(plan.perKey.rosterAtVector(v))));
+        for (let v = ps.next(); v !== null; v = ps.next()) {
+          const r = evalRoster(plan.perKey.rosterAtVector(v));
+          candidateEvals.set(rosterVectorKey(plan.perKey.totals, v), r);
+          ps.record(v, toRosterParallelEval(r));
+        }
         parallelSearch = ps.result();
       } else {
         const ks = createRosterKSearch(plan.totalMoves);
         for (let k = ks.next(); k !== null; k = ks.next()) {
           const r = evalRoster(plan.rosterAt(k));
+          candidateEvals.set(String(k), r);
           ks.record(k, { passes: r.passesAllConstraints, reasons: r.failingReasons, slaPct: r.primaryStats.achievedPctMedian });
         }
         search = ks.result();
@@ -2797,6 +2831,12 @@ export function searchOptimalHC(params: {
     const fin = finalizeRosterPolish({ plan, search, parallelSearch, currentSlaPct: primaryPassedResult.primaryStats.achievedPctMedian });
     rosterPolish = fin.rosterPolish;
     if (fin.adoptedDistribution) winningDistributionByN.set(recommendedHC, fin.adoptedDistribution);
+    // F3 (HC-15): after adoption every statistic reported for N describes the ADOPTED roster (rosterPolish.currentSlaPct above stays the pre-polish median).
+    const adoptedEval = adoptedPolishEvaluation({ plan, fin, search, parallelSearch, candidateEvals });
+    if (adoptedEval) {
+      primaryPassedResult = adoptedEval;
+      evalCache.set(recommendedHC, adoptedEval);
+    }
   }
 
   // 4. Run final DES audit pass at evalN
@@ -3536,6 +3576,7 @@ export async function searchOptimalHCAsync(params: {
     });
     let search: ReturnType<ReturnType<typeof createRosterKSearch>['result']> | undefined;
     let parallelSearch: RosterParallelResult | undefined;
+    const candidateEvals = new Map<string, ReturnType<typeof evaluateCandidateStatistical>>();
     if (plan.applicable && plan.improves) {
       const evalRoster = async (roster: ShiftDistributionByCategory | undefined, movesNow: number) => {
         if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
@@ -3559,6 +3600,7 @@ export async function searchOptimalHCAsync(params: {
         const ps = createParallelRosterKSearch(plan.perKey.totals);
         for (let v = ps.next(); v !== null; v = ps.next()) {
           const r = await evalRoster(plan.perKey.rosterAtVector(v), Object.values(v).reduce((a, b) => a + b, 0));
+          candidateEvals.set(rosterVectorKey(plan.perKey.totals, v), r);
           ps.record(v, toRosterParallelEval(r));
         }
         parallelSearch = ps.result();
@@ -3566,6 +3608,7 @@ export async function searchOptimalHCAsync(params: {
         const ks = createRosterKSearch(plan.totalMoves);
         for (let k = ks.next(); k !== null; k = ks.next()) {
           const r = await evalRoster(plan.rosterAt(k), k);
+          candidateEvals.set(String(k), r);
           ks.record(k, { passes: r.passesAllConstraints, reasons: r.failingReasons, slaPct: r.primaryStats.achievedPctMedian });
         }
         search = ks.result();
@@ -3574,6 +3617,12 @@ export async function searchOptimalHCAsync(params: {
     const fin = finalizeRosterPolish({ plan, search, parallelSearch, currentSlaPct: primaryPassedResult.primaryStats.achievedPctMedian });
     rosterPolish = fin.rosterPolish;
     if (fin.adoptedDistribution) winningDistributionByN.set(recommendedHC, fin.adoptedDistribution);
+    // F3 (HC-15): after adoption every statistic reported for N describes the ADOPTED roster (rosterPolish.currentSlaPct above stays the pre-polish median).
+    const adoptedEval = adoptedPolishEvaluation({ plan, fin, search, parallelSearch, candidateEvals });
+    if (adoptedEval) {
+      primaryPassedResult = adoptedEval;
+      evalCache.set(recommendedHC, adoptedEval);
+    }
   }
 
   // 4. Run final DES audit pass at evalN

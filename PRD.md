@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | **Status** | Draft — as-built specification |
-| **Version** | 1.17.0 |
-| **Date** | 2026-10-06 |
+| **Version** | 1.17.1 |
+| **Date** | 2026-10-07 |
 | **Owner** | _(unassigned)_ |
 | **Product** | Backoffice WFM Sizing Engine |
 | **Artifact** | `BoWFM.html` — single self-contained offline HTML file (~617 KB) |
@@ -879,6 +879,8 @@ After `recommendedHC` is final (the search itself is untouched, so HC cannot cha
    `kept_current_failed_gate` (with the gate that failed), `no_improvement`, `not_applicable`
    (24×7, shift ≥ window, no valid starts).
 
+After adoption the confidence block (`primaryStatistical`), the search-history row for N, the occupancy/ASA binding label and the representative replication (and so the headline run and the N-1 boundary evidence) all describe the **adopted** roster, using the evaluation the polish already ran for it (no extra simulation; F3 / HC-15, 1.17.1, 2026-10-07). Before, they described the pre-polish roster (probe: block 94.3 CI [94.1, 94.5] while the adopted roster scores 100 CI [100, 100]). The decision (HC, roster, `rosterPolish`) is unchanged.
+
 Results show a "Roster coverage by hour" card (needed vs current vs polished agents per half-hour)
 and the status line. Placement OFF: no polish, output byte-identical. Measured 2026-09-30 (default
 config, R=30): EGS_Only 100 HC → `adopted_partial` 13/72, late-tail coverage **1 → 14 agents**,
@@ -1138,12 +1140,12 @@ comment. Nothing else.
 
 ## 9. Validation and quality
 
-### 9.1 Automated test suites — 1,069 checks (174 + 671 + 60 + 164 trusted-source)
+### 9.1 Automated test suites — 1,120 checks (174 + 722 + 60 + 164 trusted-source)
 
 | Suite | Tests | Covers |
 |---|---|---|
 | `scripts/verify-fixes.mts` | 174 | Legacy regression: CSV parsing, date handling, calendar arithmetic, CRN consistency, occupancy semantics, standalone artifact integrity, analytical infeasibility diagnosis, 24x7 midnight budget accounting |
-| `scripts/verify-sizing-fixes.mts` | 671 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement, fair agent assignment (D43: spread bounds, determinism, EDF order pinned to the pre-change engine, OFF = original HC, HC pins on pooled/siloed/staggered/24x7; D44: no double-booking in gated 24x7 runs; D45: availability accrual and pinned HC of the three built-in samples; D47: Workload Floor toggle; D48: clock-start derivation; D49: pinned HC of `test_files/AJM_Only.csv`; D50/D51/D52: roster polish at fixed HC — pooled, siloed guard, per-queue search; D53: Results use run-time settings; D54: number fields keep what is typed; D55-D61 (G12): the frozen sizing decisions are guarded by tests — dispatch order incl. the priority tie-break, business-calendar `latestSafeStart`, CI-gated acceptance (primary / per-category / occupancy cap / ASA each use the confidence bound, not the mean), Common Random Numbers, unfinished cases in the SLA denominator, Gross HC and harmonic shrinkage, volume rounding; each proven red against its own mutation; D62 (G1) + D63 (G1-a: stray date blocks from 8 empty days): horizon from demand only, backlog injection clamp, rule D4 overdue-at-start scoring, search N_min/N_occ/recommendation with old and Friday backlog (sync = async), and the three new data-quality rules), `D64` (F2: 24x7 budget-exhausted parks hand back at once - zero avoidable waits, legitimate waits kept, SLA monotone in headcount, business-hours digest pinned, stress + determinism) |
+| `scripts/verify-sizing-fixes.mts` | 722 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement, fair agent assignment (D43: spread bounds, determinism, EDF order pinned to the pre-change engine, OFF = original HC, HC pins on pooled/siloed/staggered/24x7; D44: no double-booking in gated 24x7 runs; D45: availability accrual and pinned HC of the three built-in samples; D47: Workload Floor toggle; D48: clock-start derivation; D49: pinned HC of `test_files/AJM_Only.csv`; D50/D51/D52: roster polish at fixed HC — pooled, siloed guard, per-queue search; D53: Results use run-time settings; D54: number fields keep what is typed; D55-D61 (G12): the frozen sizing decisions are guarded by tests — dispatch order incl. the priority tie-break, business-calendar `latestSafeStart`, CI-gated acceptance (primary / per-category / occupancy cap / ASA each use the confidence bound, not the mean), Common Random Numbers, unfinished cases in the SLA denominator, Gross HC and harmonic shrinkage, volume rounding; each proven red against its own mutation; D62 (G1) + D63 (G1-a: stray date blocks from 8 empty days): horizon from demand only, backlog injection clamp, rule D4 overdue-at-start scoring, search N_min/N_occ/recommendation with old and Friday backlog (sync = async), and the three new data-quality rules), `D64` (F2: 24x7 budget-exhausted parks hand back at once - zero avoidable waits, legitimate waits kept, SLA monotone in headcount, business-hours digest pinned, stress + determinism) |
 | `scripts/verify-agent-analytics.mts` | 60 | Export timestamps equal the on-screen formatter; agent analytics reconcile to `completedCases` / `totalHandlingMinutes` / `agentFairness`; work-share case credit |
 | `scripts/verify-trusted-source.mts` (`npm run test:trusted-source`) | 164 | Hand-derived ground truth in `trusted-source-validation.json` (T0 invariants 35, T1 domain algebra 71, T2 hand-traced DES 31, T3 characterization 27). Authored under `Asia/Dubai`; on any other host timezone it prints a warning and continues (verified: all 164 pass under UTC, America/New_York, Asia/Tokyo, Pacific/Auckland, Europe/London) |
 | `scripts/audit-compare.mts` (`npm run test:audit`, opt-in, ~30 min) | 24 cells | Re-runs all four `test_files/` samples × 6 settings and fails on any difference from `docs/audit/sample-hc-after-2026-09-30.jsonl` |

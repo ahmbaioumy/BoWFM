@@ -8,6 +8,7 @@
  * Run: npx tsx scripts/verify-sizing-fixes.mts
  */
 
+import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
@@ -4968,6 +4969,115 @@ console.log('\n--- Suite D64: F2 24x7 park resumes when capacity exists ---');
     assert(sig(dG) === sig(dG2), 'D64.15 determinism: same seed twice gives identical case results (stress)', '');
     assert(sig(runF2(casesB, 3, 0.9, offs)) === sig(dB), 'D64.16 determinism: same seed twice gives identical case results (staggered)', '');
   }
+}
+
+// =================================================================
+// Suite D65 - F3 (HC-15): when the roster polish adopts a re-spread roster, the confidence block,
+// the history row for N, the occupancy/ASA binding branches and the representative replication
+// describe THAT roster. Pre-fix primaryPassedResult / evalCache[N] kept the PRE-polish evaluation
+// (D50 fixture: block 94.3 CI [94.1, 94.5] while the adopted roster scores 100 CI [100, 100] and the
+// headline run showed 100). The decision (HC, adopted roster, rosterPolish) must NOT move; runs
+// with no adoption (placement OFF, no_improvement) must be byte-identical. Pins marked "pre" were
+// measured on the unchanged code.
+// =================================================================
+console.log('\n--- Suite D65: F3 statistics describe the adopted roster ---');
+{
+  // Key-order-insensitive digest: the async search assembles its result object in a different key order than the sync one (same values).
+  const sortKeys = (_k: string, v: any) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v);
+  const dg = (x: unknown) => createHash('sha1').update(JSON.stringify(x, sortKeys)).digest('hex').slice(0, 16);
+  const cal65: CalendarConfig = { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 20 };
+  const laborOff65: LaborConfig = { ...LABOR, dailyProductiveHours: 8 };
+  const laborOn65: LaborConfig = { ...laborOff65, shiftPlacementEnabled: true, shiftSlapMinutes: 30 };
+  const mkIv65 = (cats: Array<[string, (h: number) => number]>): StandardInterval[] => {
+    const out: StandardInterval[] = [];
+    for (let day = 0; day < 5; day++) {
+      for (let h = 8; h < 20; h++) {
+        for (let m = 0; m < 60; m += 30) {
+          for (const [category, vf] of cats) {
+            out.push({ intervalIndex: out.length, start: new Date(2026, 2, 2 + day, h, m), end: new Date(2026, 2, 2 + day, h, m + 30), volume: vf(h), category });
+          }
+        }
+      }
+    }
+    return out;
+  };
+  const mkSla65 = (pct: number, windowH: number): SLAPolicyConfig => ({
+    primaryPct: pct, primaryWindow: windowH, primaryUnit: 'hours', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes',
+    asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'next_open',
+    occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 90,
+  });
+  const cat1: CategoryConfig[] = [{ id: 'c1', name: 'General', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 }];
+  const cat2: CategoryConfig[] = [
+    { id: 'A', name: 'A', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 },
+    { id: 'B', name: 'B', ahtMinutes: 25, shrinkagePct: 0.1, priority: 2 },
+  ];
+  const peak = (h: number) => (h >= 12 && h < 16 ? 14 : 3);
+  const iv1 = mkIv65([['General', peak]]);
+  const iv2 = mkIv65([['A', (h) => (h === 8 ? 60 : 4)], ['B', (h) => (h >= 12 && h < 16 ? 10 : 2)]]);
+
+  type Scn = { intervals: StandardInterval[]; categories: CategoryConfig[]; labor: LaborConfig; sla: SLAPolicyConfig; seed: number; userMaxHC: number; arch?: 'siloed' };
+  const baseOf = (s: Scn) => ({ intervals: s.intervals, openingWIP: [] as any[], categories: s.categories, calendar: cal65, labor: s.labor, sla: s.sla, seed: s.seed, userMaxHC: s.userMaxHC, replications: 6, ...(s.arch ? { queueArchitecture: s.arch } : {}) });
+  const distOf = (d: any) => JSON.stringify(d ? Object.keys(d).sort().map((k) => [k, d[k].slaps]) : null);
+
+  // Polish-adopted scenarios: (a) (b) (c) (d) (e) (h) (j).
+  const polishCase = async (tag: string, s: Scn, pin: { N: number; mean: number; rp: string; others: string; dist: string; bind: string }) => {
+    const syn: any = searchOptimalHC(baseOf(s));
+    const asy: any = await searchOptimalHCAsync(baseOf(s));
+    const N: number = syn.recommendedHC;
+    const rp = syn.rosterPolish;
+    assert(rp?.status === 'adopted' || rp?.status === 'adopted_partial', `${tag}.0 scenario adopts a polished roster`, `status=${rp?.status}`);
+    const sets = hcNs.generatePrecomputedReplications({ intervals: s.intervals, openingWIP: [], categories: s.categories, calendar: cal65, sla: s.sla, baseSeed: s.seed, replications: 6 });
+    const ind: any = evaluateCandidateStatistical({
+      operationalHC: N, intervals: s.intervals, openingWIP: [], categories: s.categories, calendar: cal65, labor: s.labor, sla: s.sla,
+      baseSeed: s.seed, replications: 6, queueArchitecture: s.arch ?? 'pooled', precomputedCaseSets: sets,
+      shiftDistribution: syn.shiftPlacement?.winningDistribution, dispatchFairness: undefined,
+    });
+    const ps = syn.primaryStatistical;
+    const brief = (x: any) => `mean=${x?.achievedPctMean} med=${x?.achievedPctMedian} CI=[${x?.ci95Low},${x?.ci95High}] R=${x?.replications}`;
+    // (a) confidence block = independent evaluation of the adopted roster
+    assert(JSON.stringify(ps) === JSON.stringify(ind.primaryStats), `${tag}.a1 primaryStatistical equals an independent evaluation of the adopted roster`, `reported ${brief(ps)} | independent ${brief(ind.primaryStats)}`);
+    assert(ps?.achievedPctMean === pin.mean && ps?.replications === 6, `${tag}.a2 primaryStatistical mean/R literal`, `got ${brief(ps)}`);
+    if (pin.mean === 100) assert(ps?.ci95Low === 100 && ps?.ci95High === 100 && ps?.achievedPctMedian === 100, `${tag}.a3 primaryStatistical CI [100, 100], median 100`, brief(ps));
+    // (b) history row for N carries those numbers; other rows pinned
+    const row = syn.searchHistory.find((r: any) => r.hc === N);
+    const rowOk = !!row && row.primaryPct === ind.primaryStats.achievedPctMedian && row.primaryCiLow === ind.primaryStats.ci95Low && row.primaryCiHigh === ind.primaryStats.ci95High
+      && row.boAsaMinutes === ind.representativeResult.boAsaMeanMinutes && row.occupancyPct === ind.representativeResult.occupancyPct && row.rawOccupancyPct === ind.representativeResult.rawOccupancyPct
+      && row.passed === ind.passesAllConstraints && JSON.stringify(row.failingReasons) === JSON.stringify(ind.failingReasons);
+    assert(rowOk, `${tag}.b1 history row for N equals the adopted evaluation`, JSON.stringify(row));
+    assert(syn.searchHistory.filter((r: any) => r.hc === N).length === 1, `${tag}.b2 exactly one history row for N`, '');
+    assert(dg(syn.searchHistory.filter((r: any) => r.hc !== N)) === pin.others, `${tag}.b3 history rows for other N unchanged (pre)`, `got ${dg(syn.searchHistory.filter((r: any) => r.hc !== N))}`);
+    // (c) (d) the decision is untouched
+    assert(dg(rp) === pin.rp, `${tag}.c rosterPolish unchanged (pre)`, `got ${dg(rp)}`);
+    assert(N === pin.N && dg(distOf(syn.shiftPlacement?.winningDistribution)) === pin.dist, `${tag}.d recommended HC and adopted roster unchanged (pre)`, `N=${N} dist=${dg(distOf(syn.shiftPlacement?.winningDistribution))}`);
+    // (e) sync deep-equals async on the full output (boundary evidence included)
+    assert(dg(syn) === dg(asy), `${tag}.e sync result deep-equals async result (full output)`, `sync ${dg(syn)} async ${dg(asy)}`);
+    // (h) headline run = the adopted evaluation's representative run
+    assert(syn.finalDESResult.primaryAchievedPct === ind.representativeResult.primaryAchievedPct, `${tag}.h headline primaryAchievedPct equals the adopted evaluation's representative run`, `headline ${syn.finalDESResult.primaryAchievedPct} vs rep ${ind.representativeResult.primaryAchievedPct}`);
+    // (j) binding label
+    assert(`${syn.bindingConstraintType}|${syn.bindingConstraintDescription}` === pin.bind, `${tag}.j binding-constraint label pinned`, `got ${syn.bindingConstraintType}|${syn.bindingConstraintDescription}`);
+  };
+
+  const sla65 = mkSla65(85, 3);
+  await polishCase('D65.1 pooled seed 42', { intervals: iv1, categories: cat1, labor: laborOn65, sla: sla65, seed: 42, userMaxHC: 40 }, { N: 9, mean: 100, rp: '5ca7f75aac8b4e42', others: 'b98412b976e5b850', dist: 'eea4224868125973', bind: 'statistical_primary_sla|Primary SLA 85% Target (Statistical DES, 90% CI)' });
+  await polishCase('D65.2 pooled seed 7', { intervals: iv1, categories: cat1, labor: laborOn65, sla: sla65, seed: 7, userMaxHC: 40 }, { N: 9, mean: 100, rp: '343796a0ef1aa6d1', others: '029a912afc357141', dist: 'eea4224868125973', bind: 'statistical_primary_sla|Primary SLA 85% Target (Statistical DES, 90% CI)' });
+  await polishCase('D65.3 pooled seed 99', { intervals: iv1, categories: cat1, labor: laborOn65, sla: sla65, seed: 99, userMaxHC: 40 }, { N: 9, mean: 100, rp: '5ca7f75aac8b4e42', others: '311f6baea3e00365', dist: 'eea4224868125973', bind: 'statistical_primary_sla|Primary SLA 85% Target (Statistical DES, 90% CI)' });
+  // (g) siloed adopted_partial (D52 fixture): a vector is adopted
+  await polishCase('D65.4 siloed (D52 fixture)', { intervals: iv2, categories: cat2, labor: laborOn65, sla: mkSla65(95, 4), seed: 42, userMaxHC: 60, arch: 'siloed' }, { N: 19, mean: 99.5, rp: '574fd697c0fc5960', others: '51ae9df0b3740505', dist: 'ef0e7a02e1a93f74', bind: 'statistical_primary_sla|Primary SLA 95% Target (Statistical DES, 90% CI)' });
+
+  // (f) nothing adopted: the full result must be byte-identical to today
+  {
+    const noImp: Scn = { intervals: iv1, categories: cat1, labor: laborOn65, sla: mkSla65(95, 2), seed: 42, userMaxHC: 40 };
+    const a: any = searchOptimalHC(baseOf(noImp));
+    const aa: any = await searchOptimalHCAsync(baseOf(noImp));
+    assert(a.rosterPolish?.status === 'no_improvement', 'D65.5a no_improvement scenario (placement ON, 95/2h) really is no_improvement', `status=${a.rosterPolish?.status}`);
+    assert(dg(a) === '733df309dc766f59' && dg(aa) === dg(a), 'D65.5b no_improvement: full result identical to today (pre) and sync = async', `sync ${dg(a)} async ${dg(aa)}`);
+    const off: Scn = { intervals: iv1, categories: cat1, labor: laborOff65, sla: sla65, seed: 42, userMaxHC: 40 };
+    const o: any = searchOptimalHC(baseOf(off));
+    const oa: any = await searchOptimalHCAsync(baseOf(off));
+    assert(o.rosterPolish === undefined && dg(o) === '9038b551a950a83b' && dg(oa) === dg(o), 'D65.6 placement OFF: full result identical to today (pre) and sync = async', `sync ${dg(o)} async ${dg(oa)}`);
+  }
+  // (i) placement stays opt-in
+  assert(!DEFAULT_LABOR.shiftPlacementEnabled, 'D65.7 default labor config: shiftPlacementEnabled is OFF', `got ${String(DEFAULT_LABOR.shiftPlacementEnabled)}`);
 }
 
 console.log('\n==================================================');
