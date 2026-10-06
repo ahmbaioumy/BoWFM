@@ -550,3 +550,24 @@ Weekly cap 25% (hard stop). Meter at plan time: 21%. No new agent at a reading o
 | 7 | Stray date blocked | One row 2 years out: blocking error naming it, Run disabled in the browser; a 10-day-out stray row: warning; a file with a real 5-week closure and substantial data on both sides: warning, not blocked |
 | 14 | Planner sees it | Browser: load a demand file plus dated old backlog, run: the note with the count appears beside the SLA headline; case CSV has the marker; no note when the count is 0 |
 | 15 | Mutation proof | In a scratch copy: re-add the backlog pull-back; remove the injection clamp; score overdue-at-start cases again: each makes a new test fail |
+
+---
+
+# BUILD PLAN — G1-a: tighten the stray-date rule (owner-approved 2026-10-06; weekly cap now 35%, no new agent at a reading of 34%)
+
+**Task:** a mistyped date close to the data (for example a wrong month) must block the run, not only a date more than 30 days away.
+**Tier 2/3** (data-quality rule; no engine maths). Reviewers: `tester` + `auditor`. Rule shape comes from the G1 final challenger, so no separate plan challenge.
+
+**Rule (replaces the 30-day condition of the blocking check only):** sort the distinct data dates. For each empty run between two data dates: if the run is **longer than 7 calendar days** AND the smaller side of it is isolated (row count no more than 1% of all rows, minimum 1, maximum 20) then blocking error "Isolated date(s) far from the rest of the data", naming the isolated date(s), their row count, the main data range, and the number of empty days. Ties: earlier side treated as isolated (as today). Everything else unchanged: the long-gap warning (more than 30 days, both sides substantial), the old-backlog warning, the overdue-at-start warning, the coverage-gap warning.
+
+**Scope lock:** `src/utils/csv-parser.ts` (that one condition and its message), `scripts/verify-sizing-fixes.mts` (append tests; the existing D62 check that expects a 10-day stray row to be a WARNING must change to expect an ERROR — the only permitted edit to an existing expectation, listed in the hand-back), `PRD.md` (the rule row, version patch bump), `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md` (amend the G1 entry), rebuilt `BoWFM.html`.
+
+| # | Acceptance criterion | Proof |
+|---|---|---|
+| 1 | Near stray date blocks | Baseline week + 1 row 10 days after the last day: error naming the date, `passed` false; same with the row 9 days BEFORE the first day |
+| 2 | Month typo blocks | Week in October + 1 row on the same day in November: error |
+| 3 | Normal gaps do not block | Mon-Fri week followed by the next Mon-Fri week (2 empty days): no issue; two full weeks separated by a 9-day closure, substantial data both sides: no error; one isolated row after a 7-day empty run exactly: no error (boundary), 8 days: error |
+| 4 | Small files safe | Two days of data 10 days apart with 15 rows each: no error (neither side isolated) |
+| 5 | No regression | lint clean; `npm test` green; `test:audit` 24/24 identical; built-in samples load with data quality passed (support and healthcare samples include weekends) |
+| 6 | Browser | Upload week + near stray row: blocking message visible, Run disabled |
+| 7 | Docs and artifact | PRD rule text matches; `npm run check:artifact` passes |
