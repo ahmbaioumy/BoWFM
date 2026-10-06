@@ -571,3 +571,53 @@ Weekly cap 25% (hard stop). Meter at plan time: 21%. No new agent at a reading o
 | 5 | No regression | lint clean; `npm test` green; `test:audit` 24/24 identical; built-in samples load with data quality passed (support and healthcare samples include weekends) |
 | 6 | Browser | Upload week + near stray row: blocking message visible, Run disabled |
 | 7 | Docs and artifact | PRD rule text matches; `npm run check:artifact` passes |
+
+---
+
+# BUILD PLAN — F2: 24x7 parked work resumes when capacity exists, not at midnight (DES-8)
+
+Weekly cap 35% (hard stop). Meter at plan time: 30%. No new agent at a reading of 34%.
+
+**Task:** on a 24x7 calendar a case parked because an agent ran out of daily productive time must be available to other free agents at once, not held until the next midnight.
+**End user:** the WFM planner of a 24x7 operation.
+**Tier 3** (simulation behaviour). Reviewers: `tester` + `auditor` (+ final `challenger` if the meter allows).
+
+## Facts (investigator, with probes in scratch `f2/`)
+
+- Parking: `dispatchSingleQueue` (`des-engine.ts:1437-1517`). A budget-bound park schedules `CasePark`; its non-handover branch (`:1659-1686`) puts the case in a side map (`parkedWIP`) and schedules `CaseResume`.
+- On every other calendar the resume time is `nextOpen(now)`, which is "now" while the business is open. On 24x7 a hard-coded branch (`:1671-1683`) sets it to the next calendar midnight by hand-rolled date maths. A dead copy of that branch sits in `DayClose` (`:1887-1899`; 24x7 never schedules `DayClose`).
+- While the case waits in the side map no dispatch can reach it, although other agents are idle with budget. Shift-end parks in staggered mode already hand over immediately (correct).
+- Probe, 3 agents, 24x7: all agents on one shift: 4 of 4 parked cases waited needlessly (586 min total). Staggered shifts with adherence 0.9: 5 of 8, 4,132 avoidable minutes (one case parked 06:46, resumed 00:00, while another agent was free from 08:01).
+- Sizing probe (24x7 week, 6 per hour, AHT 45, adherence 0.9): SLA at 16 agents 98.0% today vs 100.0% with the branch removed; today SLA is NOT monotone in headcount (14 agents 100%, 16 agents 98% at a 24 h SLA); the patch removes that. Recommendation unchanged on that dataset (floor-bound at 16).
+- No document records midnight resume on 24x7 as deliberate; `PRD.md:806` and `project_context.md:465-470` already describe next-day resume as `DayClose`-only (stale for this branch). The fix reverses no recorded decision.
+
+## Design
+
+1. Remove the 24x7 midnight branch at `des-engine.ts:1671-1683`; every calendar uses `nextOpen(currTime, calendar)`. Remove the dead copy in `DayClose`. No other logic changes: daily budget, shift-window presence (frozen decision 11), parked-first rule, EDF order, random draws and both search functions are untouched.
+2. If nobody has capacity when the case is parked, it simply stays in the live queue and is taken at the next completion, arrival or shift start / day reset — which is when capacity appears.
+
+## Steps (builder `sonnet-executor`, fail-first)
+
+1. Tests first, red on today code (new suite appended before the RESULTS block of `scripts/verify-sizing-fixes.mts`): (a) 24x7, all agents on one shift, hand-built cases straddling the daily budget: each parked case resumes at the first instant another agent is idle with budget (0 avoidable waits; today 4); (b) 24x7 staggered offsets 0/8/16 h, adherence 0.9: 0 avoidable waits (today 5), named case resumes at 08:01-ish on the same day, not 00:00; (c) when ALL agents are exhausted the case still waits for the day reset (wait is legitimate) and nothing is worked beyond any agent budget or outside its shift window; (d) conservation: handled minutes equal total work, no overlap, no agent over budget (reuse `verifyAgentTimelineInvariants`); (e) SLA monotone in headcount on the 24x7 sizing fixture for N = 14, 15, 16, 17; (f) a business-hours calendar digest unchanged.
+2. Engine edit (design 1).
+3. Existing tests: a pinned digest for a 24x7 budget-park scenario (D43.14, `verify-sizing-fixes.mts:~3169`) and possibly D43.7, D45.1e-f are expected to change. Each changed expectation is re-derived, listed with before/after and a one-line justification, and reviewed. Non-24x7 expectations must NOT change.
+4. Verify: lint; build; `npm test`; `npm run test:audit` (report any cell that moves — sample files on 24x7 settings may legitimately change; business-hours cells must not); `check:artifact`.
+5. Docs: `PRD.md` (simulation section: park/resume wording, version bump), `project_context.md` (§5 and the stale `DayClose`-only note, §11 recently fixed), `docs/wfm/07-known-defects-and-decisions.md` (new entry with the probe numbers), `docs/wfm/05-scheduling.md:90-91` if its wording needs it.
+
+## Scope lock
+
+`src/utils/des-engine.ts` (the two branches only), `scripts/verify-sizing-fixes.mts` (append; listed expectation updates only), `scripts/verify-fixes.mts` ONLY if a 24x7 pinned value there changes (listed), audit baseline file under `docs/audit/` only if `test:audit` 24x7 cells legitimately move (listed, with before/after), `PRD.md`, `project_context.md`, `docs/wfm/05-scheduling.md`, `docs/wfm/07-known-defects-and-decisions.md`, rebuilt `BoWFM.html`.
+
+## Acceptance criteria and proof
+
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | No avoidable wait on 24x7 | Tester own script on the two probe scenarios: avoidable waits 0 (were 4 and 5); park and resume times listed |
+| 2 | Legitimate waits kept | All agents exhausted: case resumes at the day reset; zero work beyond budget or outside shift windows (tester tally from the agent timeline) |
+| 3 | SLA monotone in headcount | 24x7 fixture: SLA% non-decreasing for N = 14..17 |
+| 4 | Business-hours results unchanged | Three built-in samples 31/40, 27/34, 31/39; `test:audit` business-hours cells identical; digest test |
+| 5 | 24x7 results move the right way | Any changed 24x7 number: SLA at fixed headcount not lower, recommended headcount not higher; each listed |
+| 6 | Changed expectations justified | List of every edited existing assertion with before/after; auditor confirms none is non-24x7 |
+| 7 | Mutation proof | Tester re-adds the midnight branch in a scratch copy: new tests fail |
+| 8 | Gates, docs, artifact | lint, `npm test`, `check:artifact` green; docs updated |
+| 9 | Scope respected | `git diff <checkpoint>..HEAD --stat` only scope-lock files |
