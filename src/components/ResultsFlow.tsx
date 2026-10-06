@@ -267,7 +267,7 @@ function ResultsFlowBody({
       if (caseCatFilter !== 'ALL' && c.category !== caseCatFilter) return false;
       if (caseStatusFilter === 'COMPLETED' && !c.isCompleted) return false;
       if (caseStatusFilter === 'UNFINISHED' && c.isCompleted) return false;
-      if (caseStatusFilter === 'BREACHED' && c.primaryPassed) return false;
+      if (caseStatusFilter === 'BREACHED' && (c.primaryPassed || c.overdueAtStart)) return false;
       if (caseSearch) {
         const q = caseSearch.toLowerCase();
         return c.caseId.toLowerCase().includes(q) || c.category.toLowerCase().includes(q);
@@ -282,7 +282,7 @@ function ResultsFlowBody({
   // All SLA-breaching cases at the recommended headcount (N), for the Audit Drill tab
   const breachedCases = useMemo(() => {
     return (des.caseResults || [])
-      .filter((c) => !c.primaryPassed)
+      .filter((c) => !c.primaryPassed && !c.overdueAtStart) // rule D4: overdue-at-start backlog is not an SLA breach of this plan
       .sort((a, b) => a.primaryDeadline.getTime() - b.primaryDeadline.getTime());
   }, [des.caseResults]);
 
@@ -974,6 +974,11 @@ function ResultsFlowBody({
                   style={{ width: `${Math.min(100, des.primaryAchievedPct)}%` }}
                 />
               </div>
+              {(des.overdueAtStartCount ?? 0) > 0 && (
+                <p className="mt-2 text-[10px] leading-snug text-amber-700" data-testid="overdue-at-start-note">
+                  {des.overdueAtStartCount} opening-backlog {des.overdueAtStartCount === 1 ? 'case was' : 'cases were'} already overdue when the plan starts. They are worked first and counted as workload, but are not part of the SLA % above.
+                </p>
+              )}
             </div>
 
             <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
@@ -1428,15 +1433,24 @@ function ResultsFlowBody({
                       <td className="py-2 px-3 whitespace-nowrap">{c.completeTime ? formatSafeDateTime(c.completeTime) : 'Unfinished'}</td>
                       <td className="py-2 px-3">{c.parkCount}</td>
                       <td className="py-2 px-3 text-right font-sans">
-                        <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                            c.primaryPassed
-                              ? 'bg-emerald-100 text-emerald-800'
-                              : 'bg-rose-100 text-rose-800'
-                          }`}
-                        >
-                          {c.primaryPassed ? 'PASS' : 'BREACH'}
-                        </span>
+                        {c.overdueAtStart ? (
+                          <span
+                            className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800"
+                            title="Opening backlog already overdue when the plan starts: worked and counted as workload, but not part of the SLA %."
+                          >
+                            OVERDUE AT START
+                          </span>
+                        ) : (
+                          <span
+                            className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              c.primaryPassed
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-rose-100 text-rose-800'
+                            }`}
+                          >
+                            {c.primaryPassed ? 'PASS' : 'BREACH'}
+                          </span>
+                        )}
                       </td>
                     </tr>
                   ))}

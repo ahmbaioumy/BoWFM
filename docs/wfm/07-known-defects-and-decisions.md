@@ -880,6 +880,42 @@ Known caveat: on real files the forced staggered layout costs some SLA, so their
 
 ---
 
+### 2026-10-06 (G1) — Planning horizon stretched back to the oldest backlog case (CSV-13, CSV-14) *(fixed)*
+
+**Defect.** `computeIntervalHorizon` (and hand-rolled copies in `searchOptimalHC`, `searchOptimalHCAsync` and the
+Config preview) pulled the horizon start back to the oldest opening-backlog arrival. The empty days in between counted
+as planned capacity, so the working-day count, `N_min`, `N_occ`, the occupancy denominator and the recommendation all
+fell. Every case was also injected at its own arrival, and agents were idle regardless of the clock, so an old backlog
+case was worked before the plan began by agents who were not rostered (free capacity). A stray demand date years out did
+the same and data quality said "passed". No test asserted the stretching and no document called it deliberate.
+Measured (Mon-Fri week, 08:00-17:00, 6 cases per 30-min interval, AHT 30, shrinkage 20%, default config, seed 42, 8
+replications): no backlog 5 working days, N_min 7, N_occ 8, recommended 8; one backlog case 14 days old 15 days, N_min 2,
+N_occ 3, recommended 7 (6 h SLA) / 5 (3-day SLA); 50 such cases 15 days, 2, 3, 7 / 5; 40 cases due the previous Friday
+6 days, 6, 7, 7; one stray row 2 years out 524 days, N_min 1, recommended 7 / 5.
+
+**Decision (owner-approved 2026-10-06).** (1) The horizon is the span of the demand intervals only; backlog never moves
+it (backlog-only data: earliest backlog arrival + 7 days). One implementation, `computeIntervalHorizon`. (2) A case that
+arrived before the horizon is injected at `max(arrival, horizonStart)`; its arrival, clock start, deadline and latest
+safe start are unchanged. (3) Rule D4: opening backlog that arrived before the horizon and cannot meet its deadline even
+if work starts at the first working instant (`latestSafeStart < nextOpen(horizonStart)`) is worked and counted as
+workload but **excluded from the SLA numerator/denominator and the wait-time mean**, flagged `overdueAtStart` and
+reported (`overdueAtStartCount`, Results note, case CSV column, data-quality warning). Without D4, ordinary Friday
+carry-over would fail at every headcount and drive the search to its cap. Attainable old backlog is scored against its
+original deadline; its wait is measured from `max(clockStart, horizonStart)`. (4) Data quality: an isolated stray date
+(an empty run of more than 30 days whose smaller side holds at most 1% of the rows, 1-20 rows) **blocks the run**; other
+empty runs over 30 days extend the coverage-gap warning; backlog arriving more than 30 days before the first interval
+and the overdue-at-start count are warnings. Frozen decisions 1-11 are untouched (occupancy stays demand / planned
+capacity; the planned horizon is now the demand span).
+
+**After** (same fixtures): no backlog 5 / 7 / 8 / 8; one backlog case 14 days old 5 / 7 / 8 / 8 at both SLA windows;
+50 old cases 5 / 7 / 8 / 8 (occupancy 98.3%); 40 Friday cases 5 / 7 / 8 / 8 (occupancy 96.7%, `overdueAtStartCount` 40);
+sync and async identical. Suite D62 pins this. The `primaryEligible` field (open item D15) is now live: false for
+overdue-at-start cases.
+
+**Residual.** SLA % can look healthy while a large overdue carry-over exists; read the count beside the headline (PRD L19).
+
+---
+
 ## C. Retracted after measurement
 
 ### D2 — "Occupancy window mismatch" — **NOT A BUG**
@@ -921,7 +957,7 @@ questions. Establish which question is being asked before calling one wrong.
 | **D12** | Horizon uses date-validated `validIntervals`; the workload sum iterates **unfiltered** `intervals`. Unparseable rows add volume but no horizon span. | Low |
 | **D13** | `BUG-P2-O` (flagged in-code): the "representative" replication for reporting occupancy/ASA is chosen by closeness to median *primary SLA %* — an unrelated metric. | Low — reporting only, decisions use full CI |
 | **D14** | Censored ASA for never-started cases measured only to `horizonEnd`, not the true simulation end, understating backlog age for badly undersized candidates. | Low |
-| **D15** | `primaryEligible` hardcoded `true` for every case despite existing in the type. Dead field or unimplemented exemption rule. | Low |
+| **D15** | *(resolved 2026-10-06 by the G1 fix)* `primaryEligible` is now false for opening backlog already overdue at horizon start (rule D4). | — |
 | **D18** | Two priority orderings still exist by design (`CaseMinHeap.compare` governs heap push/pop; `pickNextCase`/`compareByUrgency` governs dispatch selection — see fixed `D16` above, which only corrected which one ships). They independently re-implement the same parked-first tiering — drift risk, not a current bug. | Low — same root cause as D11 |
 | **G1** | **No backlog-ageing report** (>24h/48h/72h buckets). COPC-style backoffice reporting expects it alongside TAT attainment; data already exists in `CaseRunResult`. | Gap — worth building |
 | **G2** | **Quality/rework not modelled.** Rework is real workload; sizing against clean volume understates. | Gap — inflate input volume meanwhile |

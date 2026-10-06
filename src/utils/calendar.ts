@@ -483,36 +483,41 @@ export function getValidSlapStarts(
 }
 
 /**
- * Computes min(start) and max(end) horizon across valid intervals and opening WIP.
+ * The planning horizon: the span of the valid DEMAND intervals — min(start) to max(end). The single
+ * implementation behind the search (sync and async), case generation, data quality and the config preview.
+ *
+ * Opening backlog NEVER moves the horizon (G1, 2026-10-06). It used to pull the start back to the oldest
+ * backlog arrival, so the empty days in between counted as planned capacity and understated N_min, occupancy
+ * and the recommendation. A backlog case's own arrival still drives its deadline; the simulation injects it at
+ * max(arrival, horizonStart) (des-engine.ts).
+ *
+ * Fallback when there is no valid demand interval at all (backlog-only data): start = earliest valid backlog
+ * arrival, end = start + 7 days. With neither, the start is the wall clock (callers guard that case).
  */
 export function computeIntervalHorizon(
   intervals: Array<{ start: Date; end: Date }>,
   openingWIP: Array<{ arrival?: Date }> = []
 ): { horizonStart: Date; horizonEnd: Date } {
-  const validIntervals = intervals.filter(
-    (it) => it.start && !isNaN(it.start.getTime()) && it.end && !isNaN(it.end.getTime())
-  );
-
   let minStartMs = Infinity;
   let maxEndMs = -Infinity;
 
-  for (const it of validIntervals) {
+  for (const it of intervals) {
+    if (!it.start || isNaN(it.start.getTime()) || !it.end || isNaN(it.end.getTime())) continue;
     if (it.start.getTime() < minStartMs) minStartMs = it.start.getTime();
     if (it.end.getTime() > maxEndMs) maxEndMs = it.end.getTime();
   }
 
-  let horizonStart = isFinite(minStartMs) ? new Date(minStartMs) : new Date();
-  let horizonEnd = isFinite(maxEndMs) ? new Date(maxEndMs) : new Date(horizonStart.getTime() + 7 * 86400000);
-
-  if (openingWIP && openingWIP.length > 0) {
-    for (const w of openingWIP) {
-      if (w.arrival && !isNaN(w.arrival.getTime()) && w.arrival.getTime() < horizonStart.getTime()) {
-        horizonStart = new Date(w.arrival);
-      }
-    }
+  if (isFinite(minStartMs) && isFinite(maxEndMs)) {
+    return { horizonStart: new Date(minStartMs), horizonEnd: new Date(maxEndMs) };
   }
 
-  return { horizonStart, horizonEnd };
+  // No valid demand interval: fall back to the opening backlog, else the wall clock.
+  let minArrivalMs = Infinity;
+  for (const w of openingWIP ?? []) {
+    if (w.arrival && !isNaN(w.arrival.getTime()) && w.arrival.getTime() < minArrivalMs) minArrivalMs = w.arrival.getTime();
+  }
+  const horizonStart = isFinite(minArrivalMs) ? new Date(minArrivalMs) : new Date();
+  return { horizonStart, horizonEnd: new Date(horizonStart.getTime() + 7 * 86400000) };
 }
 
 /**

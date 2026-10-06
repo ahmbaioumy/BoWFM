@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Status** | Draft — as-built specification |
-| **Version** | 1.15.0 |
+| **Version** | 1.16.0 |
 | **Date** | 2026-10-06 |
 | **Owner** | _(unassigned)_ |
 | **Product** | Backoffice WFM Sizing Engine |
-| **Artifact** | `BoWFM.html` — single self-contained offline HTML file (~613 KB) |
+| **Artifact** | `BoWFM.html` — single self-contained offline HTML file (~617 KB) |
 
 > **Scope of this document.** This is an **as-built** PRD: §1–§10 specify the product as it
 > actually behaves today, verified against source. §11 carries known defects and unbuilt
@@ -243,7 +243,7 @@ Acceptance criteria are written to be testable against current behaviour.
 **FR-2.1 — The DQ gate must block simulation on any error-severity issue.**
 `passed = !issues.some(i => i.severity === 'error')`. Warnings never block.
 
-**FR-2.2 — The following 18 checks must be performed.** Errors block; warnings inform.
+**FR-2.2 — The following 21 checks must be performed.** Errors block; warnings inform.
 
 | # | Field | Severity | Trigger |
 |---|---|---|---|
@@ -264,7 +264,10 @@ Acceptance criteria are written to be testable against current behaviour.
 | 15 | Labor Adherence | warning | Adherence `< 0.70` |
 | 16 | Labor Off Days | warning | `offDaysPerWeek === 0` on a non-24/7 calendar — often the residue of toggling 24/7 back off |
 | 17 | Manual Agent Hours Override | warning | Override active and far out of scale (>3× or <⅓) vs. `dailyProductiveHours × calendarWorkingDaysInHorizon` |
-| 18 | Calendar/Data Coverage Gap | warning | A calendar-open day inside the horizon has zero uploaded rows (only when every timestamp parsed cleanly, to avoid a wall-clock-dependent horizon fallback) |
+| 18 | Calendar/Data Coverage Gap | warning | A calendar-open day inside the horizon has zero uploaded rows (only when every timestamp parsed cleanly, to avoid a wall-clock-dependent horizon fallback). When the data also holds an empty run of more than 30 consecutive days that is *not* an isolated stray (a genuine closure with substantial data on both sides), the warning text says so |
+| 19 | Isolated Date(s) | **error** | A run of **more than 30 consecutive empty calendar days** separates the data and the smaller side holds at most 1% of the rows (minimum 1, maximum 20 rows) — a stray or mistyped date. Names the isolated date(s), their row count and the main data range. Only when every timestamp parsed cleanly (G1, 2026-10-06) |
+| 20 | Old Backlog Arrival | warning | An opening-backlog case arrived more than 30 calendar days before the first demand interval; names the oldest case. Harmless to capacity (the horizon is the demand span) — flags typos such as a wrong year |
+| 21 | Opening WIP Overdue at Start | warning | N opening-backlog cases arrived before the first interval and cannot meet their deadline even if work starts at the first working instant (rule D4, §6): worked and counted as workload, excluded from the SLA % and the wait-time mean |
 
 **FR-2.3 — The DQ tab must summarise the dataset**: Total Intervals, Total Case Volume,
 Working Days in Horizon, Total Workload (hours).
@@ -490,6 +493,7 @@ Seeded defaults before any upload: `Claims_Auto` (AHT 35, shrinkage 20%, priorit
 | **FR-7.4** | Import preview | First four parsed cases shown before commit. |
 | **FR-7.5** | Import modes | `Replace WIP (n)` or `Append +n to existing (m)`. |
 | **FR-7.6** | WIP list management | Table of all WIP with per-row delete and Clear All; shows total pending work in minutes and hours. |
+| **FR-7.7** | Backlog older than the plan | The horizon is the demand span, so backlog dated before the first interval does not add planned capacity. It is injected at the horizon start with its original deadline. Backlog already overdue when the plan starts is worked but excluded from the SLA % and wait-time mean (rule D4, §6) and reported separately; Data Quality warns with the count (check 21) and flags arrivals more than 30 days before the data (check 20). |
 
 ### 5.8 Simulation execution
 
@@ -559,7 +563,7 @@ now 0. Tests: D53.
    is OFF; effective floor when FR-5.10 is ON). When slack is ON, Results also show policy vs
    sizing floor and audit `sla_acceptance_slack`.
 5. A **core performance grid**: Primary SLA Achieved (with progress bar vs sizing floor),
-   BO ASA, and Handling Occupancy %. When raw occupancy exceeds 100%, an explicit overload
+   BO ASA, and Handling Occupancy %. When `overdueAtStartCount` is above 0 the SLA card carries a note: *"N opening-backlog cases were already overdue when the plan starts. They are worked first and counted as workload, but are not part of the SLA % above."* (no note when the count is 0). When raw occupancy exceeds 100%, an explicit overload
    message: *"True capacity ratio: X% — demand exceeds capacity, staffing is insufficient."*
 6. A **per-category breakdown**: workload hours, workload share, Net HC, shrinkage, Gross HC,
    achieved vs sizing floor Primary SLA (policy shown when slack ON), mean ASA,
@@ -576,7 +580,9 @@ leaving Net Op un-adjusted.
 **FR-9.3 — Case Browser** must list every simulated case with Case ID, Category, Arrival,
 Primary Deadline, First Start, Completed, Parks and SLA Outcome; support free-text search,
 category filter and status filter (`Completed Only` / `Breached SLA Only` / `Unfinished
-Remainder Only`); paginate at 50 rows.
+Remainder Only`); paginate at 50 rows. Cases that were overdue at start (rule D4) show an
+amber `OVERDUE AT START` marker instead of PASS/BREACH and are left out of `Breached SLA Only`
+and the Audit breach list.
 
 **FR-9.3a — Export timestamps.** Every Results CSV export (cases, breaches, slices, queue/WIP, agent analytics) writes Date cells with the same formatter as the screen (`formatDateTime24`: local business time, `YYYY-MM-DD HH:mm`, no `Z`), UTF-8 BOM, CRLF, quoted cells. (Fixed 1.11.0: exports used UTC ISO strings, e.g. 08:18 on screen vs 04:18Z in the file at UTC+4; the slice CSV's `From ISO`/`To ISO` UTC columns were removed.)
 
@@ -662,7 +668,7 @@ SLA/simulation policy) and export it as JSON.
 
 | ID | Export | Contents |
 |---|---|---|
-| **FR-11.1** | Cases CSV | `wfm_simulated_cases.csv` — every case with timestamps, deadline, latest safe start, park count, WIP flag, SLA outcome, ASA duration and censoring flag. |
+| **FR-11.1** | Cases CSV | `wfm_simulated_cases.csv` — every case with timestamps, deadline, latest safe start, park count, WIP flag, `Overdue at Start` (YES/NO, rule D4), SLA outcome, ASA duration and censoring flag. |
 | **FR-11.2** | Agent Slices CSV | `wfm_simulated_agent_slices.csv` — every timeline slice with local and ISO timestamps. |
 | **FR-11.3** | Agent Summary CSV | `wfm_simulated_agent_summaries.csv` — per-agent totals, occupancy, budget compliance. |
 | **FR-11.4** | Assumptions JSON | `wfm_config_snapshot_{timestamp}.json` — calendar, labor, SLA, categories, sim params, column mapping. |
@@ -686,6 +692,14 @@ SLA/simulation policy) and export it as JSON.
 ## 6. The sizing methodology
 
 Four stages. Each answers a different question; the separation is deliberate.
+
+### Planning horizon and opening backlog (G1, 2026-10-06)
+
+The **planning horizon is the span of the demand intervals only** — earliest valid interval start to latest valid interval end. Opening backlog never moves it. (Until 1.16.0 the horizon start was pulled back to the oldest backlog arrival; every empty day in between then counted as planned capacity, so one backlog case 14 days old cut `N_min` 7 → 2 and the recommendation 8 → 7. A stray date years away did the same silently.) One function, `computeIntervalHorizon` (`calendar.ts`), is used by both searches, case generation, the data-quality check and the Config preview. With no valid demand interval at all (backlog-only data) the horizon is the earliest backlog arrival plus 7 days.
+
+A backlog case keeps its own arrival, clock start, deadline and latest safe start. The simulation **injects** a case that arrived before the horizon at the horizon start (`max(arrival, horizonStart)`) — nobody is rostered earlier, so no work happens before the plan begins.
+
+**Rule D4 — overdue at start.** An opening-backlog case that arrived before the horizon start and cannot meet its deadline even if work begins at the first working instant of the horizon (`latestSafeStart < nextOpen(horizonStart)`) is *overdue at start*. It is still worked (EDF puts it first) and still counts as workload, handling minutes, occupancy and unfinished cases, but it is **excluded from the primary SLA numerator and denominator (overall and per category) and from the wait-time (ASA) mean**, flagged `overdueAtStart` on its case result, and counted in `overdueAtStartCount` (overall and per category). Without the rule, ordinary Friday carry-over would fail at every headcount and push the search to its cap. Backlog that arrived before the horizon but is still attainable is scored normally against its original deadline; its wait time is measured from `max(clockStart, horizonStart)`. Backlog arriving on or after the horizon start is unchanged.
 
 ### Stage 1 — Demand → Workload
 
@@ -1114,12 +1128,12 @@ comment. Nothing else.
 
 ## 9. Validation and quality
 
-### 9.1 Automated test suites — 987 checks (174 + 589 + 60 + 164 trusted-source)
+### 9.1 Automated test suites — 1,041 checks (174 + 643 + 60 + 164 trusted-source)
 
 | Suite | Tests | Covers |
 |---|---|---|
 | `scripts/verify-fixes.mts` | 174 | Legacy regression: CSV parsing, date handling, calendar arithmetic, CRN consistency, occupancy semantics, standalone artifact integrity, analytical infeasibility diagnosis, 24x7 midnight budget accounting |
-| `scripts/verify-sizing-fixes.mts` | 589 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement, fair agent assignment (D43: spread bounds, determinism, EDF order pinned to the pre-change engine, OFF = original HC, HC pins on pooled/siloed/staggered/24x7; D44: no double-booking in gated 24x7 runs; D45: availability accrual and pinned HC of the three built-in samples; D47: Workload Floor toggle; D48: clock-start derivation; D49: pinned HC of `test_files/AJM_Only.csv`; D50/D51/D52: roster polish at fixed HC — pooled, siloed guard, per-queue search; D53: Results use run-time settings; D54: number fields keep what is typed; D55-D61 (G12): the frozen sizing decisions are guarded by tests — dispatch order incl. the priority tie-break, business-calendar `latestSafeStart`, CI-gated acceptance (primary / per-category / occupancy cap / ASA each use the confidence bound, not the mean), Common Random Numbers, unfinished cases in the SLA denominator, Gross HC and harmonic shrinkage, volume rounding; each proven red against its own mutation) |
+| `scripts/verify-sizing-fixes.mts` | 643 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement, fair agent assignment (D43: spread bounds, determinism, EDF order pinned to the pre-change engine, OFF = original HC, HC pins on pooled/siloed/staggered/24x7; D44: no double-booking in gated 24x7 runs; D45: availability accrual and pinned HC of the three built-in samples; D47: Workload Floor toggle; D48: clock-start derivation; D49: pinned HC of `test_files/AJM_Only.csv`; D50/D51/D52: roster polish at fixed HC — pooled, siloed guard, per-queue search; D53: Results use run-time settings; D54: number fields keep what is typed; D55-D61 (G12): the frozen sizing decisions are guarded by tests — dispatch order incl. the priority tie-break, business-calendar `latestSafeStart`, CI-gated acceptance (primary / per-category / occupancy cap / ASA each use the confidence bound, not the mean), Common Random Numbers, unfinished cases in the SLA denominator, Gross HC and harmonic shrinkage, volume rounding; each proven red against its own mutation; D62 (G1): horizon from demand only, backlog injection clamp, rule D4 overdue-at-start scoring, search N_min/N_occ/recommendation with old and Friday backlog (sync = async), and the three new data-quality rules) |
 | `scripts/verify-agent-analytics.mts` | 60 | Export timestamps equal the on-screen formatter; agent analytics reconcile to `completedCases` / `totalHandlingMinutes` / `agentFairness`; work-share case credit |
 | `scripts/verify-trusted-source.mts` (`npm run test:trusted-source`) | 164 | Hand-derived ground truth in `trusted-source-validation.json` (T0 invariants 35, T1 domain algebra 71, T2 hand-traced DES 31, T3 characterization 27). Authored under `Asia/Dubai`; on any other host timezone it prints a warning and continues (verified: all 164 pass under UTC, America/New_York, Asia/Tokyo, Pacific/Auckland, Europe/London) |
 | `scripts/audit-compare.mts` (`npm run test:audit`, opt-in, ~30 min) | 24 cells | Re-runs all four `test_files/` samples × 6 settings and fails on any difference from `docs/audit/sample-hc-after-2026-09-30.jsonl` |
@@ -1189,6 +1203,7 @@ Behaviours a user must understand to interpret results correctly.
 | **L16** | **SLA targets are inelastic across most of their range.** Not a defect — a property of deferrable work. Once headcount clears the workload, EDF dispatch finishes cases far inside any multi-hour window, so attainment snaps to 100% and the target % has nothing to bite on. Measured: with a 30-minute AHT, sweeping Primary % from 50→99 or the turnaround window from 2h→48h changed the recommendation by **zero** agents; the SLA gate only bound once the window approached the AHT itself (30–60 min). | Expect the recommendation to be driven by workload, occupancy cap, adherence and productive hours — not by the SLA block — unless your turnaround target is close to your handling time. Read the binding-constraint label (L15) to see which regime you are in. |
 | **L17** | **Fair agent assignment no longer changes the recommended HC (resolved by C6, 1.12.0).** Until 1.12.0 fair assignment could raise the recommendation by 1 in near-capacity runs (a 20% workload-reduction fixture 13→14; `AJM_Simu.csv` pooled 103→104), because the coverage gate counted "budget remaining" as presence and fair dispatch drains every agent's daily budget together at ~98% occupancy. Presence is now the agent's own shift window (FR-5.12), so that artefact is gone. Re-measured 2026-09-29 after the change, fair ON vs OFF: **0 of 18 scenarios differ** (8 real-file runs and 6 built-in samples, each pooled/siloed as applicable, plus the 4 D43.13 pin fixtures); N_min is identical in both modes. The suite pins ON = OFF (D43.13, D45.2). | Fair assignment is HC-neutral. It still changes *who* gets each case (FR-4.7), not how many agents are needed. The toggle remains for reproducing legacy assignment. |
 | **L18** | **Workload Floor OFF can recommend an unsustainable team** (FR-5.13). Below `max(N_min, N_occ)` a team can pass the finite-horizon simulation by draining backlog after the horizon end. The always-on occupancy ceiling blocks most of this (anything whose demand exceeds planned capacity fails), so in default configs Off changes nothing; it bites with agent-hours overrides. | Leave the floor ON for committed plans. Treat any result with the red "below the workload floor" warning as optimistic. |
+| **L19** | **SLA % excludes backlog that was already overdue when the plan starts** (G1, rule D4). Opening-backlog cases that arrived before the first interval and cannot meet their deadline even if work starts at the first working instant are worked and counted as workload, but are not in the SLA % or the wait-time mean; they are reported separately (`overdueAtStartCount`, Results note, case CSV column, Data Quality warning). | A plan with a large overdue carry-over can show a high SLA % that says nothing about that backlog. Read the count beside the SLA headline; it is workload the team must still clear. |
 
 ---
 
@@ -1346,8 +1361,7 @@ first-time users forward to fix a backward blocker.
 
 **P2-7 — Engine debt.** Search duplication (root cause of P0-2); horizon computed from
 validated intervals while workload sums unvalidated ones; representative-replication selection
-by an unrelated metric; ASA censoring measured only to horizon end; a dead `primaryEligible`
-field; and two independent case-priority orderings where only one ships.
+by an unrelated metric; ASA censoring measured only to horizon end; and two independent case-priority orderings where only one ships.
 
 **P2-8 — Restore Headline Hiring FTE (M4) UI when a clean FTE product story exists.**
 Engine still computes `fteNet` / `fteGross*`. UI hides M4 so Manual Override is only the

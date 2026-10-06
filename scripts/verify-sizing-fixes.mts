@@ -12,6 +12,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 import {
+  computeIntervalHorizon,
   getCalendarWorkingDaysInHorizon,
   getValidSlapStarts,
 } from '../src/utils/calendar';
@@ -4550,6 +4551,203 @@ console.log('\n--- Suite D61: interval volume rounding ---');
   assert(countFor(2.4) === 2, 'D61.2 volume 2.4 generates 2 cases', `got ${countFor(2.4)}`);
   assert(countFor(0.4) === 0, 'D61.3 volume 0.4 generates 0 cases', `got ${countFor(0.4)}`);
   assert(countFor(3) === 3, 'D61.4 volume 3 generates 3 cases', `got ${countFor(3)}`);
+}
+
+// ---------------------------------------------------------------
+// Suite D62 — G1: the planning horizon comes from the DEMAND data only (CSV-13, CSV-14)
+// Defect: computeIntervalHorizon (and three hand-rolled copies) pulled the horizon start back to the oldest opening-backlog
+// arrival, so the empty days in between counted as planned capacity: N_min, occupancy and the recommendation all fell
+// (measured: 1 backlog case 14 days old -> 15 working days, N_min 7 -> 2, recommended 8 -> 7). A stray date years out did
+// the same silently. Fix: horizon = demand span; backlog cases are injected at max(arrival, horizonStart) with their own
+// clock/deadline untouched; backlog already overdue when the plan starts (D4) is worked but excluded from the SLA % and the
+// wait-time mean and reported; an isolated stray date blocks the run; old/overdue backlog is flagged in data quality.
+// Fixture (all expected values hand-derived or measured on the unchanged engine, never read back from the code under test):
+// Mon-Fri 12-16 Oct 2026, 08:00-17:00 demand, 6 cases per 30-min interval = 5 x 18 x 6 = 540 cases x 30 min = 16200 min = 270 h;
+// calendar Mon-Fri 08:00-18:00 (10 h), 7.5 productive h per agent-day: agent-hours over 5 days = 37.5 -> N_occ = ceil(270/37.5) = 8.
+// ---------------------------------------------------------------
+console.log('\n--- Suite D62: G1 planning horizon from demand data only ---');
+{
+  const cats62: CategoryConfig[] = [{ id: 'g', name: 'General', ahtMinutes: 30, shrinkagePct: 0.2, priority: 1 }];
+  const day62 = (offset: number, h: number, m = 0): Date => new Date(2026, 9, 12 + offset, h, m); // offset from Mon 12 Oct 2026
+  const week62 = (firstOffset = 0, volume = 6): StandardInterval[] => {
+    const out: StandardInterval[] = [];
+    let idx = 0;
+    for (let d = 0; d < 5; d++) {
+      for (let slot = 0; slot < 18; slot++) {
+        const start = day62(firstOffset + d, 8 + Math.floor(slot / 2), (slot % 2) * 30);
+        out.push({ intervalIndex: idx++, start, end: new Date(start.getTime() + 30 * 60000), volume, category: 'General' });
+      }
+    }
+    return out;
+  };
+  const wip62 = (id: string, arrival: Date, remaining = 30) => ({ id, category: 'General', priority: 1, arrival, clockStart: arrival, remainingWorkMinutes: remaining });
+  const wipMany62 = (prefix: string, n: number, arrival: Date) => Array.from({ length: n }, (_, i) => wip62(`${prefix}${i}`, arrival));
+  const sla62 = (win: number, unit: 'hours' | 'days', extra: Partial<SLAPolicyConfig> = {}): SLAPolicyConfig => ({ ...DEFAULT_SLA, primaryWindow: win, primaryUnit: unit, ...extra });
+  const runDes62 = (hc: number, iv: StandardInterval[], wip: any[], sla: SLAPolicyConfig) =>
+    runBackofficeDES({ operationalHC: hc, intervals: iv, openingWIP: wip, categories: cats62, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla, seed: 1 });
+  const search62 = async (kind: 'sync' | 'async', iv: StandardInterval[], wip: any[], sla: SLAPolicyConfig) => {
+    const p = { intervals: iv, openingWIP: wip, categories: cats62, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla, seed: 42, userMaxHC: 200, replications: 8, queueArchitecture: 'pooled' as const };
+    return kind === 'sync' ? searchOptimalHC(p) : await searchOptimalHCAsync(p);
+  };
+  const H0 = day62(0, 8);
+  const H1 = day62(4, 17);
+  const wk = week62();
+  const old14 = wip62('OLD14', new Date(2026, 8, 28, 10, 0)); // Mon 28 Sep 10:00, 14 days before the first demand interval
+
+  // --- A. The horizon function ---
+  {
+    const hz = computeIntervalHorizon(wk, [old14]);
+    assert(hz.horizonStart.getTime() === H0.getTime() && hz.horizonEnd.getTime() === H1.getTime(), 'D62.1 horizon with a 14-day-old backlog case = the demand week itself (Mon 08:00 -> Fri 17:00)', `got ${hz.horizonStart} -> ${hz.horizonEnd}`);
+    assert(getCalendarWorkingDaysInHorizon(hz.horizonStart, hz.horizonEnd, DEFAULT_CALENDAR) === 5, 'D62.2 working days stay 5 (were 15)', `got ${getCalendarWorkingDaysInHorizon(hz.horizonStart, hz.horizonEnd, DEFAULT_CALENDAR)}`);
+    const hz0 = computeIntervalHorizon(wk, []);
+    assert(hz0.horizonStart.getTime() === H0.getTime() && hz0.horizonEnd.getTime() === H1.getTime(), 'D62.3 control: no backlog gives the same horizon');
+    const hzIn = computeIntervalHorizon(wk, [wip62('IN', day62(2, 10))]);
+    assert(hzIn.horizonStart.getTime() === H0.getTime() && hzIn.horizonEnd.getTime() === H1.getTime(), 'D62.4 control: backlog arriving inside the horizon leaves it unchanged');
+    // Backlog-only data (no valid demand rows): start = earliest valid backlog arrival, end = start + 7 days (deterministic, no wall clock).
+    const bo = computeIntervalHorizon([], [wip62('B2', new Date(2026, 9, 7, 10, 0)), wip62('B1', new Date(2026, 9, 5, 10, 0))]);
+    assert(bo.horizonStart.getTime() === new Date(2026, 9, 5, 10, 0).getTime() && bo.horizonEnd.getTime() - bo.horizonStart.getTime() === 7 * 86400000, 'D62.5 backlog-only fallback: start = earliest backlog arrival, end = start + 7 days', `got ${bo.horizonStart} -> ${bo.horizonEnd}`);
+  }
+
+  // --- B. DES: backlog older than the horizon (14 days, 6 h SLA, 10 agents) ---
+  // OLD14: arrival/clock Mon 28 Sep 10:00 (open) -> deadline 10:00 + 6 business hours = 16:00 same day; LSS = 16:00 - 30 min = 15:30.
+  // The plan starts Mon 12 Oct 08:00, so the case is overdue at start (15:30 on 28 Sep < 12 Oct 08:00): worked, not scored.
+  // Handling = (540 + 1) x 30 = 16230 min; occupancy = 16230 / (10 agents x 5 days x 450 min = 22500) = 72.13 -> 72.1% (was 24.0% over 15 days).
+  {
+    const sla6 = sla62(6, 'hours');
+    const rOld = runDes62(10, wk, [old14], sla6);
+    const co = rOld.caseResults.find((c) => c.caseId === 'OLD14')!;
+    assert(co.arrival.getTime() === new Date(2026, 8, 28, 10, 0).getTime() && co.clockStart.getTime() === new Date(2026, 8, 28, 10, 0).getTime(), 'D62.6 old backlog case keeps its own arrival and clock start');
+    assert(co.primaryDeadline.getTime() === new Date(2026, 8, 28, 16, 0).getTime() && co.latestSafeStart.getTime() === new Date(2026, 8, 28, 15, 30).getTime(), 'D62.7 ... and its original deadline (28 Sep 16:00) and latest safe start (15:30)', `deadline ${co.primaryDeadline} lss ${co.latestSafeStart}`);
+    assert(co.overdueAtStart === true && co.primaryEligible === false, 'D62.8 rule D4: the case is flagged overdueAtStart and not SLA-eligible', `overdueAtStart=${co.overdueAtStart} eligible=${co.primaryEligible}`);
+    assert(co.isCompleted === true && rOld.totalCases === 541 && rOld.completedCases === 541, 'D62.9 it is still worked to completion (541 of 541 cases complete)', `completed ${rOld.completedCases}/${rOld.totalCases}`);
+    assert(rOld.overdueAtStartCount === 1 && rOld.primaryEligibleCount === 540, 'D62.10 run result: overdueAtStartCount = 1; SLA denominator = the 540 other cases', `count=${rOld.overdueAtStartCount} eligible=${rOld.primaryEligibleCount}`);
+    assert(approx(rOld.totalHandlingMinutes, 16230, 0.01) && rOld.rawOccupancyPct === 72.1, 'D62.11 its 30 minutes count as workload: handling 16230 min, occupancy 72.1% over the 5-day planned horizon', `handling=${rOld.totalHandlingMinutes} occ=${rOld.rawOccupancyPct}`);
+    const before = rOld.agentTimeline.filter((s) => s.from.getTime() < H0.getTime());
+    assert(before.length === 0, 'D62.12 no timeline slice before the horizon start (no free pre-horizon capacity)', `${before.length} slices, first ${before[0]?.from}`);
+    assert(rOld.caseResults.every((c) => c.firstStartTime === null || c.firstStartTime.getTime() >= H0.getTime()), 'D62.13 every case starts at or after the horizon start');
+    assert(co.firstStartTime !== null && co.firstStartTime.getTime() === H0.getTime(), 'D62.14 the overdue case sorts first (EDF) and starts at the first working instant, Mon 08:00', `first start ${co.firstStartTime}`);
+    assert(co.asaDurationMinutes <= 5, 'D62.15 its wait is measured from the horizon start, not from 28 Sep (<= 5 min, not ~14 days)', `asa ${co.asaDurationMinutes}`);
+    const rNone = runDes62(10, wk, [], sla6);
+    assert(rNone.totalCases === 540 && rNone.overdueAtStartCount === 0 && rNone.rawOccupancyPct === 72.0, 'D62.16 control: no backlog -> 540 cases, overdueAtStartCount 0, occupancy 72.0% (16200/22500)', `cases=${rNone.totalCases} count=${rNone.overdueAtStartCount} occ=${rNone.rawOccupancyPct}`);
+  }
+
+  // --- C. Backlog already due Friday, plan starts Monday: 40 cases overdue at start (rule D4) ---
+  // Arrival Fri 9 Oct 10:00, 6 h SLA -> due Fri 16:00 < Mon 12 Oct 08:00 for all 40. SLA % must be over the 540 demand cases only.
+  {
+    const fri40 = wipMany62('F', 40, new Date(2026, 9, 9, 10, 0));
+    const r = runDes62(10, wk, fri40, sla62(6, 'hours'));
+    const demandCases = r.caseResults.filter((c) => !c.isOpeningWip);
+    const passed = demandCases.filter((c) => c.primaryPassed).length;
+    assert(r.overdueAtStartCount === 40 && r.caseResults.filter((c) => c.overdueAtStart).length === 40, 'D62.17 overdueAtStartCount = 40', `count=${r.overdueAtStartCount}`);
+    assert(r.primaryEligibleCount === 540 && r.primaryPassCount === passed && r.primaryAchievedPct === Math.round((passed / 540) * 1000) / 10, 'D62.18 SLA % is computed over the 540 other cases only (hand count of passes)', `eligible=${r.primaryEligibleCount} pass=${r.primaryPassCount}/${passed} pct=${r.primaryAchievedPct}`);
+    assert(r.categoryStats['General'].primaryEligible === 540 && r.categoryStats['General'].overdueAtStartCount === 40, 'D62.19 per-category SLA also excludes them (eligible 540, overdueAtStartCount 40)', JSON.stringify(r.categoryStats['General']));
+    assert(r.completedCases === 580 && r.caseResults.filter((c) => c.overdueAtStart && c.isCompleted).length === 40 && approx(r.totalHandlingMinutes, 17400, 0.01), 'D62.20 all 40 are worked to completion and counted in handling minutes (580 x 30 = 17400)', `done=${r.completedCases} handling=${r.totalHandlingMinutes}`);
+    const mean = demandCases.reduce((a, c) => a + c.asaDurationMinutes, 0) / demandCases.length;
+    assert(Math.abs(mean - r.boAsaMeanMinutes) <= 0.15, 'D62.21 the wait-time mean is over the 540 demand cases only (independent mean from the case list)', `list mean ${mean.toFixed(3)} vs run ${r.boAsaMeanMinutes}`);
+    // Unfinished-case scoring (D59) must still hold for non-excluded cases: 1 agent cannot finish the demand, so unfinished demand cases fail.
+    const rThin = runDes62(1, wk, fri40, sla62(6, 'hours'));
+    const thinUnfinished = rThin.caseResults.filter((c) => !c.isOpeningWip && !c.isCompleted);
+    assert(thinUnfinished.length > 0 && thinUnfinished.every((c) => c.primaryEligible && !c.primaryPassed) && rThin.primaryEligibleCount === 540, 'D62.22 unfinished demand cases still count as SLA failures at HC 1 (eligible stays 540)', `unfinished demand ${thinUnfinished.length} eligible ${rThin.primaryEligibleCount}`);
+  }
+
+  // --- D. Attainable pre-horizon backlog is still scored, against its ORIGINAL deadline ---
+  // Arrival Fri 9 Oct 10:00, 3 business days = 1800 min. Working time: Fri 10:00-18:00 = 480, Mon 600 -> 1080, Tue 600 -> 1680, Wed needs 120 -> Wed 14 Oct 10:00.
+  // LSS = 10:00 - 30 = 09:30 Wed 14 Oct, later than Mon 12 Oct 08:00 -> attainable, NOT overdue at start.
+  {
+    const att = wip62('ATT', new Date(2026, 9, 9, 10, 0));
+    const r = runDes62(10, wk, [att], sla62(3, 'days'));
+    const c = r.caseResults.find((x) => x.caseId === 'ATT')!;
+    assert(c.overdueAtStart === false && c.primaryEligible === true && r.overdueAtStartCount === 0 && r.primaryEligibleCount === 541, 'D62.23 attainable old backlog is NOT overdue at start and stays in the SLA denominator (541)', `overdue=${c.overdueAtStart} eligible=${r.primaryEligibleCount}`);
+    assert(c.primaryDeadline.getTime() === new Date(2026, 9, 14, 10, 0).getTime() && c.latestSafeStart.getTime() === new Date(2026, 9, 14, 9, 30).getTime(), 'D62.24 its deadline is the hand-computed Wed 14 Oct 10:00 (LSS 09:30)', `deadline ${c.primaryDeadline}`);
+    assert(c.primaryPassed === true && c.completeTime !== null && c.completeTime.getTime() <= c.primaryDeadline.getTime(), 'D62.25 scored against that original deadline: completed Monday, passed');
+    assert(c.asaDurationMinutes <= 5, 'D62.26 wait measured from the horizon start (<= 5 min; measured from Friday 10:00 it would be 480 working minutes)', `asa ${c.asaDurationMinutes}`);
+  }
+
+  // --- E. Backlog arriving inside the horizon behaves exactly as before ---
+  // Digest literals were measured on the engine BEFORE the change (3 cases arriving Mon 12 Oct 10:00, 10 agents, 6 h SLA, seed 1).
+  {
+    const inH = wipMany62('IN', 3, day62(0, 10));
+    const r = runDes62(10, wk, inH, sla62(6, 'hours'));
+    let fs = 0;
+    let cs = 0;
+    for (const c of r.caseResults) {
+      fs += c.firstStartTime ? Math.round((c.firstStartTime.getTime() - H0.getTime()) / 1000) : 0;
+      cs += c.completeTime ? Math.round((c.completeTime.getTime() - H0.getTime()) / 1000) : 0;
+    }
+    assert(r.totalCases === 543 && r.completedCases === 543 && r.primaryAchievedPct === 100 && r.rawOccupancyPct === 72.4 && r.boAsaMeanMinutes === 0 && approx(r.totalHandlingMinutes, 16290, 0.01), 'D62.27 control: in-horizon backlog headline numbers identical to the pre-change engine', JSON.stringify({ t: r.totalCases, p: r.primaryAchievedPct, o: r.rawOccupancyPct, h: r.totalHandlingMinutes }));
+    assert(fs === 102067875 && cs === 103045275, 'D62.28 control: every case start/complete time identical to the pre-change engine (digest)', `fs=${fs} cs=${cs}`);
+    assert((r.overdueAtStartCount ?? 0) === 0 && r.caseResults.every((c) => !c.overdueAtStart), 'D62.29 control: in-horizon backlog is never flagged overdue at start');
+  }
+
+  // --- F. The search: N_min / N_occ / recommendation, sync and async ---
+  {
+    const sla6 = sla62(6, 'hours');
+    const sla3d = sla62(3, 'days');
+    const none = await search62('sync', wk, [], sla6);
+    assert(none.nMinAnalytical === 7 && none.occupancyFeasibleFloor === 8 && none.recommendedHC === 8, 'D62.30 control: no backlog -> N_min 7, N_occ 8, recommended 8 (N_occ = ceil(270/37.5) = 8)', `nmin=${none.nMinAnalytical} nocc=${none.occupancyFeasibleFloor} rec=${none.recommendedHC}`);
+    for (const [label, sla] of [['6 h', sla6], ['3-day', sla3d]] as Array<[string, SLAPolicyConfig]>) {
+      const s = await search62('sync', wk, [old14], sla);
+      const a = await search62('async', wk, [old14], sla);
+      assert(s.nMinAnalytical === 7 && s.occupancyFeasibleFloor === 8 && a.nMinAnalytical === 7 && a.occupancyFeasibleFloor === 8, `D62.31 (${label}) one 14-day-old backlog case leaves N_min 7 / N_occ 8 untouched, sync and async (were 2 / 3)`, `sync ${s.nMinAnalytical}/${s.occupancyFeasibleFloor} async ${a.nMinAnalytical}/${a.occupancyFeasibleFloor}`);
+      assert((s.recommendedHC ?? 0) >= 8 && s.recommendedHC === a.recommendedHC, `D62.32 (${label}) recommendation >= 8 and sync = async (were 7 at 6 h, 5 at 3-day)`, `sync=${s.recommendedHC} async=${a.recommendedHC}`);
+      assert(!!s.finalDESResult && !!a.finalDESResult && s.finalDESResult.horizonStart.getTime() === H0.getTime() && a.finalDESResult.horizonStart.getTime() === H0.getTime() && s.finalDESResult.horizonEnd.getTime() === H1.getTime() && a.finalDESResult.horizonEnd.getTime() === H1.getTime(), `D62.33 (${label}) both searches report the demand-span horizon (Mon 08:00 -> Fri 17:00)`, `sync ${s.finalDESResult?.horizonStart} async ${a.finalDESResult?.horizonStart}`);
+    }
+    // 50 old backlog cases are real extra work: 540 + 50 = 590 cases x 30 = 17700 min handled; recommendation not below baseline.
+    const a50 = await search62('async', wk, wipMany62('B', 50, new Date(2026, 8, 28, 10, 0)), sla6);
+    assert((a50.recommendedHC ?? 0) >= 8 && (a50.nMinAnalytical ?? 0) >= 7, 'D62.34 50 old backlog cases: recommendation >= baseline 8, N_min >= 7', `rec=${a50.recommendedHC} nmin=${a50.nMinAnalytical}`);
+    assert(!!a50.finalDESResult && approx(a50.finalDESResult.totalHandlingMinutes, 17700, 0.01) && a50.finalDESResult.overdueAtStartCount === 50, 'D62.35 their 1500 minutes are in the handled workload (17700 total) and reported as 50 overdue at start', `handling=${a50.finalDESResult?.totalHandlingMinutes} overdue=${a50.finalDESResult?.overdueAtStartCount}`);
+    // Friday carry-over: 40 cases already overdue when the plan starts must not push the search to the cap.
+    const fri40 = wipMany62('F', 40, new Date(2026, 9, 9, 10, 0));
+    const sf = await search62('sync', wk, fri40, sla6);
+    const af = await search62('async', wk, fri40, sla6);
+    assert(sf.recommendedHC !== null && !sf.isInfeasible && (sf.recommendedHC ?? 0) >= 8 && (sf.recommendedHC ?? 999) < 200, 'D62.36 Friday carry-over (40 overdue at start): recommendation finite, >= 8, nowhere near the cap of 200', `rec=${sf.recommendedHC} infeasible=${sf.isInfeasible}`);
+    assert(sf.recommendedHC === af.recommendedHC && sf.nMinAnalytical === af.nMinAnalytical && sf.finalDESResult?.overdueAtStartCount === 40 && af.finalDESResult?.overdueAtStartCount === 40, 'D62.37 sync = async on the Friday carry-over; both report 40 overdue at start', `sync=${sf.recommendedHC} async=${af.recommendedHC}`);
+    // Wait-time gate ON must not fail solely because of old backlog.
+    const slaAsa = sla62(6, 'hours', { boAsaEnabled: true, boAsaTarget: 60, boAsaUnit: 'minutes' });
+    const sAsa = await search62('sync', wk, [old14], slaAsa);
+    assert(!sAsa.isInfeasible && (sAsa.recommendedHC ?? 0) >= 8 && sAsa.finalDESResult?.passesBOASA === true, 'D62.38 ASA gate ON with one 14-day-old backlog case: the run still passes the gate at the recommendation', `rec=${sAsa.recommendedHC} asa=${sAsa.finalDESResult?.boAsaMeanMinutes} pass=${sAsa.finalDESResult?.passesBOASA}`);
+  }
+
+  // --- G. Data quality ---
+  {
+    const mapping62: any = { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' };
+    const dq62 = (iv: StandardInterval[], wip: any[] = []) =>
+      validateDataQuality({ intervals: iv, mapping: mapping62, categories: cats62, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, openingWIP: wip });
+    const stray = (d: Date): StandardInterval => ({ intervalIndex: 9999, start: d, end: new Date(d.getTime() + 30 * 60000), volume: 1, category: 'General' });
+    const isoLocal = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const isolated = (r: ReturnType<typeof dq62>) => r.issues.find((i) => i.severity === 'error' && /isolated/i.test(i.field + i.message));
+
+    // Last data day = Fri 16 Oct. Empty days between it and a stray row on date S = (S - Fri 16 Oct) - 1.
+    const rBase = dq62(wk);
+    assert(rBase.passed === true && !isolated(rBase), 'D62.39 control: the clean week passes with no isolated-date error', JSON.stringify(rBase.issues.map((i) => i.field)));
+    const r2y = dq62([...wk, stray(new Date(2028, 9, 12, 9, 0))]);
+    const e2y = isolated(r2y);
+    assert(r2y.passed === false && !!e2y, 'D62.40 one row two years out: BLOCKING error "Isolated date(s)..."', JSON.stringify(r2y.issues.map((i) => i.severity + ':' + i.field)));
+    assert(!!e2y && e2y.message.includes('2028-10-12') && e2y.message.includes('2026-10-12') && e2y.message.includes('2026-10-16'), 'D62.41 the message names the isolated date and the main data range (2026-10-12 to 2026-10-16)', e2y?.message);
+    const r30 = dq62([...wk, stray(day62(35, 9))]); // Mon 16 Nov: Oct 17..Nov 15 = 30 empty days
+    assert(r30.passed === true && !isolated(r30), 'D62.42 30 empty days before an isolated row: not blocked (rule is "more than 30")', JSON.stringify(r30.issues.map((i) => i.severity + ':' + i.field)));
+    const r31 = dq62([...wk, stray(day62(36, 9))]); // Tue 17 Nov: Oct 17..Nov 16 = 31 empty days
+    assert(r31.passed === false && !!isolated(r31) && isolated(r31)!.message.includes(isoLocal(day62(36, 9))), 'D62.43 31 empty days before an isolated row: blocked, naming the date', JSON.stringify(r31.issues.map((i) => i.severity + ':' + i.field)));
+    const r10 = dq62([...wk, stray(day62(14, 9))]); // Mon 26 Oct: 9 empty days
+    assert(r10.passed === true && !isolated(r10) && r10.issues.some((i) => i.severity === 'warning' && i.field === 'Calendar/Data Coverage Gap'), 'D62.44 a stray row 10 days out: warning (coverage gap), not blocked', JSON.stringify(r10.issues.map((i) => i.severity + ':' + i.field)));
+    const closure = dq62([...wk, ...week62(42)]); // 12-16 Oct, then Mon 23 Nov: Oct 17..Nov 22 = 37 empty days, 90 rows each side
+    assert(closure.passed === true && !isolated(closure), 'D62.45 a 37-day closure with 90 rows on each side: not blocked', JSON.stringify(closure.issues.map((i) => i.severity + ':' + i.field)));
+    assert(closure.issues.some((i) => i.severity === 'warning' && /more than 30/.test(i.message + (i.details ?? ''))), 'D62.46 ... but a warning says the empty run is longer than 30 days', JSON.stringify(closure.issues.map((i) => i.field)));
+
+    // Old backlog arrival: more than 30 calendar days before the first demand interval (Mon 12 Oct).
+    const oldW = (arr: Date) => dq62(wk, [wip62('OLDW', arr)]).issues.find((i) => i.severity === 'warning' && /old backlog/i.test(i.field));
+    const w31 = oldW(new Date(2026, 8, 11, 10, 0)); // 31 days before
+    assert(!!w31 && w31.message.includes('OLDW'), 'D62.47 backlog 31 days before the first interval: warning naming the case', w31?.message);
+    assert(!oldW(new Date(2026, 8, 12, 10, 0)), 'D62.48 backlog 30 days before: no old-backlog warning');
+    const rTypo = dq62(wk, [wip62('TYPO', new Date(2006, 9, 9, 10, 0))]);
+    assert(rTypo.passed === true && rTypo.issues.some((i) => i.severity === 'warning' && /old backlog/i.test(i.field) && i.message.includes('TYPO')), 'D62.49 backlog dated 2006: warning naming the case, run still allowed', JSON.stringify(rTypo.issues.map((i) => i.severity + ':' + i.field)));
+
+    // Overdue-at-start count warning.
+    const overdueW = (wip: any[]) => dq62(wk, wip).issues.find((i) => i.severity === 'warning' && /overdue at start/i.test(i.field + i.message));
+    const w40 = overdueW(wipMany62('F', 40, new Date(2026, 9, 9, 10, 0)));
+    assert(!!w40 && /\b40\b/.test(w40.message), 'D62.50 40 Friday backlog cases: warning stating 40 will be overdue at start', w40?.message);
+    assert(!overdueW([]) && !overdueW([wip62('IN', day62(0, 10))]), 'D62.51 no backlog, or backlog inside the horizon: no overdue-at-start warning');
+  }
 }
 
 console.log('\n==================================================');

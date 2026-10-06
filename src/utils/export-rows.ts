@@ -28,6 +28,7 @@ export function buildCaseExportRows(cases: CaseRunResult[]): Array<Record<string
     'Complete Time': formatDateTime24(c.completeTime, 'UNFINISHED'),
     'Park Count': c.parkCount,
     'Is Opening WIP': c.isOpeningWip ? 'YES' : 'NO',
+    'Overdue at Start': c.overdueAtStart ? 'YES' : 'NO', // rule D4: worked, but excluded from the SLA % and the wait-time mean
     'Completed?': c.isCompleted ? 'YES' : 'NO',
     'Primary SLA Passed': c.primaryPassed ? 'PASS' : 'FAIL',
     'ASA Duration (min)': c.asaDurationMinutes,

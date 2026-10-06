@@ -17,6 +17,7 @@ import {
   TimeUnit,
 } from '../types/wfm';
 import {
+  computeIntervalHorizon,
   convertDurationToMinutes,
   getCalendarWorkingDaysInHorizon,
   getDailyWindowLengthHours,
@@ -69,21 +70,8 @@ export function ConfigFlow({
 
   let derivedAgentHoursHint: number | null = null;
   if (intervals.length > 0) {
-    let minStartMs = Infinity;
-    let maxEndMs = -Infinity;
-    for (const iv of intervals) {
-      const s = iv.start.getTime();
-      const e = iv.end.getTime();
-      if (s < minStartMs) minStartMs = s;
-      if (e > maxEndMs) maxEndMs = e;
-    }
-    let horizonStart = isFinite(minStartMs) ? new Date(minStartMs) : new Date();
-    let horizonEnd = isFinite(maxEndMs) ? new Date(maxEndMs) : new Date(horizonStart.getTime() + 7 * 86400000);
-    for (const w of openingWIP) {
-      if (w.arrival && !isNaN(w.arrival.getTime()) && w.arrival.getTime() < horizonStart.getTime()) {
-        horizonStart = new Date(w.arrival);
-      }
-    }
+    // Same horizon the search uses: the demand span only (backlog never moves it).
+    const { horizonStart, horizonEnd } = computeIntervalHorizon(intervals, openingWIP);
     const days = Math.max(1, getCalendarWorkingDaysInHorizon(horizonStart, horizonEnd, calendar));
     derivedAgentHoursHint = labor.dailyProductiveHours * days;
   }

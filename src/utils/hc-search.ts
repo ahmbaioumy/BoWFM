@@ -25,6 +25,7 @@ import {
 } from '../types/wfm';
 import type { DispatchFairnessConfig } from '../types/wfm';
 import {
+  computeIntervalHorizon,
   convertSlaDurationToMinutes,
   formatDateTime24,
   getCalendarWorkingDaysInHorizon,
@@ -2392,24 +2393,8 @@ export function searchOptimalHC(params: {
     (it) => it.start && !isNaN(it.start.getTime()) && it.end && !isNaN(it.end.getTime())
   );
 
-  let minStartMs = Infinity;
-  let maxEndMs = -Infinity;
-  for (let i = 0; i < validIntervals.length; i++) {
-    const s = validIntervals[i].start.getTime();
-    const e = validIntervals[i].end.getTime();
-    if (s < minStartMs) minStartMs = s;
-    if (e > maxEndMs) maxEndMs = e;
-  }
-  let horizonStart = isFinite(minStartMs) ? new Date(minStartMs) : new Date();
-  let horizonEnd = isFinite(maxEndMs) ? new Date(maxEndMs) : new Date(horizonStart.getTime() + 7 * 86400000);
-
-  if (openingWIP.length > 0) {
-    for (const w of openingWIP) {
-      if (w.arrival && !isNaN(w.arrival.getTime()) && w.arrival.getTime() < horizonStart.getTime()) {
-        horizonStart = new Date(w.arrival);
-      }
-    }
-  }
+  // One shared horizon (demand span only; backlog never moves it) — see computeIntervalHorizon in calendar.ts.
+  const { horizonStart, horizonEnd } = computeIntervalHorizon(validIntervals, openingWIP);
 
   const workingDaysInHorizon = getCalendarWorkingDaysInHorizon(horizonStart, horizonEnd, calendar);
 
@@ -2929,8 +2914,9 @@ export function searchOptimalHC(params: {
   let boundaryEvidence: BoundaryEvidence | undefined;
   if (failedNResult) {
     const breachSamples: BoundaryEvidence['breachSamplesAtNMinus1'] = [];
+    // Rule D4 (G1): backlog already overdue at horizon start is not a breach attributable to headcount.
     const failedBreaches = failedNResult.caseResults.filter(
-      (c) => !c.primaryPassed
+      (c) => !c.primaryPassed && !c.overdueAtStart
     );
 
     for (let i = 0; i < Math.min(10, failedBreaches.length); i++) {
@@ -3045,24 +3031,8 @@ export async function searchOptimalHCAsync(params: {
   const validIntervals = intervals.filter(
     (it) => it.start && !isNaN(it.start.getTime()) && it.end && !isNaN(it.end.getTime())
   );
-  let minStartMs = Infinity;
-  let maxEndMs = -Infinity;
-  for (let i = 0; i < validIntervals.length; i++) {
-    const s = validIntervals[i].start.getTime();
-    const e = validIntervals[i].end.getTime();
-    if (s < minStartMs) minStartMs = s;
-    if (e > maxEndMs) maxEndMs = e;
-  }
-  let horizonStart = isFinite(minStartMs) ? new Date(minStartMs) : new Date();
-  let horizonEnd = isFinite(maxEndMs) ? new Date(maxEndMs) : new Date(horizonStart.getTime() + 7 * 86400000);
-
-  if (openingWIP.length > 0) {
-    for (const w of openingWIP) {
-      if (w.arrival && !isNaN(w.arrival.getTime()) && w.arrival.getTime() < horizonStart.getTime()) {
-        horizonStart = new Date(w.arrival);
-      }
-    }
-  }
+  // One shared horizon (demand span only; backlog never moves it) — see computeIntervalHorizon in calendar.ts.
+  const { horizonStart, horizonEnd } = computeIntervalHorizon(validIntervals, openingWIP);
 
   const workingDaysInHorizon = getCalendarWorkingDaysInHorizon(horizonStart, horizonEnd, calendar);
 
@@ -3737,8 +3707,9 @@ export async function searchOptimalHCAsync(params: {
   let boundaryEvidence: BoundaryEvidence | undefined;
   if (failedNResult) {
     const breachSamples: BoundaryEvidence['breachSamplesAtNMinus1'] = [];
+    // Rule D4 (G1): backlog already overdue at horizon start is not a breach attributable to headcount.
     const failedBreaches = failedNResult.caseResults.filter(
-      (c) => !c.primaryPassed
+      (c) => !c.primaryPassed && !c.overdueAtStart
     );
 
     for (let i = 0; i < Math.min(10, failedBreaches.length); i++) {

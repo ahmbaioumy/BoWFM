@@ -513,36 +513,30 @@ export function resolveClockStartPolicy(sla: SLAPolicyConfig): ClockStartPolicy 
   return sla.clockStartPolicy ?? 'arrival';
 }
 
-export function generateCaseEntities(params: {
-  intervals: StandardInterval[];
+/**
+ * Opening-backlog case entities. Shared by generateCaseEntities and the data-quality check so the two can never
+ * disagree on which cases are overdue at start.
+ *
+ * Rule D4 (G1): a case that arrived BEFORE horizonStart and cannot meet its deadline even if work begins at the
+ * first working instant of the horizon (latestSafeStart < nextOpen(horizonStart)) is flagged overdueAtStart. It is
+ * still worked, but excluded from the primary SLA and the wait-time mean (see runBackofficeDES). Arrival, clock
+ * start, deadline and latestSafeStart are never altered.
+ */
+export function buildOpeningWipCases(params: {
   openingWIP: OpeningWIPCase[];
-  categories: CategoryConfig[];
+  categoryMap: Map<string, CategoryConfig>;
   calendar: CalendarConfig;
   sla: SLAPolicyConfig;
-  seed: number;
-}): { cases: CaseEntity[]; horizonStart: Date; horizonEnd: Date } {
-  const { intervals, openingWIP, categories, calendar, sla, seed } = params;
-
-  const categoryMap = new Map<string, CategoryConfig>();
-  categories.forEach((c) => categoryMap.set(c.name, c));
-
-  // Determine horizon start and end strictly across min/max of intervals and openingWIP
-  const { horizonStart, horizonEnd } = computeIntervalHorizon(intervals, openingWIP);
-
-  const prng = createPrng(seed);
-  const allCases: CaseEntity[] = [];
+  horizonStart: Date;
+}): { cases: CaseEntity[]; idlessCount: number } {
+  const { openingWIP, categoryMap, calendar, sla, horizonStart } = params;
+  const cases: CaseEntity[] = [];
   let nextSyntheticId = 1;
-  let caseIdCounter = 1;
-
-  const defaultPrimaryWinMin = convertSlaDurationToMinutes(
-    sla.primaryWindow,
-    sla.primaryUnit,
-    sla.clockBasis,
-    calendar
-  );
+  let idlessCount = 0;
+  const defaultPrimaryWinMin = convertSlaDurationToMinutes(sla.primaryWindow, sla.primaryUnit, sla.clockBasis, calendar);
   const clockStartPolicy = resolveClockStartPolicy(sla);
+  const firstWorkInstantMs = openingWIP.length > 0 ? nextOpen(horizonStart, calendar).getTime() : horizonStart.getTime();
 
-  // Add opening WIP
   for (const wip of openingWIP) {
     const cat = categoryMap.get(wip.category) || {
       id: 'default',
@@ -579,8 +573,9 @@ export function generateCaseEntities(params: {
         : new Date(primaryDeadline.getTime() - remainingAht * 60 * 1000);
 
     const sId = nextSyntheticId++;
-    allCases.push({
-      id: wip.id || `WIP-${String(caseIdCounter++).padStart(4, '0')}`,
+    if (!wip.id) idlessCount++;
+    cases.push({
+      id: wip.id || `WIP-${String(idlessCount).padStart(4, '0')}`,
       syntheticId: sId,
       category: wip.category,
       priority: wip.priority || cat.priority || 1,
@@ -594,8 +589,47 @@ export function generateCaseEntities(params: {
       completeTime: null,
       parkCount: 0,
       isOpeningWip: true,
+      overdueAtStart: arrival.getTime() < horizonStart.getTime() && latestSafeStart.getTime() < firstWorkInstantMs,
     });
   }
+
+  return { cases, idlessCount };
+}
+
+export function generateCaseEntities(params: {
+  intervals: StandardInterval[];
+  openingWIP: OpeningWIPCase[];
+  categories: CategoryConfig[];
+  calendar: CalendarConfig;
+  sla: SLAPolicyConfig;
+  seed: number;
+}): { cases: CaseEntity[]; horizonStart: Date; horizonEnd: Date } {
+  const { intervals, openingWIP, categories, calendar, sla, seed } = params;
+
+  const categoryMap = new Map<string, CategoryConfig>();
+  categories.forEach((c) => categoryMap.set(c.name, c));
+
+  // Planning horizon = span of the demand intervals only (backlog never moves it; see computeIntervalHorizon).
+  const { horizonStart, horizonEnd } = computeIntervalHorizon(intervals, openingWIP);
+
+  const prng = createPrng(seed);
+  const allCases: CaseEntity[] = [];
+  let nextSyntheticId = 1;
+  let caseIdCounter = 1;
+
+  const defaultPrimaryWinMin = convertSlaDurationToMinutes(
+    sla.primaryWindow,
+    sla.primaryUnit,
+    sla.clockBasis,
+    calendar
+  );
+  const clockStartPolicy = resolveClockStartPolicy(sla);
+
+  // Add opening WIP (shared builder — also used by the data-quality check; flags rule D4 'overdue at start').
+  const wipBuilt = buildOpeningWipCases({ openingWIP, categoryMap, calendar, sla, horizonStart });
+  for (const c of wipBuilt.cases) allCases.push(c);
+  nextSyntheticId = wipBuilt.cases.length + 1;
+  caseIdCounter = 1 + wipBuilt.idlessCount;
 
   // Add Demand Intervals cases
   for (const interval of intervals) {
@@ -816,9 +850,11 @@ export function runBackofficeDES(params: {
     });
   }
 
-  // 1. Initialize all arrival events
+  // 1. Initialize all arrival events. A case that arrived before the horizon (older opening backlog) is
+  // injected at the horizon start: nobody is rostered before the plan begins, so no work may happen earlier
+  // (G1). Its arrival, clockStart, deadline and latestSafeStart are NOT changed — only the injection instant.
   for (let i = 0; i < allCases.length; i++) {
-    scheduleEvent(allCases[i].arrival, 'CaseArrival', allCases[i].id);
+    scheduleEvent(Math.max(allCases[i].arrival.getTime(), horizonStart.getTime()), 'CaseArrival', allCases[i].id);
   }
 
   // Business-open/close event scheduling (step 2) happens further below, after the
@@ -1929,6 +1965,9 @@ export function runBackofficeDES(params: {
   let primaryPassCount = 0;
 
   let totalAsaMinutesSum = 0;
+  let asaIncludedCount = 0; // cases in the wait-time mean (rule D4 excludes overdue-at-start cases)
+  let overdueAtStartCount = 0;
+  const catAsaIncluded = new Map<string, number>();
   let censoredAsaCount = 0;
 
   const categoryStats: DESResult['categoryStats'] = {};
@@ -1942,6 +1981,7 @@ export function runBackofficeDES(params: {
       primaryPct: 0,
       asaMeanMinutes: 0,
       asaCensoredCount: 0,
+      overdueAtStartCount: 0,
     };
   });
 
@@ -1951,38 +1991,53 @@ export function runBackofficeDES(params: {
     const c = allCases[i];
     const isCompleted = c.completeTime !== null;
 
-    const primaryEligible = true;
+    // Rule D4 (G1): opening backlog that was already overdue when the plan starts is worked and counted as
+    // workload, but is not part of the primary SLA (numerator or denominator) or the wait-time mean.
+    const overdueAtStart = c.overdueAtStart === true;
+    const primaryEligible = !overdueAtStart;
     let primaryPassed = false;
     if (isCompleted && c.completeTime) {
       primaryPassed = c.completeTime.getTime() <= c.primaryDeadline.getTime();
     }
 
-    primaryEligibleCount++;
-    if (primaryPassed) primaryPassCount++;
+    if (primaryEligible) {
+      primaryEligibleCount++;
+      if (primaryPassed) primaryPassCount++;
+    } else {
+      overdueAtStartCount++;
+    }
 
     // ASA Duration respecting asaClockBasis
     let asaDurationMinutes = 0;
     let asaCensored = false;
 
+    // Wait is measured from max(clockStart, horizonStart): backlog that arrived before the plan starts has
+    // only waited since the plan began, the part the team can influence. A no-op for every case that arrives
+    // inside the horizon (clockStart >= arrival >= horizonStart).
+    const waitFrom = c.clockStart.getTime() < horizonStart.getTime() ? horizonStart : c.clockStart;
+
     if (sla.asaClockBasis === 'business_window') {
       if (c.firstStartTime) {
-        asaDurationMinutes = workingDuration(c.clockStart, c.firstStartTime, calendar);
+        asaDurationMinutes = workingDuration(waitFrom, c.firstStartTime, calendar);
       } else {
-        asaDurationMinutes = workingDuration(c.clockStart, horizonEnd, calendar);
+        asaDurationMinutes = workingDuration(waitFrom, horizonEnd, calendar);
         asaCensored = true;
-        censoredAsaCount++;
       }
     } else {
       // clock_hours / wall clock
       if (c.firstStartTime) {
-        asaDurationMinutes = Math.max(0, (c.firstStartTime.getTime() - c.clockStart.getTime()) / 60000);
+        asaDurationMinutes = Math.max(0, (c.firstStartTime.getTime() - waitFrom.getTime()) / 60000);
       } else {
-        asaDurationMinutes = Math.max(0, (horizonEnd.getTime() - c.clockStart.getTime()) / 60000);
+        asaDurationMinutes = Math.max(0, (horizonEnd.getTime() - waitFrom.getTime()) / 60000);
         asaCensored = true;
-        censoredAsaCount++;
       }
     }
-    totalAsaMinutesSum += asaDurationMinutes;
+    if (!overdueAtStart) {
+      totalAsaMinutesSum += asaDurationMinutes;
+      asaIncludedCount++;
+      catAsaIncluded.set(c.category, (catAsaIncluded.get(c.category) ?? 0) + 1);
+      if (asaCensored) censoredAsaCount++;
+    }
 
     // Category Level Rollups
     let cStat = categoryStats[c.category];
@@ -1996,6 +2051,7 @@ export function runBackofficeDES(params: {
         primaryPct: 0,
         asaMeanMinutes: 0,
         asaCensoredCount: 0,
+        overdueAtStartCount: 0,
       };
       categoryStats[c.category] = cStat;
     }
@@ -2003,10 +2059,14 @@ export function runBackofficeDES(params: {
     cStat.volume++;
     cStat.workloadHours += c.totalAhtMinutes / 60;
     if (isCompleted) cStat.completed++;
-    cStat.primaryEligible++;
-    if (primaryPassed) cStat.primaryPass++;
-    cStat.asaMeanMinutes += asaDurationMinutes;
-    if (asaCensored) cStat.asaCensoredCount++;
+    if (primaryEligible) {
+      cStat.primaryEligible++;
+      if (primaryPassed) cStat.primaryPass++;
+      cStat.asaMeanMinutes += asaDurationMinutes;
+      if (asaCensored) cStat.asaCensoredCount++;
+    } else {
+      cStat.overdueAtStartCount = (cStat.overdueAtStartCount ?? 0) + 1;
+    }
 
     if (!skipCaseResultsAndTimeline) {
       caseResults.push({
@@ -2022,6 +2082,7 @@ export function runBackofficeDES(params: {
         completeTime: c.completeTime,
         parkCount: c.parkCount,
         isOpeningWip: c.isOpeningWip,
+        overdueAtStart,
         isCompleted,
         primaryEligible,
         primaryPassed,
@@ -2082,7 +2143,8 @@ export function runBackofficeDES(params: {
     const catTarget = cat?.primaryPct !== undefined ? cat.primaryPct : sla.primaryPct;
 
     s.primaryPct = s.primaryEligible > 0 ? Math.round((s.primaryPass / s.primaryEligible) * 1000) / 10 : 100;
-    s.asaMeanMinutes = s.volume > 0 ? Math.round((s.asaMeanMinutes / s.volume) * 10) / 10 : 0;
+    const asaN = catAsaIncluded.get(catName) ?? 0;
+    s.asaMeanMinutes = asaN > 0 ? Math.round((s.asaMeanMinutes / asaN) * 10) / 10 : 0;
     s.workloadHours = Math.round(s.workloadHours * 10) / 10;
 
     if (s.primaryPct < catTarget) {
@@ -2094,7 +2156,7 @@ export function runBackofficeDES(params: {
     primaryEligibleCount > 0 ? Math.round((primaryPassCount / primaryEligibleCount) * 1000) / 10 : 100;
 
   const boAsaMeanMinutes =
-    totalCasesCount > 0 ? Math.round((totalAsaMinutesSum / totalCasesCount) * 10) / 10 : 0;
+    asaIncludedCount > 0 ? Math.round((totalAsaMinutesSum / asaIncludedCount) * 10) / 10 : 0;
 
   // Occupancy: (Total Handling Minutes) / (Operational HC * Working Days in Horizon * Daily Present Minutes)
   const workingDaysInHorizon = getCalendarWorkingDaysInHorizon(horizonStart, horizonEnd, calendar);
@@ -2156,6 +2218,7 @@ export function runBackofficeDES(params: {
     primaryEligibleCount,
     primaryPassCount,
     primaryAchievedPct,
+    overdueAtStartCount,
     passesPrimarySLA,
     categoryStats,
     passesCategorySLA,
