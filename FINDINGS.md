@@ -458,3 +458,114 @@ Clean and proven:
 
 - Claims per-category net 4.16 / 9.48 / 17.36 and gross 5.2 / 11.86 / 23.14 match the engine; harmonic shrinkage 22.9%.
 - Reset-confirm modal, progress modal, "View Results", sidebar READY badge all work. No crash, NaN, Infinity or undefined seen.
+
+### P3-2 — `ResultsFlow.tsx:1-1200` line by line (investigator) — 2 majors, display only; no wrong computed number
+
+IDs renamed from the agent's R1..R7 to UI-9..UI-15.
+
+| ID | Severity (my verdict) | Finding | Effect on the planner | Evidence |
+|---|---|---|---|---|
+| UI-9 | **major (display)** | Search-history "Primary SLA" cell is coloured by `median >= policy target`, while the engine passes/fails on the confidence-interval lower bound against the slack-aware floor. The bounds are on each history row (`primaryCiLow`) but never read. Example: target 95, median 96.0, CI low 94.1 → green "96%" beside a red Fail. With slack ON: median 92, CI low 90.5, floor 90 → red "92%" beside PASS. | Row colour contradicts the pass/fail next to it; the planner cannot see why a headcount was rejected or accepted. | `ResultsFlow.tsx:775`; `hc-search.ts:2917`, `:3725`, `:1927-1928`; `wfm.ts:622-623` |
+| UI-10 | **major (display)** | Headline "Primary SLA Achieved" card and per-category rows show ONE representative run but are coloured as if that were the gate. The engine writes a warning for exactly this case ("Representative run fell slightly below target… CI remains satisfied") — **no component renders it** (I confirmed: the two fields appear only in `wfm.ts` and `hc-search.ts`). Example: target 95, CI low 95.2 (passes), representative run 94.7 → "COMPLETE / Verified" banner above a red 94.7% card and red category row, unexplained. | A valid recommendation looks failed, with the explanation the engine prepared thrown away. | `ResultsFlow.tsx:965`, `:972`, `:1086-1111`; `hc-search.ts:2838-2849`, `:3647-3657`, `:1999-2008`; `wfm.ts:615-616` |
+| UI-11 | minor | Agent tab and its CSV use `labor.adherencePct || 1.0` for the daily budget; the engine's `resolveEffectiveAdherence` treats 0 as 0.1. Only differs at adherence 0. | Budget column / violation flag wrong in an extreme setting. | `ResultsFlow.tsx:297`, `:427`; `des-engine.ts:666-678` |
+| UI-12 | minor | "Invariants" panel always shows green ticks: M1 prints "10h ≤ 8h. Passed" without comparing (data quality warns on the same input); M2 is `round(x) = x`; M3 is a hard-coded tick. | A check that cannot fail. Misleading reassurance. | `ResultsFlow.tsx:1154-1172`; `csv-parser.ts:1031` |
+| UI-13 | minor | Infeasible run: "SLA on-duty HC" stays green, "Hire after same shrink" and "Agents Required" show the search-cap headcount as if it were a recommendation. Only the top banner and one tile say "Fails SLA". | Cap value can be read as an answer. | `ResultsFlow.tsx:593`, `:612`, `:618`, `:856-858`; `hc-search.ts:2675`, `:2776` |
+| UI-14 | minor | "Held at the workload floor" banner tests `HC === N_min`; the real floor is the search start (`max(N_min, N_occ)`). When held at N_occ > N_min no banner shows; text always names N_min. | Missing explanation. | `ResultsFlow.tsx:911-919`; `hc-search.ts:2880-2884` |
+| UI-15 | minor | Reassuring fallbacks: "Evaluated up to N = 500" when the value is missing (500 is not the configured cap); ASA "0m" when the category has no stats; zero-demand data shows workload "1h". | Wrong figure in edge cases only. | `ResultsFlow.tsx:523`, `:1119`, `:1128`; `hc-search.ts:1568` |
+
+Clean in this slice: every headline figure traced to its engine field with the right unit and rounding (Net HC, Gross HC single round, OFF %, uplift, shares, shrinkage, CI block, occupancy raw vs capped, coverage, per-category targets); CI-low colour uses the same floor as the gate; all settings read from the run snapshot (no live reads in 1-1200); crash guards present; no `fetch`, storage, console, `Math.random`, `Date.now` anywhere in the file.
+
+### P3-3 — `ResultsFlow.tsx:1200-2387`, export handlers, `export-rows.ts` (investigator) — 2 majors, rest minor; no wrong computed number
+
+IDs renamed from the agent's S1..S12 to UI-16..UI-27.
+
+| ID | Severity (my verdict) | Finding | Effect on the planner | Evidence |
+|---|---|---|---|---|
+| UI-16 | **major (security hygiene, low likelihood)** | Every CSV export writes cells that start with `=`, `+`, `-`, `@` unchanged (quoted, but Excel still runs them). A category name or case ID like `=HYPERLINK(...)` from a file or imported settings the planner did not write is executed when the export is opened in Excel. I confirmed `csvCell` has no guard. | Exported file can run a formula from someone else's data. Product — exports. | `csv-parser.ts:1072-1076`; `export-rows.ts:19-20`, `:40-41`, `:56-60`; `ResultsFlow.tsx:481-494` |
+| UI-17 | **major (siloed runs)** | Agent Summary gives agents with **no work** a category by round-robin (`categories[i % n]`) instead of the engine's real assignment. Example: agents A,B,C,A,A; idle Agent-5 (really A) is listed under B, appears in B's filter and CSV, missing from A. Idle agents are exactly what a planner reads to spot an over-staffed category. The Fairness table uses the real mapping. | Wrong category on screen and in the Summary CSV for idle agents. | `ResultsFlow.tsx:323`, `:339-341`, `:484`; `des-engine.ts:2060`; correct source `des.agentFairness.perAgent[i].category` |
+| UI-18 | minor | Agent Summary and Slice tables share one search/filter state without saying so; category + "IDLE only" always gives an empty table (idle slices carry no category); a hidden selected agent still filters slices. | Confusing filters. | `ResultsFlow.tsx:399`, `:1677-1700`, `:1933-1971` |
+| UI-19 | minor | Audit tab "Breach samples at N−1" and the "At N−1 SLA was X%… stepping up achieved Y%" text come from one run, while the search decided on R runs and the CI bound; with the workload floor ON, N−1 may never have been a candidate. Can show "no breaches at lower headcount" for a headcount the search rejected. Extends HC-16. | Rationale text can contradict the decision. | `hc-search.ts:2851-2859`, `:2957`; `ResultsFlow.tsx:2211` |
+| UI-20 | minor | "Occupancy Proof" badge is green when the numbers reconcile, not when occupancy is within the cap — a 130% run shows a green "130%". | Green reads as "OK". | `ResultsFlow.tsx:441`, `:1489` |
+| UI-21 | minor | Step 3 prints `replications || 30` — claims 30 replications if the value is missing. | Edge case. | `ResultsFlow.tsx:1268` |
+| UI-22 | minor (wording) | "EXISTING / NEW ADDED" agent labels and the export "Source" column: the app has no existing-headcount input. Agents 1..N_min are called Existing; in siloed runs the ID order is a category split, so the label is meaningless. | Invented meaning on screen and in two CSVs. | `ResultsFlow.tsx:1606`, `:1694`, `:1761-1766`, `:2005`; `export-rows.ts:54` |
+| UI-23 | minor | Case Browser shows "Showing 1 - 0 of 0 cases" with no empty-state row. | Cosmetic. | `ResultsFlow.tsx:1450` |
+| UI-24 | minor | Exports: ignore active filters without saying so; slices CSV not sorted like the screen; unstarted case `-` on screen vs `UNSTARTED` in CSV; AHT/ASA unrounded; empty export does nothing silently; Results JSON uses the same file-name pattern as the Config export (`wfm_config_snapshot_*`); the "run snapshot" JSON includes the **live** column mapping. | Export vs screen inconsistencies. | `ResultsFlow.tsx:453-497`; `export-rows.ts:24-33`; `csv-parser.ts:1108`; `App.tsx:386`, `:399` |
+| UI-25 | minor | Assumptions tab mixes `adherence_pct: 0.85` (fraction) with `confidence_level_pct: 95%`; titled "Full parameter state snapshot" but lists about 20 parameters (no AHT, shrinkage, volume, replications). | Misleading title/units. | `ResultsFlow.tsx:2349` |
+| UI-26 | minor | Numbers formatted with the PC locale: on a German/French PC `1,234 min` shows as `1.234 min` and can be read as 1.2. One figure can print 3 decimals. | Misread risk, no calculation error. | `ResultsFlow.tsx:1345`, `:1501-1513`, `:1622`, `:1814`, `:1898`, `:2231` |
+| UI-27 | minor | Queue/backlog table and Agent Summary are not paginated (a long horizon is thousands of rows). | Slow screen on large runs. | `ResultsFlow.tsx:2130` |
+
+For the UI-1 fix: no export inside `ResultsFlow.tsx` reads live demand or backlog (they use the run's own results). Remaining live reads: `App.tsx:659-660` (props never used by Results), `App.tsx:386` (column mapping in the JSON), `App.tsx:410`, `:655-661` (fall back to live settings only when no snapshot exists).
+
+Clean in this slice: the five "how we got here" formulas on screen equal the engine code (N_min floor, max with search result, OFF adjustment, per-category gross-up → sum → one round); pass/breach flags and breach reasons equal the CSV; timestamps on screen and in CSV use the same local formatter; fairness percentages not double-multiplied; sorts explicit; no empty-array or divide-by-zero crash path; CSV escaping of commas, quotes and newlines correct.
+
+### P3-4 — `DemandFlow.tsx` all 1227 lines (investigator; code reading, D1/D2 lines re-read by me) — 2 majors, both in the backlog file import
+
+IDs renamed from the agent's D1..D12 to UI-28..UI-39. `DataTable.tsx` is not used by this screen (not read).
+
+| ID | Severity (my verdict) | Finding | Effect on the planner | Evidence |
+|---|---|---|---|---|
+| UI-28 | **major** | Backlog import: a row whose category is not recognised is given the fallback category's **name** but not its handling time or priority — it gets an invented 30 min, priority 1. Example: categories `[Billing AHT 12, prio 2]`, row "Foo" with blank remaining work → stored Billing, 30 min, prio 1. The warning says only "map to fallback category". Blank category cell or unmapped category column: same, with **no warning at all**. | Wrong minutes enter the sizing. Product — wrong input. | `DemandFlow.tsx:195-204`, `:207`, `:214`, `:1080` |
+| UI-29 | **major** | Backlog import: remaining-work cell read with `parseFloat` — takes the leading digits and ignores the rest, silently. `7,5` → 7; `1:30` → 1; `2h` → 2 minutes; `12abc` → 12. Negative, `N/A`, text → category AHT or 30 with no count and no warning. `1e9`, `Infinity` accepted. | Wrong minutes enter the sizing, unflagged. Same family as CSV-4. | `DemandFlow.tsx:215-220`, `:208-211` |
+| UI-30 | minor | Backlog import column auto-pick: `Due Date, Created Date` picks Due Date as arrival; one column can fill two roles; with no match, category falls back to the first column and date to the second (often the case ID → every row "unmatched"). | Wrong mapping proposed; planner can correct it. | `DemandFlow.tsx:130-154` |
+| UI-31 | minor (wrong input, silent) | Backlog import: a blank date cell or unmapped date column silently becomes "arrived at the start of the data". Only unparseable non-empty dates are counted as skipped. | 500 undated rows import with no notice. | `DemandFlow.tsx:227-238` |
+| UI-32 | minor | A backlog case added before any demand file is loaded gets the PC's current time as its arrival (not repeatable; feeds CSV-13). Not verified reachable in the UI. | Edge case. | `DemandFlow.tsx:237`, `:296-301` |
+| UI-33 | minor | Manual backlog "remaining minutes" field: typing 0 or clearing it snaps to 30 mid-edit; decimals truncated; −5 shows −5 but stores the category AHT; no upper limit. | Field shows one value, stores another. | `DemandFlow.tsx:813`, `:286` |
+| UI-34 | minor | Manual backlog: empty/unparseable arrival silently defaults; a category chosen before loading a different file stays selected invisibly and is stored (data quality then blocks it without saying why). | Confusing block. | `DemandFlow.tsx:289-302`, `:78`, `:284` |
+| UI-35 | minor | Backlog import text says "mm/dd is rejected" but `03/04/2026` is read as 3 April silently (only day > 12 is rejected); colliding IDs regenerated silently; Append button enabled with 0 cases. | Misleading message. | `DemandFlow.tsx:1073`, `:241-245`, `:1137` |
+| UI-36 | minor | Backlog import re-parses the whole file on every dropdown change with a per-row full scan — a 20k-row file would freeze the screen. | Slow on large backlog files. | `DemandFlow.tsx:915`, `:242-244` |
+| UI-37 | minor (root of P3-T3) | File reading: empty file dropped silently (`if (text)`); no error handler for an unreadable/locked file; non-UTF-8 files (Windows-1252) turn accented category names into `�` with no warning; no size limit. Header-only file: screen moves to mapping anyway. | Exact lines for the P3-T3 fix. | `DemandFlow.tsx:118-127`, `:170-183`; `App.tsx:189` |
+| UI-38 | minor | Dropping a file outside the drop box makes the browser open it — **all in-memory work is lost** (no page-level drop guard found). Picking the same file twice does nothing. Two quick uploads can finish out of order. | Lost work on a mis-drop. | `DemandFlow.tsx:346`, `:373-378`, `:877` |
+| UI-39 | minor | Data-quality tab says "Upload and map…" when a file is loaded but a required column is unmapped — no hint which. Backlog total uses `|| 0`, hiding a bad value. | Unhelpful message. | `DemandFlow.tsx:714`, `:1170-1174`; `App.tsx:131`, `:152` |
+
+Clean: re-upload goes through the reset dialog and clears backlog; mapping changes recompute intervals and data quality (no stale data); every data-quality issue is listed with the right colour and count; totals come straight from the parser (no second formula); backlog IDs unique, delete by ID; manual date-time entry is local-time consistent; invalid calendar dates rejected; no offline-contract breach in the file.
+
+### P3-5 — `ConfigFlow.tsx`, `CalendarConfigPanel.tsx`, `ParamsPanel.tsx` all lines (investigator; code reading only) — 2 majors
+
+IDs renamed from the agent's C1..C9 to UI-40..UI-48.
+
+| ID | Severity (my verdict) | Finding | Effect on the planner | Evidence |
+|---|---|---|---|---|
+| UI-40 | **major (dead control)** | Per-category "BO ASA Target" inputs do nothing. The screen offers an editable wait-time target per category, help text says each category "has its own … BO ASA target", and "Apply Template to All" copies it — but the engine reads only the global target. `cat.boAsaTarget` has no reader in `src/utils`. Example: Claims_Auto set to 15 min, global 60 → engine enforces 60. | Planner believes a target is enforced when it is not. Headcount unaffected. | `ConfigFlow.tsx:642-643`, `:738`, `:844-878`; `hc-search.ts:1966-1968`; `des-engine.ts:2116-2117` |
+| UI-41 | **major — from code, needs a browser confirmation** | Three percentage fields clamp on every keystroke with a minimum above the first digit, so typing a value stores a different one. Occupancy cap (min 50): select the field, type `85` → "8" becomes 50, then "505" becomes **100**. Adherence (min 10): `85` → **100%**. Confidence level (min 50): `95` → **99.9%**. I re-read the occupancy handler: it is as described. Arrow keys and paste work. | **Changes the headcount**: the gate the planner meant to set is silently weaker or stricter. The wrong number is visible in the field but nothing says the clamp fired. | `ConfigFlow.tsx:154`, `:921-924`, `:1071` |
+| UI-42 | minor | Many fields snap back to a default the moment they are cleared (`|| default`): productive hours 7.5, days/week 5, SLA 80 / 6, ASA 60, confidence 95, slack 5, cap 85, priority 1, AHT 1. AHT below 1 minute cannot be entered. | Awkward editing; no wrong value reaches the engine. | `ConfigFlow.tsx:130`, `:176`, `:667`, `:680`, `:710`, `:787`, `:923`, `:974`, `:1024`, `:1071`, `:1221`, `:1253` |
+| UI-43 | minor | Daily productive hours has no clamp: a pasted negative is stored, passes the Run gate (`allGatesPassed` omits the `> 0` check), `N_min` drops to 1 and the simulation uses it unclamped. | Wrong headcount only if a negative is pasted. | `ConfigFlow.tsx:129-131`; `RunFlow.tsx:75`, `:89-95`; `hc-search.ts:131`; `des-engine.ts:795` |
+| UI-44 | minor | Adherence and shrinkage show a rounded percent but store the exact value: type 12.5 → field shows 13, engine uses 12.5. | Screen differs from value used. | `ConfigFlow.tsx:152`, `:1236` |
+| UI-45 | minor (answers the phase 2 open question) | **Yes, the UI can build broken calendars, and the Calendar tab warns about none**: all weekdays unticked (engine then throws "No open working window found"; nothing checks it); close ≤ open or open = close (window shown as "0 hours/day" in neutral colour; run is blocked later by an unrelated-looking message on the Run screen); nothing checks holidays covering the whole horizon. | Crash or a blocked run with the message far from the cause. No wrong headcount. | `CalendarConfigPanel.tsx:35-45`, `:69`, `:79`; `calendar.ts:117-132`; `RunFlow.tsx:75` |
+| UI-46 | minor | "Productive hours fit inside the daily window" is shown on the Labor tab and enforced only at Run — nothing on the Calendar tab. | Late feedback. | `ConfigFlow.tsx:64`, `:207-223`; `CalendarConfigPanel.tsx:369` |
+| UI-47 | minor | Per-category SLA window display: a category holding minutes only is shown as minutes/60 with the global unit label (360 min shows as "6 days" when the global unit is days); global window truncates decimals, per-category accepts them. Engine uses its own fields — no headcount effect. | Wrong label in one case. | `ConfigFlow.tsx:680`, `:763`, `:804`, `:1201`; `des-engine.ts:561-563` |
+| UI-48 | minor | Changing the global SLA baseline changes nothing until "Apply Template to All" is clicked; categories are not marked out of sync. Partly disclosed in help text. | Planner edits the baseline and sees no effect. | `ConfigFlow.tsx:628`, `:633-646` |
+
+Not in these files (so not assessed here): replications / seed / max HC controls (in `RunFlow.tsx` — the "R = 1 without a warning" question stays open), shift-offset controls, pooled/siloed switch. No category add / rename / delete exists in the UI, so duplicate names cannot be created there.
+
+Clean: shrinkage clamped 0–99% (gross-up can never divide by zero); AHT ≥ 1; occupancy cap, min coverage, slack, confidence all re-clamped by the engine; toggles OFF really switch the dependent value off, no silent stale value; **Workload Floor defaults ON with its explanation always visible**; 24x7 saves/restores the weekday set and bypasses holidays as labelled; holiday dates never parsed through `new Date(string)` (no timezone off-by-one); the daily-window figure uses the engine's own function; no offline-contract breach.
+
+---
+
+## Phase 3 — final ranked list
+
+No final challenger was run (meter reached the 17% soft line). Severities below are my verdicts on single-agent reports; items marked "from code" were not exercised in a browser.
+
+| Rank | ID | Severity | What the planner experiences | Product or internal? |
+|---|---|---|---|---|
+| 1 | UI-41 | major (from code) | Typing 85 into occupancy cap / adherence, or 95 into confidence, stores 100 / 100 / 99.9 | Product — changes headcount |
+| 2 | UI-28 + UI-29 (+ UI-31) | major | Backlog file import invents 30 min / priority 1 for unrecognised or blank categories, reads `7,5` as 7 and `2h` as 2 min, defaults blank dates — mostly with no warning | Product — wrong input |
+| 3 | UI-10 + UI-9 | major (display) | A passing recommendation can show a red headline SLA card and red rows; the engine's own explanation is never displayed; history-row colours contradict the Pass/Fail beside them | Display |
+| 4 | UI-40 | major (dead control) | Per-category wait-time targets are editable but ignored | Display / expectation |
+| 5 | UI-17 | major (siloed) | Idle agents listed under the wrong category on screen and in CSV | Display + export |
+| 6 | P3-T3 (+ UI-37) | major | Empty or header-only file: nothing happens, no message | Product — input handling |
+| 7 | UI-16 | major (security hygiene, low likelihood) | CSV exports can carry a formula from someone else's data into Excel | Export |
+| — | UI-11..15, UI-18..27, UI-30, UI-32..36, UI-38, UI-39, UI-42..48, P3-T1, P3-T2 | minor | See tables | Mostly display |
+
+Proven clean in phase 3: the shipped file loads from disk with no errors and no network traffic; headline numbers on screen equal a direct engine run and a hand calculation on all three samples; every headline figure on Results traces to the right engine field with the right unit and rounding; exports equal the screen; Workload Floor default ON with warning; shrinkage/AHT/cap inputs cannot produce a divide-by-zero.
+
+## Not audited (carry to phase 4 or a phase 3b)
+
+- **P3-6 not reached**: `App.tsx`, `RunFlow.tsx` (replications/seed/max-HC inputs, "R = 1 without a warning", cancel path), `SensitivityFlow.tsx`, `AgentAnalyticsPanel.tsx`, `Sidebar.tsx`, both modals, `NativeCharts.tsx`, `DataTable.tsx`; settings import/export round trip.
+- UI-41 keystroke behaviour, UI-38 (drop outside the box) and UI-32 not confirmed in a browser.
+- Final challenger on phase 3 findings.
+- Still open from earlier phases: staggered-mode stale-event fuzz; `.xlsx` sample files; personal data in `test_complaint.csv`.
+- Phase 4: docs vs code line by line.
+
+## Usage
+
+Weekly meter: 15% at phase 3 start → 17% after P3-5. Soft line reached; stopped. Cap 20% respected.

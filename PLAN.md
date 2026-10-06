@@ -193,3 +193,30 @@ State at start: weekly meter 15%. Hard stop 20%. No new audit agent at or above 
 | P3-6 | `App.tsx`, `RunFlow.tsx`, `SensitivityFlow.tsx`, modals, `Sidebar.tsx`, `ParamsPanel.tsx`, `AgentAnalyticsPanel.tsx` | `sonnet-investigator` | State resets, cancel path, config import/export round trip, stale-state paths |
 
 Steps not reached are marked "not audited" and carried to the next session. Known findings not to re-report: everything in `FINDINGS.md` (IDs CAL-, DES-, HC-, CSV-, UI-, OFF-, TEST-, P2-).
+
+---
+
+# Phase 3 status
+
+Done: P3-1 (browser), P3-2, P3-3 (Results), P3-4 (Demand), P3-5 (Settings + calendar). **Not reached: P3-6** (`App.tsx`, `RunFlow.tsx`, `SensitivityFlow.tsx`, `AgentAnalyticsPanel.tsx`, modals, sidebar). Final challenger not run. Stopped at the 17% soft line.
+
+# Fix plan — phase 3 findings (for approval; nothing built yet)
+
+Same rules as before: fail-first test where engine or parsing code changes, docs + rebuild + `npm run check:artifact`, one item per `/supervise` run.
+
+| # | Finding | What changes | Where | Tier | Proof it is fixed | Needs your decision? |
+|---|---|---|---|---|---|---|
+| H1 | UI-41, UI-42, UI-43, UI-44 | Number fields keep what is typed and clamp only when the field is left (blur); negative productive hours rejected; adherence/shrinkage show one decimal. First confirm UI-41 in a browser. | `ConfigFlow.tsx:129-131`, `:154`, `:921-924`, `:1071`, others in UI-42 | 2 | Browser: select occupancy cap, type 85 → field and stored value 85; same for adherence 85, confidence 95; paste −3 into productive hours → rejected | No. |
+| H2 | UI-28, UI-29, UI-31, UI-35 | Backlog import: unrecognised/blank category uses the fallback category's own AHT and priority (or the row is rejected); strict number parse shared with G2; every defaulted row counted and listed (category, minutes, date); message text corrected. | `DemandFlow.tsx:185-262`, `:1068-1080` | 3 | `7,5`, `2h`, `1:30`, `N/A`, −5, blank date, unknown category → each counted in a visible warning; none silently stored | **Yes** — reject bad rows, or import with a counted warning? (Recommend: import + warning.) |
+| H3 | UI-10, UI-9, UI-19 | Show the engine's "representative run slightly below target, CI satisfied" note; label the headline card "representative run"; colour history rows from the CI bound against the same floor the engine uses; reword the N−1 text. | `ResultsFlow.tsx:775`, `:965-972`, `:1086-1111`, `:2211`; `hc-search.ts:2957` (text only) | 2 | Fixture with CI low ≥ target and representative run below → note visible, card not red-as-failed; history colour equals Pass/Fail on every row | No. |
+| H4 | UI-40 | Either remove the per-category ASA inputs and fix the help text, or make the engine honour them. | `ConfigFlow.tsx:642-643`, `:738`, `:844-878` (remove) — or `hc-search.ts:1966`, `des-engine.ts:2116` (wire) | 1 (remove) / 3 (wire) | Control gone and text corrected — or a per-category ASA test moves the result | **Yes.** Recommend remove: cheaper, no engine risk. |
+| H5 | UI-17, P3-T2, UI-18 | Agent Summary reads the engine's category assignment; pooled runs get a "Pooled" option (or the dropdown is hidden); filters labelled as shared. Do with G7. | `ResultsFlow.tsx:323`, `:339-341`, `:399` | 2 | Siloed run with an idle agent → correct category on screen and CSV; pooled filter no longer empties the table | No. |
+| H6 | P3-T3, UI-37, UI-38, UI-39 | Plain messages for empty file, header-only file, unreadable file, unmapped required column; clear the file input after each pick; ignore drops outside the box. Do with G4. | `DemandFlow.tsx:118-127`, `:170-183`, `:373-378`, `:714`; `App.tsx:189` | 2 | Browser: each bad file → named message; drop outside the box → page stays | No. |
+| H7 | UI-16 | Neutralise cells that start with `=`, `+`, `-`, `@`, tab in CSV exports. | `csv-parser.ts:1072-1076` | 2 | Category `=1+1` → exported as text; negative numbers still export as numbers | No. |
+| H8 | UI-45, UI-46 | Calendar tab: block zero open days and close ≤ open with a message on that tab; show the productive-hours-vs-window check there too. | `CalendarConfigPanel.tsx:35-45`, `:69-79` | 2 | Untick every day → message, run blocked, no crash | No. |
+
+Backlog (minor): UI-11..15, UI-20..27, UI-30, UI-32..34, UI-36, UI-47, UI-48, P3-T1.
+
+Suggested order across all three phases: **G12** (tests) → **G1** (horizon) → **H1** (typed values) → F2 → F3 → G2–G5 + **H2** + **H6** (input safety together) → G6, G7 + **H5** → **H3**, **H4** → G8/F1 → F4–F6 → G9, G10 → H7, H8, rest.
+
+Next session options: `continue audit phase 3b` (P3-6 + browser confirmation of UI-41 + challenger), then phase 4 (docs vs code).
