@@ -220,3 +220,30 @@ Backlog (minor): UI-11..15, UI-20..27, UI-30, UI-32..34, UI-36, UI-47, UI-48, P3
 Suggested order across all three phases: **G12** (tests) → **G1** (horizon) → **H1** (typed values) → F2 → F3 → G2–G5 + **H2** + **H6** (input safety together) → G6, G7 + **H5** → **H3**, **H4** → G8/F1 → F4–F6 → G9, G10 → H7, H8, rest.
 
 Next session options: `continue audit phase 3b` (P3-6 + browser confirmation of UI-41 + challenger), then phase 4 (docs vs code).
+
+---
+
+# Phase 3b status and fix-plan update (after P3-6, P3-7 browser confirmation, P3-8 challenger)
+
+Phase 3 is complete except the small panels listed under "Not audited" in `FINDINGS.md`. Changes to the phase 3 fix plan above:
+
+| # | Change |
+|---|---|
+| H1 | **Now first in the whole queue**: UI-41 is browser-confirmed and under-sizes by about 16% in the tested case. Add the Run-screen fields (UI-54) to the same fix. Proof adds: typed adherence 85 on claims → recommended 37, gross 48. |
+| H2 | Add the priority column parse (`DemandFlow.tsx:209-210`). |
+| H5 | UI-17: confirm `agentFairness.perAgent[i]` is index-aligned before changing. |
+| H7 | UI-16 downgraded to minor; keep (cheap). |
+| H6 | P3-T3 downgraded to minor; keep with G4. |
+
+New items:
+
+| # | Finding | What changes | Where | Tier | Proof it is fixed | Needs your decision? |
+|---|---|---|---|---|---|---|
+| H9 | UI-49 (do with G6 / UI-1), UI-58 | Column mapping joins the run snapshot comparison, so a mapping change raises the "changed since run" banner (or clears results); header chip shows the same stale marker. | `run-inputs.ts:14-41`; `App.tsx:262`, `:517-526`, `:593`, `:452` | 2 | Browser: run, change Category mapping → banner on Results and header | No. |
+| H10 | UI-56, UI-60, UI-38, UI-51 ("lost work" theme) | Settings import: validate shape, merge onto defaults, honest message when nothing applies (extends F5); add an error boundary so a render error shows a recoverable message; "leave page?" guard when data is loaded; keep the Sensitivity matrix when leaving the tab and cancel its search. | `App.tsx:414-467`, `:667`; `SensitivityFlow.tsx:45-125`; new boundary component | 2 | Import `{}` → "nothing applied"; import file without `holidays` → loads with defaults, no white screen; refresh with data → browser prompt | No. |
+| H11 | UI-55, UI-59 | Warning when replications < 30 (stronger at 1: "no confidence check"); labels reflect the real value; Run gates for zero open days, close ≤ open, zero categories, ceiling below `N_min`. Do with H8. | `RunFlow.tsx:75-106`, `:276`, `:312`, `:328` | 2 | Replications 1 → visible warning; no working days → gate blocks before Run with a calendar message | No. |
+| H12 | UI-50, UI-52, UI-53 | Sensitivity: do not round AHT; show "infeasible" on failed cells; handle Stop/errors with a message. | `SensitivityFlow.tsx:53-129`, `:84`, `:260`, `:351` | 2 | AHT 7.5 → base cell equals the Results headline | No. |
+
+**Overall order across all phases:** **H1** (typed values, confirmed under-staffing) → **G12** (tests) → **G1** (horizon) → F2 → F3 → G2–G5 + H2 + H6 (input safety) → G6 + H9, G7 + H5 → H3, H4 → H10, H11 → G8/F1 → F4–F6 → G9, G10 → H7, H8, H12, rest.
+
+Next: phase 4 (docs vs code, plus the leftovers in "Not audited"), in a new session after the weekly reset.

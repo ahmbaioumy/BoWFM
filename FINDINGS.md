@@ -609,3 +609,45 @@ Clean: engine errors during a run are caught and shown (no white screen or stuck
 | UI-38 drop outside the box | not tested | Not reliable headless. |
 
 **UI-41 is upgraded to the top finding of phase 3: major, confirmed, changes the headcount (under-staffs by about 16% in the tested case) through ordinary typing.**
+
+### P3-8 — final challenger on phase 3 + 3b — PASS with corrections (all accepted)
+
+| Challenge | Ruling |
+|---|---|
+| UI-41 upheld. Framing: default adherence is 100% and correct (`default-config.ts:26`); the fault is clamping on every keystroke. The only cue is help text "Default 100%" — a planner seeing 100 may read it as the default | **Accepted.** Stays top finding. |
+| UI-28, UI-29 upheld; nothing downstream catches the rows (the unknown category is renamed before the orphan check). Priority parse (`DemandFlow.tsx:209-210`) has the same fault | **Accepted.** Priority parse added to UI-29. |
+| UI-9, UI-10 upheld (display only) | Kept major (display). |
+| UI-49 upheld (browser-confirmed) | Kept major. |
+| UI-50: the **volume half is wrong** — the engine also rounds per-interval volume (`des-engine.ts:602`). Only the AHT rounding is a real difference | **Accepted.** Narrowed to AHT; downgraded to minor (Sensitivity tab only). |
+| UI-16 overstated for an offline single-user tool | **Accepted.** Minor (cheap fix, keep in plan). |
+| UI-51, P3-T3 overstated — annoyance, no wrong number | **Accepted.** Minor. |
+| UI-40 dead control, no headcount effect — high minor | **Accepted in part.** Kept as major (expectation): the screen states a target is enforced that is not. |
+| UI-17: index alignment of `perAgent[i]` and "idle siloed agent exists" not confirmed | **Accepted.** Marked "from code — confirm before fixing"; low major. |
+| Under-rated: UI-56 (bad settings file → white screen, no error boundary, work lost) | **Accepted.** Upgraded to major. |
+| Under-rated: UI-55 (replications = 1, no warning, labels still claim a confidence interval) | **Accepted.** Upgraded to major (missing warning). |
+| Theme: lost work — refresh (UI-60), mis-drop (UI-38), leaving Sensitivity (UI-51), bad settings file (UI-56) | Noted as one theme in the fix plan. |
+
+## Final ranked list (phase 3, after challenge) — replaces the earlier phase 3 list
+
+| Rank | ID | Severity | What the planner experiences | Product or internal? |
+|---|---|---|---|---|
+| 1 | UI-41 | **major — confirmed in browser** | Typing 85 into adherence or occupancy cap stores 100; 95 into confidence stores 99.9. Tested: recommended 31 instead of 37 (−16%) | Product — changes headcount (under-staffs) |
+| 2 | UI-28 + UI-29 (+ UI-31) | major | Backlog file import invents 30 min / priority 1 for unknown or blank categories; `7,5` → 7, `2h` → 2 min; blank dates defaulted; mostly no warning | Product — wrong input |
+| 3 | UI-49 (with UI-1) | major — confirmed in browser | Changing a column mapping after a run leaves the old headcount on screen, unflagged | Product — stale output |
+| 4 | UI-10 + UI-9 | major (display) | A passing recommendation can show a red SLA card; the engine's explanation is never shown; history colours contradict Pass/Fail | Display |
+| 5 | UI-56 | major | A partial or foreign settings file: white screen (no recovery but reload) or a false "successfully loaded" | Product — crash / lost work |
+| 6 | UI-55 | major (missing warning) | Replications = 1 runs with no confidence check and no warning; labels still say "≥30" | Product — expectation |
+| 7 | UI-40 | major (expectation) | Per-category wait-time targets editable but ignored | Display |
+| 8 | UI-17 | low major (from code) | Idle agents under the wrong category in siloed runs | Display + export |
+| — | P3-T1..T3, UI-11..16, UI-18..27, UI-30, UI-32..39, UI-42..48, UI-50..54, UI-57..60 | minor | See tables | Mostly display / convenience |
+
+## Not audited (carry to phase 4)
+
+- `AgentAnalyticsPanel.tsx`, `NativeCharts.tsx`, `Sidebar.tsx`, `ResetConfirmModal.tsx`, `DataTable.tsx` line by line.
+- UI-49 with the Category dropdown specifically; UI-38 (drop outside the box); UI-32; UI-17 index alignment.
+- Earlier leftovers: staggered-mode stale-event fuzz; `.xlsx` sample files; personal data in `test_complaint.csv`.
+- Phase 4: docs vs code line by line.
+
+## Usage
+
+Weekly meter: 17% at phase 3b start → see final reading in the report. Cap 20% respected.
