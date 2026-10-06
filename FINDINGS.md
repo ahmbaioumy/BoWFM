@@ -762,3 +762,25 @@ The code-facing content of both documents is otherwise accurate: every default, 
 ## Usage
 
 Weekly meter: 17% at phase 4 start → 18% after P4-3. Cap 20% respected across all four phases (6% → 18%).
+
+---
+
+# FIX H1 — number fields keep the typed value — BUILT, awaiting owner approval (2026-10-06)
+
+Branch `fix/h1-number-fields`, commit `990833a` (checkpoint `2970f19`). Closes UI-41, UI-42, UI-43, UI-44, UI-54, UI-33, DOC-3.
+
+| Reviewer | Verdict | Evidence |
+|---|---|---|
+| Plan challenger | fail, then all points accepted | commit rule changed to commit-when-valid plus blur, Enter and unmount; units, seed, scope clarified |
+| Tester (real browser, real key presses) | **pass**, 17 of 17 criteria | adherence, cap, confidence keep 85 / 85 / 95; claims with adherence 85 gives recommended 37, gross 48, N_min 36, equal to a direct engine run; defaults still 31/40, 27/34, 31/39; Run without Tab uses the typed value; zero console errors, zero network requests |
+| Auditor (diff vs plan) | **pass** | all 26 inputs field-by-field equivalent; scope exact; no test weakened; docs accurate |
+| Final challenger | **pass** | no crash on intermediate values (calendar window clamps at 0); no destructive effect per keystroke |
+
+Gates: lint clean; `npm test` 174 + 541 + 60 green (new suite D54, 23 checks); trusted-source 164 green; `BoWFM.html` rebuilt; `check:artifact` fresh. `PRD.md` (v1.15.0) and `project_context.md` updated.
+
+Backlog from the reviews (all minor, none blocking):
+- H1-a: typing more decimals than a field allows (92.55) flips the display to 92.6 mid-typing; clamps on leave give no hint to the planner.
+- H1-b: unmount commit uses the last-rendered handler; with a pending draft and an unmount that has no blur first it could write an old settings object over a newer one. No trigger found in normal use; harden by skipping the commit when the stored value changed since the draft was typed.
+- H1-c: seed field has no upper bound (values beyond the safe-integer range accepted).
+- H1-d: D54 covers the helpers and a source guard; `NumberField` behaviour itself is proven only in the browser.
+- H1-e: adherence and shrinkage arrow-key step is now 0.1 (was 1).
