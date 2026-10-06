@@ -4725,11 +4725,11 @@ console.log('\n--- Suite D62: G1 planning horizon from demand data only ---');
     assert(r2y.passed === false && !!e2y, 'D62.40 one row two years out: BLOCKING error "Isolated date(s)..."', JSON.stringify(r2y.issues.map((i) => i.severity + ':' + i.field)));
     assert(!!e2y && e2y.message.includes('2028-10-12') && e2y.message.includes('2026-10-12') && e2y.message.includes('2026-10-16'), 'D62.41 the message names the isolated date and the main data range (2026-10-12 to 2026-10-16)', e2y?.message);
     const r30 = dq62([...wk, stray(day62(35, 9))]); // Mon 16 Nov: Oct 17..Nov 15 = 30 empty days
-    assert(r30.passed === true && !isolated(r30), 'D62.42 30 empty days before an isolated row: not blocked (rule is "more than 30")', JSON.stringify(r30.issues.map((i) => i.severity + ':' + i.field)));
+    assert(r30.passed === false && !!isolated(r30), 'D62.42 30 empty days before an isolated row: blocked (G1-a: rule is now "more than 7")', JSON.stringify(r30.issues.map((i) => i.severity + ':' + i.field)));
     const r31 = dq62([...wk, stray(day62(36, 9))]); // Tue 17 Nov: Oct 17..Nov 16 = 31 empty days
     assert(r31.passed === false && !!isolated(r31) && isolated(r31)!.message.includes(isoLocal(day62(36, 9))), 'D62.43 31 empty days before an isolated row: blocked, naming the date', JSON.stringify(r31.issues.map((i) => i.severity + ':' + i.field)));
     const r10 = dq62([...wk, stray(day62(14, 9))]); // Mon 26 Oct: 9 empty days
-    assert(r10.passed === true && !isolated(r10) && r10.issues.some((i) => i.severity === 'warning' && i.field === 'Calendar/Data Coverage Gap'), 'D62.44 a stray row 10 days out: warning (coverage gap), not blocked', JSON.stringify(r10.issues.map((i) => i.severity + ':' + i.field)));
+    assert(r10.passed === false && !!isolated(r10), 'D62.44 a stray row 10 days out: BLOCKING error (G1-a: empty run longer than 7 days)', JSON.stringify(r10.issues.map((i) => i.severity + ':' + i.field)));
     const closure = dq62([...wk, ...week62(42)]); // 12-16 Oct, then Mon 23 Nov: Oct 17..Nov 22 = 37 empty days, 90 rows each side
     assert(closure.passed === true && !isolated(closure), 'D62.45 a 37-day closure with 90 rows on each side: not blocked', JSON.stringify(closure.issues.map((i) => i.severity + ':' + i.field)));
     assert(closure.issues.some((i) => i.severity === 'warning' && /more than 30/.test(i.message + (i.details ?? ''))), 'D62.46 ... but a warning says the empty run is longer than 30 days', JSON.stringify(closure.issues.map((i) => i.field)));
@@ -4748,6 +4748,61 @@ console.log('\n--- Suite D62: G1 planning horizon from demand data only ---');
     assert(!!w40 && /\b40\b/.test(w40.message), 'D62.50 40 Friday backlog cases: warning stating 40 will be overdue at start', w40?.message);
     assert(!overdueW([]) && !overdueW([wip62('IN', day62(0, 10))]), 'D62.51 no backlog, or backlog inside the horizon: no overdue-at-start warning');
   }
+}
+
+// ---------------------------------------------------------------
+// Suite D63 — G1-a: the isolated-date block now starts at an empty run LONGER THAN 7 calendar days
+// A mistyped date close to the data (wrong month, a row 10 days after the end) used to only warn and still stretched the
+// planning horizon (N_min 7 -> 3 in a probe). Rule: empty run of 8 or more days between two data dates AND the smaller side
+// isolated (<= 1% of rows, min 1 / max 20) -> blocking error. All expectations hand-derived from the dates below.
+// Fixture: Mon-Fri 12-16 Oct 2026, 90 intervals; last data day Fri 16 Oct. Empty days to a stray on date S = (S - 16 Oct) - 1.
+// ---------------------------------------------------------------
+console.log('\n--- Suite D63: G1-a stray date blocks from 8 empty days ---');
+{
+  const cats63: CategoryConfig[] = [{ id: 'g', name: 'General', ahtMinutes: 30, shrinkagePct: 0.2, priority: 1 }];
+  const mapping63: any = { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' };
+  const d63 = (offset: number, h = 8, m = 0): Date => new Date(2026, 9, 12 + offset, h, m); // offset from Mon 12 Oct 2026
+  const iv63 = (start: Date, i = 0): StandardInterval => ({ intervalIndex: i, start, end: new Date(start.getTime() + 30 * 60000), volume: 6, category: 'General' });
+  const week63 = (firstOffset = 0): StandardInterval[] => {
+    const out: StandardInterval[] = [];
+    for (let d = 0; d < 5; d++) for (let slot = 0; slot < 18; slot++) out.push(iv63(d63(firstOffset + d, 8 + Math.floor(slot / 2), (slot % 2) * 30), out.length));
+    return out;
+  };
+  const dq63 = (iv: StandardInterval[]) =>
+    validateDataQuality({ intervals: iv, mapping: mapping63, categories: cats63, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, openingWIP: [] });
+  const iso63 = (r: ReturnType<typeof dq63>) => r.issues.find((i) => i.severity === 'error' && /isolated/i.test(i.field + i.message));
+  const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const tags = (r: ReturnType<typeof dq63>) => JSON.stringify(r.issues.map((i) => i.severity + ':' + i.field));
+  const wk63 = week63();
+
+  // 1. Near stray date blocks (after and before the data)
+  const after = dq63([...wk63, iv63(d63(14, 9), 9999)]); // Mon 26 Oct: 9 empty days
+  const eAfter = iso63(after);
+  assert(after.passed === false && !!eAfter, 'D63.1 a stray row 10 days after the data (9 empty days): BLOCKING error', tags(after));
+  assert(!!eAfter && eAfter.message.includes('2026-10-26') && eAfter.message.includes('1 row') && eAfter.message.includes('2026-10-12') && eAfter.message.includes('2026-10-16') && /\b9\b/.test(eAfter.message), 'D63.2 the message names the date, 1 row, the main range (2026-10-12 to 2026-10-16) and the 9 empty days', eAfter?.message);
+  const before = dq63([...wk63, iv63(d63(-9, 9), 9999)]); // Sun 3 Oct: 8 empty days (4..11 Oct)
+  assert(before.passed === false && !!iso63(before) && iso63(before)!.message.includes('2026-10-03'), 'D63.3 a stray row 9 days BEFORE the data (8 empty days): blocked, naming the date', tags(before));
+
+  // 2. Month typo blocks
+  const typo = dq63([...wk63, iv63(new Date(2026, 10, 13, 9, 0), 9999)]); // Fri 13 Nov (typed 11 for 10)
+  assert(typo.passed === false && !!iso63(typo) && iso63(typo)!.message.includes('2026-11-13'), 'D63.4 an October week plus one row a month later: blocked', tags(typo));
+
+  // 3. Normal gaps do not block
+  const next = dq63([...wk63, ...week63(7)]); // Mon-Fri, then next Mon-Fri: 2 empty days
+  assert(next.passed === true && !iso63(next) && next.issues.length === 0, 'D63.5 consecutive weeks (2 empty days): no issue at all', tags(next));
+  const closure9 = dq63([...wk63, ...week63(14)]); // Mon 26 Oct: 9 empty days, 90 rows each side
+  assert(closure9.passed === true && !iso63(closure9), 'D63.6 a 9-day closure with substantial data on both sides: not blocked', tags(closure9));
+  const e7 = dq63([...wk63, iv63(d63(12, 9), 9999)]); // Sat 24 Oct: 17..23 Oct = 7 empty days
+  assert(e7.passed === true && !iso63(e7), 'D63.7 isolated row after exactly 7 empty days: not blocked (boundary)', tags(e7));
+  const e8 = dq63([...wk63, iv63(d63(13, 9), 9999)]); // Sun 25 Oct: 8 empty days
+  assert(e8.passed === false && !!iso63(e8) && iso63(e8)!.message.includes('2026-10-25'), 'D63.8 isolated row after 8 empty days: blocked', tags(e8));
+
+  // 4. Small files are safe: 15 rows on Mon 12 Oct, 15 rows on Thu 22 Oct (9 empty days), neither side isolated (limit = 1)
+  const small: StandardInterval[] = [];
+  for (let s = 0; s < 15; s++) small.push(iv63(d63(0, 8 + Math.floor(s / 2), (s % 2) * 30), small.length));
+  for (let s = 0; s < 15; s++) small.push(iv63(d63(10, 8 + Math.floor(s / 2), (s % 2) * 30), small.length));
+  const rSmall = dq63(small);
+  assert(!iso63(rSmall), 'D63.9 two days 10 days apart with 15 rows each: no isolated-date error', tags(rSmall));
 }
 
 console.log('\n==================================================');

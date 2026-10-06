@@ -902,7 +902,7 @@ workload but **excluded from the SLA numerator/denominator and the wait-time mea
 reported (`overdueAtStartCount`, Results note, case CSV column, data-quality warning). Without D4, ordinary Friday
 carry-over would fail at every headcount and drive the search to its cap. Attainable old backlog is scored against its
 original deadline; its wait is measured from `max(clockStart, horizonStart)`. (4) Data quality: an isolated stray date
-(an empty run of more than 30 days whose smaller side holds at most 1% of the rows, 1-20 rows) **blocks the run**; other
+(an empty run of more than 7 days whose smaller side holds at most 1% of the rows, 1-20 rows) **blocks the run** (threshold tightened from 30 to 7 empty days, same day, owner-approved: G1-a, suite D63); other
 empty runs over 30 days extend the coverage-gap warning; backlog arriving more than 30 days before the first interval
 and the overdue-at-start count are warnings. Frozen decisions 1-11 are untouched (occupancy stays demand / planned
 capacity; the planned horizon is now the demand span).

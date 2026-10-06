@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft — as-built specification |
-| **Version** | 1.16.0 |
+| **Version** | 1.16.1 |
 | **Date** | 2026-10-06 |
 | **Owner** | _(unassigned)_ |
 | **Product** | Backoffice WFM Sizing Engine |
@@ -265,7 +265,7 @@ Acceptance criteria are written to be testable against current behaviour.
 | 16 | Labor Off Days | warning | `offDaysPerWeek === 0` on a non-24/7 calendar — often the residue of toggling 24/7 back off |
 | 17 | Manual Agent Hours Override | warning | Override active and far out of scale (>3× or <⅓) vs. `dailyProductiveHours × calendarWorkingDaysInHorizon` |
 | 18 | Calendar/Data Coverage Gap | warning | A calendar-open day inside the horizon has zero uploaded rows (only when every timestamp parsed cleanly, to avoid a wall-clock-dependent horizon fallback). When the data also holds an empty run of more than 30 consecutive days that is *not* an isolated stray (a genuine closure with substantial data on both sides), the warning text says so |
-| 19 | Isolated Date(s) | **error** | A run of **more than 30 consecutive empty calendar days** separates the data and the smaller side holds at most 1% of the rows (minimum 1, maximum 20 rows) — a stray or mistyped date. Names the isolated date(s), their row count and the main data range. Only when every timestamp parsed cleanly (G1, 2026-10-06) |
+| 19 | Isolated Date(s) | **error** | A run of **more than 7 consecutive empty calendar days** (8 or more) separates the data and the smaller side holds at most 1% of the rows (minimum 1, maximum 20 rows) — a stray or mistyped date, including a near one such as a wrong month. Names the isolated date(s), their row count, the number of empty days and the main data range. Only when every timestamp parsed cleanly (G1, 2026-10-06; threshold tightened from 30 to 7 days in G1-a, same day) |
 | 20 | Old Backlog Arrival | warning | An opening-backlog case arrived more than 30 calendar days before the first demand interval; names the oldest case. Harmless to capacity (the horizon is the demand span) — flags typos such as a wrong year |
 | 21 | Opening WIP Overdue at Start | warning | N opening-backlog cases arrived before the first interval and cannot meet their deadline even if work starts at the first working instant (rule D4, §6): worked and counted as workload, excluded from the SLA % and the wait-time mean |
 
@@ -1128,12 +1128,12 @@ comment. Nothing else.
 
 ## 9. Validation and quality
 
-### 9.1 Automated test suites — 1,041 checks (174 + 643 + 60 + 164 trusted-source)
+### 9.1 Automated test suites — 1,050 checks (174 + 652 + 60 + 164 trusted-source)
 
 | Suite | Tests | Covers |
 |---|---|---|
 | `scripts/verify-fixes.mts` | 174 | Legacy regression: CSV parsing, date handling, calendar arithmetic, CRN consistency, occupancy semantics, standalone artifact integrity, analytical infeasibility diagnosis, 24x7 midnight budget accounting |
-| `scripts/verify-sizing-fixes.mts` | 643 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement, fair agent assignment (D43: spread bounds, determinism, EDF order pinned to the pre-change engine, OFF = original HC, HC pins on pooled/siloed/staggered/24x7; D44: no double-booking in gated 24x7 runs; D45: availability accrual and pinned HC of the three built-in samples; D47: Workload Floor toggle; D48: clock-start derivation; D49: pinned HC of `test_files/AJM_Only.csv`; D50/D51/D52: roster polish at fixed HC — pooled, siloed guard, per-queue search; D53: Results use run-time settings; D54: number fields keep what is typed; D55-D61 (G12): the frozen sizing decisions are guarded by tests — dispatch order incl. the priority tie-break, business-calendar `latestSafeStart`, CI-gated acceptance (primary / per-category / occupancy cap / ASA each use the confidence bound, not the mean), Common Random Numbers, unfinished cases in the SLA denominator, Gross HC and harmonic shrinkage, volume rounding; each proven red against its own mutation; D62 (G1): horizon from demand only, backlog injection clamp, rule D4 overdue-at-start scoring, search N_min/N_occ/recommendation with old and Friday backlog (sync = async), and the three new data-quality rules) |
+| `scripts/verify-sizing-fixes.mts` | 652 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement, fair agent assignment (D43: spread bounds, determinism, EDF order pinned to the pre-change engine, OFF = original HC, HC pins on pooled/siloed/staggered/24x7; D44: no double-booking in gated 24x7 runs; D45: availability accrual and pinned HC of the three built-in samples; D47: Workload Floor toggle; D48: clock-start derivation; D49: pinned HC of `test_files/AJM_Only.csv`; D50/D51/D52: roster polish at fixed HC — pooled, siloed guard, per-queue search; D53: Results use run-time settings; D54: number fields keep what is typed; D55-D61 (G12): the frozen sizing decisions are guarded by tests — dispatch order incl. the priority tie-break, business-calendar `latestSafeStart`, CI-gated acceptance (primary / per-category / occupancy cap / ASA each use the confidence bound, not the mean), Common Random Numbers, unfinished cases in the SLA denominator, Gross HC and harmonic shrinkage, volume rounding; each proven red against its own mutation; D62 (G1) + D63 (G1-a: stray date blocks from 8 empty days): horizon from demand only, backlog injection clamp, rule D4 overdue-at-start scoring, search N_min/N_occ/recommendation with old and Friday backlog (sync = async), and the three new data-quality rules) |
 | `scripts/verify-agent-analytics.mts` | 60 | Export timestamps equal the on-screen formatter; agent analytics reconcile to `completedCases` / `totalHandlingMinutes` / `agentFairness`; work-share case credit |
 | `scripts/verify-trusted-source.mts` (`npm run test:trusted-source`) | 164 | Hand-derived ground truth in `trusted-source-validation.json` (T0 invariants 35, T1 domain algebra 71, T2 hand-traced DES 31, T3 characterization 27). Authored under `Asia/Dubai`; on any other host timezone it prints a warning and continues (verified: all 164 pass under UTC, America/New_York, Asia/Tokyo, Pacific/Auckland, Europe/London) |
 | `scripts/audit-compare.mts` (`npm run test:audit`, opt-in, ~30 min) | 24 cells | Re-runs all four `test_files/` samples × 6 settings and fails on any difference from `docs/audit/sample-hc-after-2026-09-30.jsonl` |

@@ -898,10 +898,10 @@ export function validateDataQuality(params: {
     });
   }
 
-  // G1 — empty runs longer than 30 calendar days between data dates (days sorted explicitly; Map order is insertion order).
+  // G1 / G1-a — empty runs between data dates (days sorted explicitly; Map order is insertion order).
   // The planning horizon is the demand span, so a mistyped date years away would make the plan span the empty gap and
-  // understate the sizing. An ISOLATED stray (the smaller side of the gap holds <= 1% of the rows, min 1 / max 20 rows)
-  // blocks the run. Any other long run (a genuine closure with substantial data on both sides) only extends the
+  // understate the sizing. A run LONGER THAN 7 calendar days (8 or more empty days) next to an ISOLATED stray (the smaller side of the gap holds <= 1% of the rows, min 1 / max 20 rows)
+  // blocks the run. Any other run longer than 30 days (a genuine closure with substantial data on both sides) only extends the
   // coverage-gap warning below. Only meaningful once every timestamp parsed cleanly.
   const longEmptyRuns: Array<{ from: number; to: number; emptyDays: number }> = [];
   if (invalidTimestamps.length === 0 && rowsByDayMs.size > 1) {
@@ -910,23 +910,26 @@ export function validateDataQuality(params: {
     for (const d of dayList) totalRows += rowsByDayMs.get(d) ?? 0;
     const isolatedLimit = Math.min(20, Math.max(1, totalRows * 0.01));
     const isolatedDays = new Set<number>();
+    const isolatedGapDays: number[] = [];
     let rowsBefore = 0;
     for (let k = 0; k + 1 < dayList.length; k++) {
       rowsBefore += rowsByDayMs.get(dayList[k]) ?? 0;
-      // More than 30 empty days between two data days <=> the next data day is 32 or more calendar days later.
+      // More than 7 empty days between two data days <=> the next data day is 9 or more calendar days later.
       const gapLimit = new Date(dayList[k]);
-      gapLimit.setDate(gapLimit.getDate() + 32);
+      gapLimit.setDate(gapLimit.getDate() + 9);
       if (dayList[k + 1] < gapLimit.getTime()) continue;
       const rowsAfter = totalRows - rowsBefore;
+      const emptyDays = Math.round((dayList[k + 1] - dayList[k]) / 86400000) - 1;
       if (Math.min(rowsBefore, rowsAfter) <= isolatedLimit) {
+        isolatedGapDays.push(emptyDays);
         // The smaller side (the earlier one on an exact tie) is the isolated one.
         if (rowsBefore <= rowsAfter) {
           for (let q = 0; q <= k; q++) isolatedDays.add(dayList[q]);
         } else {
           for (let q = k + 1; q < dayList.length; q++) isolatedDays.add(dayList[q]);
         }
-      } else {
-        longEmptyRuns.push({ from: dayList[k], to: dayList[k + 1], emptyDays: Math.round((dayList[k + 1] - dayList[k]) / 86400000) - 1 });
+      } else if (emptyDays > 30) {
+        longEmptyRuns.push({ from: dayList[k], to: dayList[k + 1], emptyDays });
       }
     }
     if (isolatedDays.size > 0) {
@@ -939,7 +942,7 @@ export function validateDataQuality(params: {
       issues.push({
         severity: 'error',
         field: 'Isolated Date(s)',
-        message: `Isolated date(s) far from the rest of the data: ${shownIso}${moreIso} (${isolatedRows} row${isolatedRows === 1 ? '' : 's'}), more than 30 days away from the main data range ${formatDate24(new Date(mainDays[0]))} to ${formatDate24(new Date(mainDays[mainDays.length - 1]))}.`,
+        message: `Isolated date(s) far from the rest of the data: ${shownIso}${moreIso} (${isolatedRows} row${isolatedRows === 1 ? '' : 's'}), separated by ${isolatedGapDays.join(' and ')} empty day${isolatedGapDays.length === 1 && isolatedGapDays[0] === 1 ? '' : 's'} (more than 7) from the main data range ${formatDate24(new Date(mainDays[0]))} to ${formatDate24(new Date(mainDays[mainDays.length - 1]))}.`,
         details: 'Check for a mistyped date (for example a wrong year) and correct or remove those rows before running. The planning horizon is the span of the demand data, so a stray date would stretch it across the empty gap and understate the headcount.',
       });
     }
