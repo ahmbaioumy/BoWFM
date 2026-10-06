@@ -247,3 +247,18 @@ New items:
 **Overall order across all phases:** **H1** (typed values, confirmed under-staffing) → **G12** (tests) → **G1** (horizon) → F2 → F3 → G2–G5 + H2 + H6 (input safety) → G6 + H9, G7 + H5 → H3, H4 → H10, H11 → G8/F1 → F4–F6 → G9, G10 → H7, H8, H12, rest.
 
 Next: phase 4 (docs vs code, plus the leftovers in "Not audited"), in a new session after the weekly reset.
+
+---
+
+# Phase 4 plan — docs vs code (resume point)
+
+State at start: weekly meter 17%. Hard stop 20%. No new agent at a meter reading of 19%. One agent at a time, meter read before and after each. Read-only. Pre-plan challenger skipped (budget).
+
+| # | Slice | Agent | Check |
+|---|---|---|---|
+| P4-1 | `PRD.md` lines 1-684 (overview, journey, section 5 functional requirements) | sonnet-investigator | Every stated behaviour, default, limit, label and rule vs the code; report doc-says / code-does mismatches |
+| P4-2 | `PRD.md` lines 684-1465 (methodology, design decisions, non-functional, validation, limitations, backlog, glossary) | sonnet-investigator | Formulas and decisions vs code; limitations and backlog items still true; check counts |
+| P4-3 | `project_context.md` (1116) + `CLAUDE.md` (178) | sonnet-investigator | Architecture map, commands, frozen decisions, conventions, open-items list vs code and `package.json` |
+| P4-4 | Final challenge | challenger | Only if meter reads below 19% |
+
+Not in scope this session unless budget remains: `docs/wfm/*.md` (1742 lines), leftover UI panels. Steps not reached are listed as not audited.
