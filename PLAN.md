@@ -679,3 +679,12 @@ Weekly cap 40% (owner: "increase and resume", +5 step assumed). Meter at plan ti
 | 6 | Screen | Browser: placement ON run where polish is adopted: confidence block and headline no longer contradict each other |
 | 7 | Mutation proof | Remove the two assignments in a scratch copy: new tests fail |
 | 8 | Gates, docs, artifact, scope | lint, `npm test`, `check:artifact` green; docs updated; diff only scope-lock files |
+
+## F3 plan — challenger verdict: FAIL on test design (core design sound). Revisions accepted; these override the sections above:
+
+- **Criterion and test (h) replaced:** "agree" means the headline run equals the adopted evaluation representative run: `finalDESResult.primaryAchievedPct` equals `primaryPassedResult.representativeResult.primaryAchievedPct` for the adopted roster (builder confirms the audit seed reproduces that replication; if it does not: STOP and report). CI containment of a single run is NOT asserted.
+- **Blast radius stated in full:** with placement ON and polish adopted, the representative replication index changes, so these may legitimately change and are listed before/after: `finalDESResult` (headline run), the N-1 boundary run and `boundaryEvidence`, `differenceSummary`, `isInfeasibleAdjacent` / its warning text, and the occupancy/ASA binding label. Criterion 3 reworded: recommended HC, adopted roster and `rosterPolish` identical; the listed fields are expected to change.
+- Siloed path confirmed safe by the challenger (`hc-search.ts:1224-1236`: the adopted vector is always an evaluated, passing one). The evaluation map must use the same key function as `createParallelRosterKSearch` (`idOf`, `:1182`).
+- `primaryPassedResult` is reassigned strictly AFTER `finalizeRosterPolish` (so `rosterPolish.currentSlaPct` stays the pre-polish median, `:2797`).
+- When `coverageIsBetter` fails or nothing is adopted the helper returns nothing and behaviour is as today.
+- Added tests: default of `labor.shiftPlacementEnabled` is OFF (pinned); placement-OFF full-result digest identical; binding label pinned on the polish fixture; sync = async compared on the full result including boundary evidence.
