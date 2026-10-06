@@ -173,7 +173,7 @@ Bo_4Final-main/
 │   ├── verify-fixes.mts          ← legacy regression suite (174 tests)
 │   ├── verify-sizing-fixes.mts   ← sizing-chain suite (589 tests)
 │   ├── verify-agent-analytics.mts ← export-timestamp + agent-analytics suite (60 tests)
-│   ├── verify-trusted-source.mts ← ground-truth benchmark runner (164 checks; needs TZ Asia/Dubai)
+│   ├── verify-trusted-source.mts ← ground-truth benchmark runner (164 checks; authored under TZ Asia/Dubai, warns but runs on any TZ)
 │   └── check-artifact-freshness.mts ← BoWFM.html mtime gate
 └── src/
     ├── App.tsx                   ← state machine, navigation, orchestration
@@ -858,7 +858,7 @@ npm run test:sizing   # sizing-chain suite only (faster)
 | `scripts/verify-sizing-fixes.mts` | 589 | Sizing chain — `D1` working-day counting, `D3` apportionment monotonicity, `D7` staffing-chain integrity, `D9` offline enforcement, `D20`-`D26` deadline-coverage shift placement (Stage 3a: valid-slap enumeration, no-regression, greedy monotonicity/optimality, I1/I2 invariants under staggering, seed determinism, positive control, I4 occupancy-ceiling regression guard), `D27` day-open telemetry off-by-one, `D28` fast-path/full-path attainment agreement, `D29` I5 per-agent stagger-offset compliance (check #8), `D30`/`D31` shift-end enforcement + in-flight case handover, `D32`/`D33` minimum-coverage floor + flag-independent redistribution repair, `D34` N_sla walk-down safety-net fix, `D35` adherence/capacity conflation closed-form pin, `D36` 24×7 coverage-gate regression fix, `D37` real 24×7 multi-start (staggering, shift-end, coverage repair), `D38` "exact minimum" wording pin (source-text based — the message is unreachable dead code), `D39` empirical monotonicity sweep for the uniform-only predicate (N=1..25, no violation found), `D40` extra-OFF coverage-ratio fix (ratio table sweep + integer-exactness cases — see §6.4a), `D41` non-blocking DQ warnings for zero off-days / override-vs-horizon scale / calendar-open days with no uploaded rows, `D47` Workload Floor toggle, `D48` clock-start derivation, `D49` pinned HC of `test_files/AJM_Only.csv`, `D50`/`D51`/`D52` roster polish at fixed HC (pooled / siloed guard / per-queue search), `D53` Results use run-time settings, `D54` number fields keep what is typed, `D55`-`D61` (G12) tests that protect the frozen sizing decisions: dispatch order + priority tie-break + parked-first, business-calendar `latestSafeStart`, CI gates (primary / per-category / occupancy / ASA use the bound, not the mean), CRN, unfinished-in-denominator, Gross HC + harmonic shrinkage, volume rounding — each shown red under its own mutation (see §11) |
 | `scripts/audit-compare.mts` (`npm run test:audit`, opt-in, ~30 min) | 24 cells | All four `test_files/` samples × 6 settings, diffed against `docs/audit/sample-hc-after-2026-09-30.jsonl`; exits 1 on any difference |
 | `scripts/verify-agent-analytics.mts` | 60 | `EX` export timestamps == on-screen formatter (fixed UTC+4 TZ, midnight-crossing, real engine rows, static no-`toISOString` guard); `AA` agent analytics (reconciles to `completedCases`/`totalHandlingMinutes`/`agentFairness`, date/category/agent filters, determinism, late cohorts); `AW` work share (split case 0.75/0.25, totals == finished, slice-date attribution, avg handle) + single-agent-cover insight fixtures |
-| `scripts/verify-trusted-source.mts` (`npm run test:trusted-source`) | 164 | Hand-derived ground truth in `trusted-source-validation.json` (see §9.2); **part of `npm test` since 2026-10-06**. Aborts with exit 1 unless the host timezone is `Asia/Dubai` |
+| `scripts/verify-trusted-source.mts` (`npm run test:trusted-source`) | 164 | Hand-derived ground truth in `trusted-source-validation.json` (see §9.2); **part of `npm test` since 2026-10-06**. Authored under `Asia/Dubai`; a different host timezone only prints a warning and the run continues (all 164 verified under UTC, America/New_York, Asia/Tokyo, Pacific/Auckland, Europe/London) |
 | `scripts/check-artifact-freshness.mts` | gate | Fails if `BoWFM.html` is missing or older than `src/` / build inputs (`npm run check:artifact`) |
 
 If a legacy test fails after your change, the default assumption is that **your change is
@@ -884,7 +884,7 @@ For any behavioural fix:
 1. **Write the test first.**
 2. **Run it and capture the failure.** A test that has never failed proves nothing.
 3. Apply the fix.
-4. Re-run: new test passes, both suites stay green.
+4. Re-run: new test passes, all four suites stay green.
 5. Report the fail-before output as evidence.
 
 Include a **control case** — a near-identical scenario that passes both before and after. If
@@ -935,7 +935,7 @@ optional `details`. **`error` blocks the simulation; `warning` does not** —
 2. Check `docs/wfm/07-known-defects-and-decisions.md` in case it is deliberate.
 3. Write a test pinning the *current* behaviour, and a test pinning the *intended* behaviour.
 4. Confirm the second fails, then change the formula.
-5. Run both suites; investigate every delta.
+5. Run all four suites; investigate every delta.
 
 ### Debug a headcount that looks wrong
 Work down the chain in order — the fault is almost always upstream of where it is noticed:
