@@ -816,3 +816,36 @@ Open after G12:
 - G12-b (minor): a CI lower bound exactly equal to the target (`>=` vs `>`) is not pinned by any test.
 - G12-c (minor): `CaseMinHeap.compare` ordering is untested and does not decide dispatch (DES-15); docs still name it as real dispatch (DOC-40, fix J1).
 - Stale doc lines left: `PRD.md:9` file size; `project_context.md:887`, `:938` "both suites".
+
+---
+
+# FIX G1 — planning horizon from demand data only — BUILT, awaiting owner approval (2026-10-06)
+
+Branch `fix/g1-horizon` (stacked on `fix/g12-tests`), commit `920f3fd` (checkpoint `6f6b001`). Also on `fix/g12-tests`: `4f6a2a7` trusted-source timezone lock relaxed to a warning (164/164 green in 6 timezones). Closes CSV-13, CSV-14 (isolated stray date), and the three-copy horizon duplication. Weekly cap raised by the owner to 30%.
+
+Owner decisions applied: stray isolated date blocks the run; backlog already overdue at the plan start is excluded from the SLA % and wait-time checks and reported separately.
+
+| Scenario (Mon-Fri week, 540 cases, AHT 30) | Before: days / N_min / recommended | After |
+|---|---|---|
+| No backlog | 5 / 7 / 8 | 5 / 7 / 8 |
+| + 1 backlog case 14 days old, 6 h SLA | 15 / 2 / 7 | 5 / 7 / 8 |
+| + 1 backlog case 14 days old, 3-day SLA | 15 / 2 / 5 | 5 / 7 / 8 |
+| + 50 old backlog cases | 15 / 2 / 7 | 5 / 7 / 8 (workload +25 h, all worked) |
+| + 40 backlog cases overdue at start (2 h SLA) | n/a | 40 flagged, all completed, SLA 532/540 over the rest, recommended 10 |
+
+| Reviewer | Verdict | Evidence |
+|---|---|---|
+| Plan challenger | fail, then plan revised | found the overdue-at-start problem before any code was written |
+| Builder gates | green | red-first: 34 new checks failed on the old engine; lint clean; `npm test` 174 + 643 + 60 + 164 = 1,041; `test:audit` 24/24 sample headcounts identical; artifact fresh; no existing test expectation changed |
+| Tester (own scripts + browser) | **pass**, 12 of 12 | numbers recomputed by hand; sync = async; zero work before the horizon; note, badge and blocking message seen on screen; samples 31/40, 27/34, 31/39; zero console errors |
+| Auditor | **pass** | scope exact; exclusion applied consistently; frozen decisions untouched; sync and async edits identical |
+| Final challenger | **pass**, with dissent | see open items |
+
+Open after G1:
+- **G1-a (major, recommended next):** a stray date within 30 days of the data (e.g. a month typo) still stretches the horizon with only a warning: probe N_min 7 to 3, recommended 8 to 7. Proposed rule: block when the smaller side is isolated (no more than 1% of rows) and the gap exceeds max(14 calendar days, length of the main data span).
+- G1-b (minor): excluded backlog has no completion requirement in the gate; EDF works it first and the tester saw all completed, but add a warning when any overdue-at-start case is left unfinished.
+- G1-c (accepted consequence of the owner rule): a backlog case just inside its deadline is scored, one a few minutes older is excluded, so older backlog can give a slightly lower headcount. Bounded: excluded cases still add workload and are worked first.
+- G1-d (minor): one day of demand plus a week of attainable dated backlog now packs all workload into one capacity day (over-sizes, no note).
+- G1-e (minor): wait time for attainable old backlog is measured from the plan start; label it. Case CSV still shows FAIL for a late flagged case next to the new column; per-case wait is still listed for flagged cases.
+- G1-f (minor): data-quality check swallows an engine error silently when counting overdue backlog on a broken calendar; hand-rolled day arithmetic in `csv-parser.ts` (message and block decision only, DST-safe).
+- Correction to my brief: a Friday 15:00 backlog case with a 6-business-hour SLA is NOT overdue on Monday under the default 08:00-18:00 calendar (due Monday 11:00); the engine handled it correctly.
