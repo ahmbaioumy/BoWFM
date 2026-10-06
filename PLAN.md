@@ -37,26 +37,35 @@
 3. Dispatch `challenger` on `PLAN.md`; fix what holds up. *(Plan mode blocked writing `PLAN.md` before approval.)*
 4. `MAP.md` skipped: line ranges below already cover it.
 
-## Phase 1 steps — in this order, one agent each
+## Phase 1 steps — in this order, one agent each (re-cut after challenger review, round 0)
 
 | # | Slice | Agent | What "deep" means here |
 |---|---|---|---|
-| 1 | Health baseline | `tester` | `npm run lint`, `npm test`, `npm run test:trusted-source`. Records pass counts so later findings are judged against a known-green or known-red start |
-| 2 | `calendar.ts` (564 lines, whole file) | `sonnet-investigator` | Line by line: half-open `[start,end)` bounds, backwards walk in `subtractWorkingTime`, day-boundary and 24x7 edge cases, off-by-one days |
-| 3 | `des-engine.ts:720-1500` (event loop, part 1) | `sonnet-investigator` | Dispatch order, presence (`countAgentsOnShiftNow` at 1214), adherence as budget not gap, event ordering ties |
-| 4 | `des-engine.ts:1500-2375` (event loop, part 2 + invariants) | `sonnet-investigator` | Occupancy numerator/denominator, drain window, SLA attainment counting, `verifyAgentTimelineInvariants` |
-| 5 | `hc-search.ts:1-1200` (demand → workload → `N_min`) | `sonnet-investigator` | Shrinkage absent from Stage 2, units (minutes/hours/days), precision kept until display |
-| 6 | `hc-search.ts:1200-2356` (shrinkage, gross-up, `resolveSearchBounds`) | `sonnet-investigator` | Harmonic blend, per-category gross-up then sum then single `round`, floor on/off bounds |
-| 7 | Independent recompute | `tester` | Works out `N_min` and Gross HC for the sample dataset **by hand a second way** and compares with engine output |
-| 8 | `hc-search.ts:2357-end` (sync vs async search) | `sonnet-investigator` | Block-by-block diff of `searchOptimalHC` and `searchOptimalHCAsync`; CI gate direction, CRN reuse, any logic present in one only |
-| 9 | `des-engine.ts:1-719` (heap, PRNG, apportionment, case generation) | `sonnet-investigator` | EDF compare vs `compareByUrgency`, seed determinism, Webster apportionment monotone, Map/Set order |
-| 10 | Final challenge | `challenger` | Attacks the findings: wrong, overstated, or missed |
+| 1 | Health baseline | `tester` | `npm run lint`, `npm test`, `npm run test:trusted-source`. `git status --short` before and after. A freshness-check failure is informational only — never rebuild |
+| 2 | `calendar.ts` (564 lines, whole file) | `sonnet-investigator` | Half-open `[start,end)` bounds, backwards walk in `subtractWorkingTime`, day-boundary and 24x7 edge cases, off-by-one days |
+| 3 | `des-engine.ts:1-719` (heap, PRNG, apportionment, case generation) | `sonnet-investigator` | EDF compare vs `compareByUrgency`, seed determinism, Webster apportionment monotone, Map/Set order |
+| 4 | Independent recompute | `tester` | `N_min` and Gross HC only (DES-recommended HC cannot be hand-computed). Formulas written fresh from `docs/wfm/` + `CLAUDE.md`, **no engine imports**, script in the scratchpad dir. Also reads `default-config.ts` and `run-inputs.ts` |
+| 5 | `hc-search.ts:1-212` + `1300-1688` (`computeAnalyticalNMin`, `computeOccupancyFloor`, `calculateStaffingRequirement`) | `sonnet-investigator` | Shrinkage absent from Stage 2, harmonic blend, per-category gross-up then sum then single `round`, units, precision |
+| 6 | `des-engine.ts:720-1500` (`runBackofficeDES`, part 1) | `sonnet-investigator` | Dispatch, presence (`countAgentsOnShiftNow` 1214), adherence as budget. Ends with an interface summary handed to step 7 |
+| 7 | `des-engine.ts:1500-2375` (part 2 + invariants) | `sonnet-investigator` | Occupancy numerator/denominator, drain window, SLA counting, `verifyAgentTimelineInvariants`. Receives step 6's interface summary |
+| 8 | `hc-search.ts:1689-2356` (CI statistics, `resolveSearchBounds`) | `sonnet-investigator` | CI bound direction, floor on/off bounds |
+| 9 | `hc-search.ts:2357-3829` (sync vs async search, known risk D11) | `sonnet-investigator` | Mechanical diff of the two functions first, then read only the hunks that differ |
+| 10 | `hc-search.ts:213-1299` (shift placement, roster polish) | `sonnet-investigator` | Lowest risk to headline HC |
+| 11 | Final challenge | `challenger` | Attacks the findings: wrong, overstated, or missed |
+
+Budget rules added after challenger review:
+- Cost of steps 1–2 is measured; if the average is above ~1.5 points per agent, later steps are dropped up front.
+- No audit agent starts at or above **15.5%**, so the final challenger (step 11) always has room. Challenger itself starts only below 17.5%.
+- Not covered by phase 1, carried to phase 2: `src/types/wfm.ts`, `src/utils/agent-analytics.ts`, `src/utils/export-rows.ts`.
 
 Rules given to every agent:
 - Read-only. No edits to project files.
 - Read the whole slice, not excerpts. Report by `file:line`.
 - Look for: logic errors, unit mix-ups, off-by-one, float `===`, unsorted Map/Set iteration, `Math.random`/`Date.now`, hand-rolled date math, rounding before the display boundary, breaches of the 11 frozen decisions in `CLAUDE.md`.
-- Do **not** re-report items already written down as open (PRD §10 L1–L18, §11 backlog, `project_context.md` §11) unless docs say "fixed" and code says otherwise.
+- Do **not** re-report items already written down as open (PRD §10 L1–L18, §11 backlog, `project_context.md` §11) unless docs say "fixed" and code says otherwise, or the real impact is worse than the doc states.
+- A bug in *how* the floor/ceiling is implemented is reportable; a proposal to change the design is not.
+- `calendar.ts` is the allowed home of `Date` math — not a finding there.
+- A finding that needs a number check may be marked "suspected, needs recompute".
 - Do **not** propose changing the `N_min` floor, the occupancy ceiling, or SLA inelasticity (L16) — settled.
 - Standard `VERDICT / FINDINGS / NEXT ACTION` format. No evidence → dropped.
 
@@ -78,7 +87,7 @@ Rules given to every agent:
 | Criterion | Proof |
 |---|---|
 | Usage cap respected | Final `get_usage` reading ≤ 20%, quoted in the report |
-| Each step 1–10 is done or marked "not audited" | Status table in `FINDINGS.md` |
+| Each step 1–11 is done or marked "not audited" | Status table in `FINDINGS.md` |
 | Every finding has evidence | `file:line`, command output, or recompute working |
 | Numbers checked a second way | Step 7 hand calculation shown next to engine output |
 | No product code changed | `git diff main --stat` shows only `PLAN.md` and `FINDINGS.md` |
