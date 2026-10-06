@@ -378,3 +378,54 @@ Clean (staggered non-24x7, 40 seeds, pooled + siloed, my own tally from the agen
 | UI-8 | minor (dead code) | Zero readers: `LaborConfig.shifts`, `ShiftWindow` type, `SAMPLE_TEMPLATES`, `generate30MinInflowCSV`. | No. | `wfm.ts:27-35`, `:55`; `sample-data.ts:8-119` |
 
 Reconciled exactly (pooled HC 12 and siloed HC 21): total busy = engine `totalHandlingMinutes` (47,160); finished cases 1,572; work-share credits sum to 1,572; available, team occupancy and utilisation all equal a hand recompute. No NaN/Infinity/>100%. Results identical under UTC, UTC+4 and London. Exports match the screen (units, rounding, local-time stamps) and read the run's own results. All defaults match the PRD and every fallback literal in the code (no mismatch found).
+
+### P2-8 — final challenger on phase 2 — PASS with corrections (all accepted)
+
+| Challenge | Ruling |
+|---|---|
+| CSV-13 "blocker" overstated: needs a real old backlog date (default arrival = first interval start, `DemandFlow.tsx:234-235`, `:298-299`); default-SLA effect is −12%, the −44% needs a multi-day SLA | **Accepted.** Re-rated **major — top priority** (under-staffing, passes data quality, core feature). |
+| CSV-13 and CSV-14 are one root cause (`computeIntervalHorizon`) | **Accepted.** Merged into one item. |
+| Fix must NOT clamp backlog arrival — arrival also drives backlog deadlines (`des-engine.ts:557`) | **Accepted.** Fix = split "deadline clock start" from "capacity horizon" (horizon from demand intervals only) + a date-span guard. |
+| HC-20 is a model/expectation gap, not an engine error (headcount for an ideal roster) | **Accepted in part.** Stays major for the missing planner-facing note; engine not described as wrong. |
+| P2-A1 category priority is a documented feature (PRD FR-6.3) | **Accepted.** Downgraded to docs item. |
+| UI-1: a new demand file and mapping changes DO clear results (`App.tsx:179`, `:210`, `:237`, `:295`, `:303`) | **Accepted.** Narrowed to backlog edits/imports only. |
+| DES-7 is a documentation gap, not a frozen-decision change | **Accepted.** Stays major only for the default-backlog consequence. |
+| DES-10 realism | Kept **major (seasonal)**: year-end / Eid closures after a month-end peak are ordinary; direction is over-staff. |
+| TEST-4 plausible: the deadline comparison is reachable (`des-engine.ts:191-194`); no fixture has two SLA windows where a later arrival is due earlier | **Upheld.** |
+| CSV-5/6/7 and CSV-8 rated inconsistently | Fixed below: CSV-5/6/7 minor (blocked or unusual); CSV-8 merged into CSV-4 as major. |
+
+## Final ranked list (phase 2)
+
+| Rank | ID | Severity | What the planner experiences | Product or internal? |
+|---|---|---|---|---|
+| 1 | CSV-13 + CSV-14 | **major — top priority** | A dated backlog case (or one typo date) stretches the planning horizon; empty days count as capacity; recommendation −12% at default SLA, up to −44% with multi-day SLA; occupancy shown as 0.1–40%; data quality "passed" | Product — under-staffs |
+| 2 | P2-A2 (+ HC-14) | major | Minimal coverage-repair roster drives wait time: ASA gate ON → heavy over-staffing or "infeasible at any HC" on ordinary business-hours calendars | Product |
+| 3 | CSV-4 + CSV-8 | major | Comma-decimal and dirty volume cells read silently wrong (`12,5` → 125) | Product — wrong input |
+| 4 | CSV-1 | major | `Z`/offset timestamps land on different hours/days depending on the PC timezone | Product — wrong input |
+| 5 | CSV-16, CSV-17 | major | Case/space category variants split into phantom categories; categories on fallback AHT 30 / 20% never flagged | Product — wrong input |
+| 6 | CSV-2, CSV-3 | major | Ragged rows, duplicate headers, unterminated quote: data mangled or lost with no warning | Product — wrong input |
+| 7 | UI-1 | major | Results stay on screen, unflagged, after backlog is edited | Product — stale output |
+| 8 | UI-2 | major | Agent Analytics category filter (pooled) shows wrong occupancy/available | Product — wrong display |
+| 9 | HC-20 | major (missing note) | 24x7 + coverage OFF + uneven demand: number assumes any-hour scheduling; real fixed shifts need +10–40% | Product — expectation |
+| 10 | DES-10 | major (seasonal) | Holidays after the horizon turn not-yet-due cases into failures: up to +50% HC | Product — over-staffs |
+| 11 | DES-7 | major (design call) | Default opening backlog always outranks new cases: −6.6 SLA points, sometimes +1 head | Product |
+| 12 | CSV-15 | major (PRD promise unmet) | 30-minute interval rule can never fire; hourly/15-min data accepted silently | Product — wrong input shape |
+| 13 | P2-A3, HC-16, UI-3 | major (display) | Wrong binding-constraint label under ASA; N−1 evidence from a different roster; one label, two occupancy numbers | Display |
+| 14 | TEST-1, TEST-4..7 | major (tests) | Frozen decisions 2 (EDF), 8 (CI gate), 9 (CRN), the Gross HC total, and the SLA denominator can be broken with all 916 checks green; trusted-source suite not in `npm test` | Internal |
+| 15 | OFF-1, OFF-2, OFF-3 | major (guards) | Artifact gate is time-based only; `dependencies` rule unenforced; suite D9 thinner than documented | Internal |
+| — | CSV-5..7, CSV-9..12, CSV-18..22, UI-4..8, OFF-4..6, TEST-2/3/8, P2-A1, P2-A4, P2-B1, P2-N1 | minor / docs | See tables above | Mostly internal |
+
+Clean and proven in phase 2: workload floor never breached (18 runs, sync = async); siloed seats, isolation, per-category SLA, `N_occ`, occupancy, ASA all equal hand recomputes; staggered non-24x7 shifts (40 seeds, 0 violations incl. shift-end); holidays inside the horizon; offline contract in `src/` and in the shipped HTML; defaults vs PRD; exports vs screen; analytics totals.
+
+## Not audited (carry to phase 3)
+
+- All UI components line by line (`ResultsFlow.tsx`, `ConfigFlow.tsx`, `DemandFlow.tsx`, `RunFlow.tsx`, panels, modals) and the shipped `BoWFM.html` driven in a real browser.
+- Backlog (WIP) import with a date column against realistic file shapes; Excel-serial / `Z` dates through the UI path.
+- Whether the UI can produce degenerate calendars (CAL-2) or duplicate categories.
+- Staggered mode stale-event fuzz; Probe 1 on 24x7 and with 3+ categories.
+- `UAT_BO.xlsx`, `test_breaks.xlsx` (no loader). `test_complaint.csv` contents not checked for personal data.
+- Phase 4: docs vs code line by line.
+
+## Usage
+
+Weekly meter: 9% at phase 2 start → 15% after P2-8. Cap 20% respected.
