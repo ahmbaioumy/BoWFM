@@ -176,3 +176,20 @@ Backlog (minor): CSV-9..12, CSV-19..22, UI-4..8, OFF-4, OFF-5, TEST-2, TEST-3, T
 Suggested overall order across both phases: **G12** (tests first, so later fixes are protected) → **G1** → F2 → F3 → G2/G3/G4/G5 (input safety) → G6, G7 → G8 (with F1) → F4, F5, F6 → G9, G10 → G11, G13, F7–F10. One item per `/supervise` run.
 
 Phase 3 starts with: the UI components line by line and the shipped `BoWFM.html` in a real browser, plus the "not audited" list in `FINDINGS.md`.
+
+---
+
+# Phase 3 — UI and shipped file (approved 2026-10-06; resume point after compaction)
+
+State at start: weekly meter 15%. Hard stop 20%. No new audit agent at or above 17%; keep about 1 point for the write-up. One agent at a time, meter read (`get_usage`) before and after each. Read-only: no product code changes; findings go to `FINDINGS.md` after every agent; fix plan appended here at the end. Pre-plan challenger skipped to save budget; final challenger only if the meter is below 17.5%.
+
+| # | Step | Agent | What is checked |
+|---|---|---|---|
+| P3-1 | Shipped `BoWFM.html` in a real browser (`file:///`, `browser-automation` skill) | `tester` | Loads with no console errors and no network requests; load each built-in sample; run sizing end to end; headline HC / Gross HC / SLA / occupancy on screen equal a direct engine run with the same seed (claims: recommended 31, gross 40); edit backlog after a run (UI-1); category filter in Agent Analytics (UI-2); upload a bad file (comma decimals, title row, .xlsx) and record the messages |
+| P3-2 | `ResultsFlow.tsx:1-1200` | `sonnet-investigator` | Every displayed figure traced to its engine field: unit, rounding, label; live state vs run snapshot; `|| 100` style fallbacks (UI-4); crash paths on null/infeasible results |
+| P3-3 | `ResultsFlow.tsx:1200-2387` | `sonnet-investigator` | Same, plus exports and the fairness/agent tables (UI-3) |
+| P3-4 | `DemandFlow.tsx` (1227) | `sonnet-investigator` | Upload, mapping, backlog (WIP) entry and import incl. date column, data-quality display; can the UI create bad input states |
+| P3-5 | `ConfigFlow.tsx` (1292) + `CalendarConfigPanel.tsx` (428) | `sonnet-investigator` | Input clamps and validation; can the UI produce degenerate calendars (CAL-2: overnight window, 0:00-0:00, no working days), duplicate categories, shrinkage out of range; horizon copy at `ConfigFlow.tsx:70-85` |
+| P3-6 | `App.tsx`, `RunFlow.tsx`, `SensitivityFlow.tsx`, modals, `Sidebar.tsx`, `ParamsPanel.tsx`, `AgentAnalyticsPanel.tsx` | `sonnet-investigator` | State resets, cancel path, config import/export round trip, stale-state paths |
+
+Steps not reached are marked "not audited" and carried to the next session. Known findings not to re-report: everything in `FINDINGS.md` (IDs CAL-, DES-, HC-, CSV-, UI-, OFF-, TEST-, P2-).
