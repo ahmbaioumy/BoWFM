@@ -522,3 +522,31 @@ Weekly cap 25% (hard stop). Meter at plan time: 21%. No new agent at a reading o
 | Workload already includes backlog remaining minutes (`hc-search.ts:2441-2460`); horizon end unaffected; frozen decisions 3 and 4 not altered in logic (numbers change — owner confirmation recorded). | Noted. |
 
 **Owner decisions now required:** D1 (stray date: block vs warn), D4 (backlog already overdue at horizon start: exclude from the SLA/ASA gates and report separately — recommended; or restart its clock at horizon start; or keep as failures with a clear infeasible message). D2 and D3 keep the recommended defaults unless changed.
+
+## G1 plan — FINAL revision (owner decisions 2026-10-06; overrides the sections above where they differ)
+
+**Owner decisions:** D1 = block the run on an isolated stray date. D4 = backlog already overdue at horizon start is **excluded from the SLA and wait-time checks and reported separately**. D2, D3 = recommended defaults (30 days; backlog-only data behaves as today).
+
+**Rule D4, exact:**
+- Applies only to opening-backlog cases whose `arrival` is before `horizonStart` (pre-horizon backlog).
+- Such a case is **overdue at start** when it cannot meet its deadline even if work begins at the first working instant of the horizon: `latestSafeStart < nextOpen(horizonStart)` (calendar functions only; `latestSafeStart` already accounts for remaining minutes).
+- Overdue-at-start cases: still injected at `max(arrival, horizonStart)`, still dispatched by the normal EDF order (they sort first), still counted in workload, handling minutes, occupancy and unfinished counts. They are NOT counted in the primary SLA numerator or denominator (overall and per category) and NOT in the wait-time (ASA) mean. Each case result carries `overdueAtStart: true`; the run result carries `overdueAtStartCount` (and per category).
+- Pre-horizon backlog that is still attainable stays fully scored against its ORIGINAL deadline. Its wait time is measured from `max(clockStart, horizonStart)` (the wait the team can influence).
+- Backlog arriving on or after `horizonStart`: no change at all.
+- Results screen: when the count is above 0, a visible note next to the SLA headline: "N opening-backlog cases were already overdue when the plan starts. They are worked first and counted as workload, but are not part of the SLA % above." Case table and case CSV: an "Overdue at start" marker/column. Data quality: a warning listing the count before the run.
+
+**Data-quality rule D1, exact:** after interval validation and before the working-day calculation: sort the distinct data dates; if a run of more than 30 consecutive calendar days has no rows AND the smaller side of that gap holds no more than 1% of the rows (minimum 1 row, maximum 20 rows) then **blocking error** "Isolated date(s) far from the rest of the data" naming the isolated date(s), the row count and the main data range. Any other empty run longer than 30 days: warning (existing coverage-gap warning text extended to say so). Old backlog arrival more than 30 days before the first interval: warning naming the case.
+
+**Scope lock — extended:** also `src/types/wfm.ts` (new optional fields only), `src/components/ResultsFlow.tsx` (the note, the case-table marker), `src/utils/export-rows.ts` (case CSV column), `src/utils/agent-analytics.ts` only if it reads SLA eligibility (report if so). Builder lists every consumer of case `arrival` / `clockStart` and states whether each needs a change.
+
+**Acceptance criteria — replaced / added:**
+
+| # | Criterion | Proof |
+|---|---|---|
+| 2 | Recommendation not lowered by old backlog | Baseline fixture (Mon-Fri, 6 per interval, AHT 30, target 80%): 1 backlog case 14 days old gives recommended >= 8 at 6 h SLA and at 3-day SLA (were 7 and 5); sync = async |
+| 4 | Overdue-at-start rule | Friday-backlog + Monday-demand fixture, 40 backlog cases due Friday: `overdueAtStartCount` = 40; SLA % computed over the other cases only (hand count shown); all 40 are worked (complete) and their minutes are in the workload; recommended HC is finite and >= the no-backlog recommendation; search does NOT hit the cap |
+| 4b | Attainable old backlog still scored | Backlog arriving Friday with a 3-day business SLA (due Wednesday): `overdueAtStart` false, scored normally, deadline equal to the hand-computed one |
+| 4c | Wait time | Old attainable backlog: wait measured from horizon start; overdue-at-start cases absent from the ASA mean; ASA gate ON does not fail solely because of old backlog |
+| 7 | Stray date blocked | One row 2 years out: blocking error naming it, Run disabled in the browser; a 10-day-out stray row: warning; a file with a real 5-week closure and substantial data on both sides: warning, not blocked |
+| 14 | Planner sees it | Browser: load a demand file plus dated old backlog, run: the note with the count appears beside the SLA headline; case CSV has the marker; no note when the count is 0 |
+| 15 | Mutation proof | In a scratch copy: re-add the backlog pull-back; remove the injection clamp; score overdue-at-start cases again: each makes a new test fail |
