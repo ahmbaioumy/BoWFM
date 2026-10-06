@@ -1669,17 +1669,10 @@ export function runBackofficeDES(params: {
             }
 
             let nextResumeTime: Date | null = null;
-            if (calendar.is24x7) {
-              const nextDay = new Date(currTime);
-              nextDay.setDate(nextDay.getDate() + 1);
-              nextDay.setHours(0, 0, 0, 0);
-              nextResumeTime = nextDay;
-            } else {
-              try {
-                nextResumeTime = nextOpen(currTime, calendar);
-              } catch {
-                nextResumeTime = null;
-              }
+            try {
+              nextResumeTime = nextOpen(currTime, calendar);
+            } catch {
+              nextResumeTime = null;
             }
             if (nextResumeTime) {
               scheduleEvent(nextResumeTime, 'CaseResume', c.id);
@@ -1885,17 +1878,10 @@ export function runBackofficeDES(params: {
             parkedWIP.set(c.id, c);
 
             let nextResumeTime: Date | null = null;
-            if (calendar.is24x7) {
-              const nextDay = new Date(currTime);
-              nextDay.setDate(nextDay.getDate() + 1);
-              nextDay.setHours(0, 0, 0, 0);
-              nextResumeTime = nextDay;
-            } else {
-              try {
-                nextResumeTime = nextOpen(currTime, calendar);
-              } catch {
-                nextResumeTime = null;
-              }
+            try {
+              nextResumeTime = nextOpen(currTime, calendar);
+            } catch {
+              nextResumeTime = null;
             }
             if (nextResumeTime) {
               scheduleEvent(nextResumeTime, 'CaseResume', c.id);

@@ -53,6 +53,7 @@ import { loadSampleFile } from './sample-files';
 import { DEFAULT_CALENDAR, DEFAULT_CATEGORIES, DEFAULT_LABOR, DEFAULT_SIM_PARAMS, DEFAULT_SLA } from '../src/utils/default-config';
 import {
   CalendarConfig,
+  CaseEntity,
   CategoryConfig,
   LaborConfig,
   ShiftDistributionByCategory,
@@ -3168,7 +3169,7 @@ console.log('\n--- Suite D43: fair case-to-agent distribution ---');
   // --- D43.14: OFF is the exact legacy dispatch — timing digests equal the pre-change engine, including the
   // 24x7 scenario where daily budgets bind (30 parked cases) and ON legitimately differs -------------------
   {
-    const GOLDEN_OFF: Record<string, number> = { ...GOLDEN_TIMES, c247: 3849299782 };
+    const GOLDEN_OFF: Record<string, number> = { ...GOLDEN_TIMES, c247: 857025119 };
     for (const [name, golden] of Object.entries(GOLDEN_OFF)) {
       const d = run43((scn43 as any)[name](), { dispatchFairness: { enabled: false } });
       assert(timesDigest43(d) === golden, `D43.14 ${name}: fairness OFF timing identical to the pre-change engine`, `digest=${timesDigest43(d)} golden=${golden}`);
@@ -4803,6 +4804,170 @@ console.log('\n--- Suite D63: G1-a stray date blocks from 8 empty days ---');
   for (let s = 0; s < 15; s++) small.push(iv63(d63(10, 8 + Math.floor(s / 2), (s % 2) * 30), small.length));
   const rSmall = dq63(small);
   assert(!iso63(rSmall), 'D63.9 two days 10 days apart with 15 rows each: no isolated-date error', tags(rSmall));
+}
+
+// ---------------------------------------------------------------
+// Suite D64 - F2 (DES-8): on a 24x7 calendar a budget-exhausted park hands the case back at once
+// (CaseResume at nextOpen(now) = now), instead of holding it in parkedWIP until the next calendar midnight
+// while other agents sit idle with budget. Hand-built precomputedCases, every time derived by hand.
+// Budget = 7.5 h x adherence. Mon 12 Oct 2026 is day 1.
+// ---------------------------------------------------------------
+console.log('\n--- Suite D64: F2 24x7 park resumes when capacity exists ---');
+{
+  const catF2: CategoryConfig[] = [{ id: 'g', name: 'General', ahtMinutes: 240, shrinkagePct: 0.2, priority: 1, primaryWindowMinutes: 1440 }];
+  const f2At = (day: number, h: number, m = 0) => new Date(2026, 9, day, h, m);
+  const f2Case = (id: string, syn: number, arr: Date, aht: number, windowH = 24): CaseEntity => {
+    const dl = new Date(arr.getTime() + windowH * 3600000);
+    return {
+      id, syntheticId: syn, category: 'General', priority: 1, arrival: arr, clockStart: arr, totalAhtMinutes: aht,
+      remainingWorkMinutes: aht, primaryDeadline: dl, latestSafeStart: new Date(dl.getTime() - aht * 60000),
+      firstStartTime: null, completeTime: null, parkCount: 0, isOpeningWip: false,
+    };
+  };
+  const labF2 = (adh: number): LaborConfig => ({ ...DEFAULT_LABOR, dailyProductiveHours: 7.5, adherencePct: adh, workingDaysPerWeek: 7, offDaysPerWeek: 0 });
+  const slaF2: SLAPolicyConfig = { ...DEFAULT_SLA, primaryWindow: 24, primaryUnit: 'hours' };
+  const stagF2 = (offsets: number[]): ShiftDistributionByCategory => ({ __POOLED__: { slapMinutes: 60, slaps: offsets.map((o) => ({ startMinutesFromOpen: o, agentCount: 1 })) } } as any);
+  const runF2 = (cases: CaseEntity[], hc: number, adh: number, offsets: number[] | null, seed = 7) =>
+    runBackofficeDES({
+      operationalHC: hc, intervals: [], openingWIP: [], categories: catF2, calendar: CAL_24X7, labor: labF2(adh), sla: slaF2, seed,
+      shiftDistribution: offsets ? stagF2(offsets) : undefined,
+      precomputedCases: { cases, horizonStart: f2At(12, 0), horizonEnd: f2At(13, 0) },
+    });
+  const dayKeyF2 = (d: Date) => d.getFullYear() * 10000 + d.getMonth() * 100 + d.getDate();
+  const busyF2 = (des: any) => (des.agentTimeline as any[]).filter((s) => s.state === 'busy');
+  const slicesOf = (des: any, id: string) => busyF2(des).filter((s) => s.caseId === id).sort((a, b) => a.from - b.from);
+  const hhmm = (d: Date) => `${d.getDate()}/${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+  // Avoidable waits: a park gap where, at some 5-minute sample inside the gap, ANOTHER agent was idle, had daily
+  // budget left, and (staggered) was inside its own shift window. 0 on a correct engine.
+  const avoidable = (des: any, hc: number, adh: number, offsets: number[] | null): number => {
+    const budget = 450 * adh;
+    const sl = busyF2(des);
+    const byCase = new Map<string, any[]>();
+    for (const s of sl) { if (!byCase.has(s.caseId)) byCase.set(s.caseId, []); byCase.get(s.caseId)!.push(s); }
+    let n = 0;
+    for (const arr of byCase.values()) {
+      arr.sort((a, b) => a.from - b.from);
+      for (let i = 0; i + 1 < arr.length; i++) {
+        const a = arr[i], b = arr[i + 1];
+        if ((b.from - a.to) / 60000 <= 0.01) continue;
+        let found = false;
+        for (let t = a.to.getTime(); t < b.from.getTime() && !found; t += 5 * 60000) {
+          for (let ag = 0; ag < hc && !found; ag++) {
+            if (sl.some((s) => s.agentId === ag && s.from.getTime() <= t && t < s.to.getTime())) continue;
+            let used = 0;
+            for (const s of sl) if (s.agentId === ag && s.from.getTime() <= t && dayKeyF2(s.from) === dayKeyF2(new Date(t))) used += (Math.min(s.to.getTime(), t) - s.from.getTime()) / 60000;
+            let inShift = true;
+            if (offsets) { const d0 = new Date(t); d0.setHours(0, 0, 0, 0); const st = d0.getTime() + offsets[ag] * 60000; inShift = t >= st && t < st + 450 * 60000; }
+            if (inShift && used < budget - 0.01) found = true;
+          }
+        }
+        if (found) n++;
+      }
+    }
+    return n;
+  };
+  const budgetOk = (des: any, adh: number): boolean => {
+    const per = new Map<string, number>();
+    for (const s of busyF2(des)) { const k = `${s.agentId}:${dayKeyF2(s.from)}`; per.set(k, (per.get(k) ?? 0) + (s.to - s.from) / 60000); }
+    return [...per.values()].every((v) => v <= 450 * adh + 0.01);
+  };
+  const fmtSl = (a: any[]) => a.map((s) => `ag${s.agentId}@${hhmm(s.from)}-${hhmm(s.to)}`).join(' ');
+
+  // (a) all on one shift, 3 agents. W1-W3 400 min each from 00:00 (agents left with 50 min). D (due 12 h) and E (due 24 h),
+  // 100 min, arrive 06:40: two agents take them, work 50 min each, budget gone at 07:30 -> both park with 50 left.
+  // The third agent is idle with 50 min: D (earlier deadline) must resume 07:30-08:20 on it. E: nobody has budget -> waits for
+  // the day reset (Tue 13 Oct 00:00), legitimate.
+  const casesA = [
+    f2Case('W1', 1, f2At(12, 0), 400), f2Case('W2', 2, f2At(12, 0), 400), f2Case('W3', 3, f2At(12, 0), 400),
+    f2Case('D', 4, f2At(12, 6, 40), 100, 12), f2Case('E', 5, f2At(12, 6, 40), 100),
+  ];
+  const dA = runF2(casesA, 3, 1.0, null);
+  const dSl = slicesOf(dA, 'D'), eSl = slicesOf(dA, 'E');
+  assert(avoidable(dA, 3, 1.0, null) === 0, 'D64.1 24x7 one shift: 0 avoidable waits (before the fix: 2, D and E both waited to midnight)', `avoidable=${avoidable(dA, 3, 1.0, null)}`);
+  assert(dSl.length === 2 && hhmm(dSl[0].from) === '12/6:40' && hhmm(dSl[0].to) === '12/7:30' && hhmm(dSl[1].from) === '12/7:30' && hhmm(dSl[1].to) === '12/8:20' && dSl[0].agentId !== dSl[1].agentId,
+    'D64.2 case D: 06:40-07:30 on one agent, resumes at 07:30 on the agent that still has budget, done 08:20 (same day)', fmtSl(dSl));
+  assert(eSl.length === 2 && hhmm(eSl[1].from) === '13/0:00' && hhmm(eSl[1].to) === '13/0:50',
+    'D64.3 case E (nobody has budget at 07:30): resumes at the day reset, Tue 00:00-00:50', fmtSl(eSl));
+  assert(budgetOk(dA, 1.0), 'D64.4 no agent works beyond its 450-min daily budget (scenario a)', '');
+
+  // (b) staggered 0/8/16 h, adherence 0.9 (budget 405; shift windows 00:00-07:30 / 08:00-15:30 / 16:00-23:30).
+  // C1 00:00 (240) and C2 01:00 (240): the 00:00 agent works C1 00:00-04:00, then C2 04:00-06:45 (165 min = budget gone) and parks with 75 left.
+  // The 08:00 cohort starts -> C2 must resume 08:00-09:15 the same day, not Tue 00:00.
+  const offs = [0, 480, 960];
+  const casesB = [f2Case('C1', 1, f2At(12, 0), 240), f2Case('C2', 2, f2At(12, 1), 240), f2Case('C3', 3, f2At(12, 17), 240), f2Case('C4', 4, f2At(12, 18), 240)];
+  const dB = runF2(casesB, 3, 0.9, offs);
+  const c2 = slicesOf(dB, 'C2');
+  assert(avoidable(dB, 3, 0.9, offs) === 0, 'D64.5 24x7 staggered 0/8/16 h, adherence 0.9: 0 avoidable waits (before the fix: C2 waited to midnight)', `avoidable=${avoidable(dB, 3, 0.9, offs)}`);
+  assert(c2.length === 2 && hhmm(c2[0].from) === '12/4:00' && hhmm(c2[0].to) === '12/6:45' && hhmm(c2[1].from) === '12/8:00' && hhmm(c2[1].to) === '12/9:15',
+    'D64.6 C2 parks 06:45 (budget) and resumes 08:00 when the second cohort starts, done 09:15', fmtSl(c2));
+  // no work outside any agent's own shift window, none beyond budget
+  const outside = busyF2(dB).filter((s: any) => { const d0 = new Date(s.from); d0.setHours(0, 0, 0, 0); const st = d0.getTime() + offs[s.agentId] * 60000; return s.from.getTime() < st || s.to.getTime() > st + 450 * 60000; });
+  assert(outside.length === 0 && budgetOk(dB, 0.9), 'D64.7 staggered: every busy slice inside its agent shift window and within the 405-min budget', `outside=${outside.length}`);
+
+  // (c) all agents exhausted: 2 agents, W1/W2 400 min, D/E 100 min at 06:40 -> both park 07:30, nobody has budget.
+  const dC = runF2([f2Case('W1', 1, f2At(12, 0), 400), f2Case('W2', 2, f2At(12, 0), 400), f2Case('D', 3, f2At(12, 6, 40), 100), f2Case('E', 4, f2At(12, 6, 40), 100)], 2, 1.0, null);
+  const dcD = slicesOf(dC, 'D'), dcE = slicesOf(dC, 'E');
+  assert(dcD.length === 2 && dcE.length === 2 && hhmm(dcD[0].to) === '12/7:30' && hhmm(dcD[1].from) === '13/0:00' && hhmm(dcE[1].from) === '13/0:00',
+    'D64.8 every agent exhausted: D and E wait to the next budget reset (Tue 00:00) - legitimate wait, not an avoidable one', `D ${fmtSl(dcD)} E ${fmtSl(dcE)}`);
+  assert(avoidable(dC, 2, 1.0, null) === 0 && budgetOk(dC, 1.0), 'D64.9 all-exhausted run: 0 avoidable waits, nobody over budget', '');
+
+  // (d) conservation + invariants on (a), (b), (c)
+  for (const [lbl, des, adh] of [['a', dA, 1.0], ['b', dB, 0.9], ['c', dC, 1.0]] as const) {
+    const inv = verifyAgentTimelineInvariants(des as any, labF2(adh), CAL_24X7);
+    const tot = new Map<string, number>();
+    for (const s of busyF2(des)) tot.set(s.caseId, (tot.get(s.caseId) ?? 0) + (s.to - s.from) / 60000);
+    const completed = (des as any).caseResults.filter((c: any) => c.isCompleted);
+    const conserved = completed.every((c: any) => Math.abs((tot.get(c.caseId) ?? 0) - c.ahtMinutes) < 0.01);
+    assert(inv.valid && conserved && (des as any).doubleBookedAssignments === 0 && completed.length > 0, `D64.10${lbl} (${lbl}) invariants valid, handled minutes = AHT for every completed case, no double booking`, `${inv.errors.join('; ')} completed=${completed.length}`);
+  }
+
+  // (e) SLA % non-decreasing in headcount, 24x7 week, 6 cases/hour, AHT 45, adherence 0.9, 24 h SLA (before the fix: 14 -> 100%, 16 -> 98%)
+  {
+    const iv: StandardInterval[] = [];
+    for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) { const s = new Date(2026, 9, 12 + d, h, 0); iv.push({ intervalIndex: iv.length, start: s, end: new Date(s.getTime() + 3600000), volume: 6, category: 'General' } as StandardInterval); }
+    const catS: CategoryConfig[] = [{ id: 'g', name: 'General', ahtMinutes: 45, shrinkagePct: 0.2, priority: 1 }];
+    const slaS: SLAPolicyConfig = { ...DEFAULT_SLA, primaryWindow: 24, primaryUnit: 'hours', clockBasis: 'wall_clock', clockStartPolicy: 'arrival', minCoverageEnabled: false };
+    const pcts: number[] = [];
+    for (const hc of [14, 15, 16, 17]) {
+      const r = runBackofficeDES({ operationalHC: hc, intervals: iv, openingWIP: [], categories: catS, calendar: CAL_24X7, labor: labF2(0.9), sla: slaS, seed: 11, queueArchitecture: 'pooled', skipCaseResultsAndTimeline: true });
+      pcts.push(r.primaryAchievedPct);
+    }
+    assert(pcts.every((p, i) => i === 0 || p >= pcts[i - 1] - 1e-9), 'D64.11 SLA % is non-decreasing in headcount for N = 14..17 (before the fix 14 -> 100%, 16 -> 98%)', `SLA% by N=14..17: ${pcts.map((p) => p.toFixed(1)).join(', ')}`);
+  }
+
+  // (f) business-hours digest (Mon-Fri default calendar, uniform and staggered) identical before/after the fix
+  {
+    const digest = (des: any): number => {
+      let h = 2166136261;
+      for (const c of [...des.caseResults].sort((a: any, b: any) => (a.caseId < b.caseId ? -1 : 1))) {
+        const str = `${c.caseId}:${c.firstStartTime?.getTime() ?? 'x'}:${c.completeTime?.getTime() ?? 'x'}:${c.parkCount}`;
+        for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+      }
+      return h >>> 0;
+    };
+    const iv: StandardInterval[] = [];
+    for (let d = 0; d < 5; d++) for (const h of [8, 10, 12, 14]) { const s = new Date(2026, 9, 12 + d, h, 0); iv.push({ intervalIndex: iv.length, start: s, end: new Date(s.getTime() + 1800000), volume: 1, category: 'General' } as StandardInterval); }
+    const mk = (offsets: number[] | null) => runBackofficeDES({ operationalHC: 3, intervals: iv, openingWIP: [], categories: catF2, calendar: DEFAULT_CALENDAR, labor: { ...DEFAULT_LABOR, adherencePct: 0.9 }, sla: slaF2, seed: 7, queueArchitecture: 'pooled', shiftDistribution: offsets ? stagF2(offsets) : undefined });
+    const dU = digest(mk(null)), dS = digest(mk([0, 120, 240]));
+    assert(dU === 1141821764, 'D64.12a business-hours uniform run digest pinned (measured on the unchanged engine)', `digest=${dU}`);
+    assert(dS === 147910604, 'D64.12b business-hours staggered 0/2/4 h run digest pinned (measured on the unchanged engine)', `digest=${dS}`);
+  }
+
+  // (g) stress: 24x7, 41 cases, 4 agents, budget 225 min (adherence 0.5) - completes, parks per case <= agents x days, work slices bounded
+  {
+    const cs: CaseEntity[] = [];
+    for (let i = 0; i < 41; i++) cs.push(f2Case(`S${String(i).padStart(2, '0')}`, i + 1, new Date(f2At(12, 0).getTime() + i * 70 * 60000), 120 + ((i * 37) % 90), 36));
+    const dG = runF2(cs, 4, 0.5, null);
+    const days = new Set(busyF2(dG).map((s: any) => dayKeyF2(s.from))).size;
+    const maxPark = Math.max(...(dG as any).caseResults.map((c: any) => c.parkCount));
+    const nSlices = busyF2(dG).length;
+    assert(dG.totalCases === 41 && maxPark <= 4 * days && nSlices <= 41 * 4 * days && nSlices <= 400, 'D64.13 stress: completes; parks per case <= agents x days; busy slices <= 400', `cases=${dG.totalCases} maxPark=${maxPark} days=${days} slices=${nSlices}`);
+    assert(budgetOk(dG, 0.5), 'D64.14 stress: nobody over the 225-min daily budget', '');
+    const dG2 = runF2(cs, 4, 0.5, null);
+    const sig = (d: any) => JSON.stringify((d.caseResults as any[]).map((c) => [c.caseId, c.firstStartTime?.getTime() ?? null, c.completeTime?.getTime() ?? null, c.parkCount]));
+    assert(sig(dG) === sig(dG2), 'D64.15 determinism: same seed twice gives identical case results (stress)', '');
+    assert(sig(runF2(casesB, 3, 0.9, offs)) === sig(dB), 'D64.16 determinism: same seed twice gives identical case results (staggered)', '');
+  }
 }
 
 console.log('\n==================================================');

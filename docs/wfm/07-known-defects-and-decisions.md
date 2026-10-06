@@ -916,6 +916,23 @@ overdue-at-start cases.
 
 ---
 
+### DES-8 - 24x7 parked work waited for the next midnight while agents were idle *(fixed 2026-10-06)*
+On a 24x7 calendar a case parked because its agent's daily budget ran out was put in `parkedWIP` and resumed at the next
+calendar midnight (a hard-coded `is24x7` branch in the `CasePark` budget path, hand-rolled date maths); every other calendar
+used `nextOpen(now)`. Other agents with budget stayed idle meanwhile; shift-end parks in staggered mode already handed over at once.
+A dead copy of the branch sat in `DayClose` (24x7 never schedules `DayClose`).
+
+**Measured before** (3 agents, probe fixtures): one shift - 4 of 4 parked cases waited needlessly (586 min); staggered 0/8/16 h,
+adherence 0.9 - 5 of 8 (4,132 min; one case parked 06:46, resumed 00:00, while another agent was free from 08:01).
+Sizing probe (24x7 week, 6/h, AHT 45, adherence 0.9, 24 h SLA): SLA 14 agents 100%, 16 agents 98% - not monotone in headcount.
+
+**After:** both branches deleted; every calendar uses `nextOpen(currTime)`. Avoidable waits 4/4 -> 0 and 5/8 -> 0; SLA at 14..17 agents
+100 / 100 / 100 / 100. A case with no capacity anywhere still waits for the next budget reset (legitimate). Budgets, shift-window
+presence (frozen decision 11), parked-first, EDF, random draws and the search code are untouched; business-hours results identical.
+Suite D64 pins this; D43.14 c247 golden digest re-pinned (HC 8, fairness OFF: SLA 100% -> 100%, parks 12 -> 9).
+
+---
+
 ## C. Retracted after measurement
 
 ### D2 — "Occupancy window mismatch" — **NOT A BUG**
