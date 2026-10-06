@@ -18,12 +18,14 @@ import {
 import {
   computeIntervalHorizon,
   convertDurationToMinutes,
+  formatDate24,
   formatDateTime24,
   getCalendarWorkingDaysInHorizon,
   getDailyWindowLengthHours,
   isWorking,
   isWorkingDay,
 } from './calendar';
+import { buildOpeningWipCases } from './des-engine';
 
 export function parseCSVRaw(text: string): { headers: string[]; rows: Record<string, string>[] } {
   if (!text || !text.trim()) return { headers: [], rows: [] };
@@ -781,6 +783,8 @@ export function validateDataQuality(params: {
   const seenSlots = new Set<string>();
   const volumeParsingIssues: Array<{ row: number; message: string }> = [];
   const daysWithDataMs = new Set<number>();
+  const rowsByDayMs = new Map<number, number>(); // valid rows per local calendar day (G1 date-gap rule)
+  let firstDemandStartMs = Infinity;
 
   for (let i = 0; i < intervals.length; i++) {
     const it = intervals[i];
@@ -800,6 +804,8 @@ export function validateDataQuality(params: {
       const dayStart = new Date(it.start);
       dayStart.setHours(0, 0, 0, 0);
       daysWithDataMs.add(dayStart.getTime());
+      rowsByDayMs.set(dayStart.getTime(), (rowsByDayMs.get(dayStart.getTime()) ?? 0) + 1);
+      if (it.start.getTime() < firstDemandStartMs) firstDemandStartMs = it.start.getTime();
 
       // Diagnostic tracking of volume arrival relative to calendar operating hours
       if (isWorking(it.start, calendar)) {
@@ -892,6 +898,53 @@ export function validateDataQuality(params: {
     });
   }
 
+  // G1 — empty runs longer than 30 calendar days between data dates (days sorted explicitly; Map order is insertion order).
+  // The planning horizon is the demand span, so a mistyped date years away would make the plan span the empty gap and
+  // understate the sizing. An ISOLATED stray (the smaller side of the gap holds <= 1% of the rows, min 1 / max 20 rows)
+  // blocks the run. Any other long run (a genuine closure with substantial data on both sides) only extends the
+  // coverage-gap warning below. Only meaningful once every timestamp parsed cleanly.
+  const longEmptyRuns: Array<{ from: number; to: number; emptyDays: number }> = [];
+  if (invalidTimestamps.length === 0 && rowsByDayMs.size > 1) {
+    const dayList = Array.from(rowsByDayMs.keys()).sort((x, y) => x - y);
+    let totalRows = 0;
+    for (const d of dayList) totalRows += rowsByDayMs.get(d) ?? 0;
+    const isolatedLimit = Math.min(20, Math.max(1, totalRows * 0.01));
+    const isolatedDays = new Set<number>();
+    let rowsBefore = 0;
+    for (let k = 0; k + 1 < dayList.length; k++) {
+      rowsBefore += rowsByDayMs.get(dayList[k]) ?? 0;
+      // More than 30 empty days between two data days <=> the next data day is 32 or more calendar days later.
+      const gapLimit = new Date(dayList[k]);
+      gapLimit.setDate(gapLimit.getDate() + 32);
+      if (dayList[k + 1] < gapLimit.getTime()) continue;
+      const rowsAfter = totalRows - rowsBefore;
+      if (Math.min(rowsBefore, rowsAfter) <= isolatedLimit) {
+        // The smaller side (the earlier one on an exact tie) is the isolated one.
+        if (rowsBefore <= rowsAfter) {
+          for (let q = 0; q <= k; q++) isolatedDays.add(dayList[q]);
+        } else {
+          for (let q = k + 1; q < dayList.length; q++) isolatedDays.add(dayList[q]);
+        }
+      } else {
+        longEmptyRuns.push({ from: dayList[k], to: dayList[k + 1], emptyDays: Math.round((dayList[k + 1] - dayList[k]) / 86400000) - 1 });
+      }
+    }
+    if (isolatedDays.size > 0) {
+      const isolatedSorted = Array.from(isolatedDays).sort((x, y) => x - y);
+      const mainDays = dayList.filter((d) => !isolatedDays.has(d));
+      let isolatedRows = 0;
+      for (const d of isolatedSorted) isolatedRows += rowsByDayMs.get(d) ?? 0;
+      const shownIso = isolatedSorted.slice(0, 5).map((d) => formatDate24(new Date(d))).join(', ');
+      const moreIso = isolatedSorted.length > 5 ? ` (+${isolatedSorted.length - 5} more)` : '';
+      issues.push({
+        severity: 'error',
+        field: 'Isolated Date(s)',
+        message: `Isolated date(s) far from the rest of the data: ${shownIso}${moreIso} (${isolatedRows} row${isolatedRows === 1 ? '' : 's'}), more than 30 days away from the main data range ${formatDate24(new Date(mainDays[0]))} to ${formatDate24(new Date(mainDays[mainDays.length - 1]))}.`,
+        details: 'Check for a mistyped date (for example a wrong year) and correct or remove those rows before running. The planning horizon is the span of the demand data, so a stray date would stretch it across the empty gap and understate the headcount.',
+      });
+    }
+  }
+
   const { horizonStart, horizonEnd } = computeIntervalHorizon(intervals, openingWIP);
   const calendarWorkingDays = getCalendarWorkingDaysInHorizon(horizonStart, horizonEnd, calendar);
 
@@ -949,7 +1002,11 @@ export function validateDataQuality(params: {
         severity: 'warning',
         field: 'Calendar/Data Coverage Gap',
         message: `${emptyOpenDays.length} calendar-open day(s) inside the uploaded horizon have no demand rows at all: ${shown}${more}.`,
-        details: 'These days are still counted as fully-staffed working days in the sizing chain. Confirm they are genuine zero-demand days (business open, nothing arrived) rather than a gap in the export.',
+        details:
+          'These days are still counted as fully-staffed working days in the sizing chain. Confirm they are genuine zero-demand days (business open, nothing arrived) rather than a gap in the export.' +
+          (longEmptyRuns.length > 0
+            ? ` The data also contains ${longEmptyRuns.length} run(s) of more than 30 consecutive calendar days with no rows at all (longest ${Math.max(...longEmptyRuns.map((r) => r.emptyDays))} days, e.g. ${formatDate24(new Date(longEmptyRuns[0].from))} to ${formatDate24(new Date(longEmptyRuns[0].to))}); confirm this is a genuine closure and not a missing export.`
+            : ''),
       });
     }
   }
@@ -996,6 +1053,40 @@ export function validateDataQuality(params: {
         field: 'Opening WIP',
         message: `Orphan Opening WIP Category "${wip.category}" is not present in FCT demand intervals.`,
         details: 'All Opening WIP cases must belong to a category present in the demand forecast.',
+      });
+    }
+  }
+
+  // G1 — opening backlog that sits far outside the demand data, and backlog that is already overdue when the plan starts.
+  if (openingWIP.length > 0 && isFinite(firstDemandStartMs)) {
+    const cutoff = new Date(firstDemandStartMs);
+    cutoff.setHours(0, 0, 0, 0);
+    cutoff.setDate(cutoff.getDate() - 30);
+    const tooOld = openingWIP
+      .filter((w) => w.arrival && !isNaN(w.arrival.getTime()) && w.arrival.getTime() < cutoff.getTime())
+      .sort((a, b) => a.arrival.getTime() - b.arrival.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    if (tooOld.length > 0) {
+      issues.push({
+        severity: 'warning',
+        field: 'Old Backlog Arrival',
+        message: `${tooOld.length} opening-backlog case(s) arrived more than 30 days before the first demand interval (${formatDate24(new Date(firstDemandStartMs))}); the oldest is "${tooOld[0].id}" (arrived ${formatDate24(tooOld[0].arrival)}).`,
+        details: 'The planning horizon is the demand span, so old backlog does not change the capacity maths — it is still worked as workload. A very old date is usually a typo (for example a wrong year); confirm the arrival dates are right.',
+      });
+    }
+  }
+  if (openingWIP.length > 0) {
+    let overdueAtStart = 0;
+    try {
+      overdueAtStart = buildOpeningWipCases({ openingWIP, categoryMap, calendar, sla, horizonStart }).cases.filter((c) => c.overdueAtStart).length;
+    } catch {
+      overdueAtStart = 0; // degenerate calendar (no open window): nothing meaningful to report here
+    }
+    if (overdueAtStart > 0) {
+      issues.push({
+        severity: 'warning',
+        field: 'Opening WIP Overdue at Start',
+        message: `${overdueAtStart} opening-backlog case(s) will already be overdue when the plan starts (${formatDateTime24(horizonStart)}).`,
+        details: 'They are worked first and counted as workload, but they are not part of the SLA % or the wait-time check (they cannot be made on time by any headcount). The Results screen reports their count separately.',
       });
     }
   }

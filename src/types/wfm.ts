@@ -294,6 +294,13 @@ export interface CaseEntity {
   completeTime: Date | null;
   parkCount: number;
   isOpeningWip: boolean;
+  /**
+   * Rule D4 (G1). Opening-backlog case that arrived BEFORE the horizon start and already cannot meet its
+   * deadline even if work begins at the first working instant of the horizon
+   * (latestSafeStart < nextOpen(horizonStart)). Still worked (workload, handling, occupancy, unfinished
+   * counts) but excluded from the primary SLA numerator/denominator and the wait-time mean.
+   */
+  overdueAtStart?: boolean;
 }
 
 export type EventType =
@@ -370,6 +377,9 @@ export interface CaseRunResult {
   parkCount: number;
   isOpeningWip: boolean;
   
+  /** Rule D4: already overdue when the plan starts — worked, but not part of the SLA % or the wait-time mean. */
+  overdueAtStart?: boolean;
+
   // Status flags
   isCompleted: boolean;
   primaryEligible: boolean;
@@ -403,6 +413,9 @@ export interface DESResult {
   primaryPassCount: number;
   primaryAchievedPct: number;
   
+  /** Rule D4: opening-backlog cases already overdue at horizon start; excluded from primaryEligibleCount and the ASA mean. */
+  overdueAtStartCount?: number;
+
   // Category breakdown
   categoryStats: Record<
     string,
@@ -415,6 +428,8 @@ export interface DESResult {
       primaryPct: number;
       asaMeanMinutes: number;
       asaCensoredCount: number;
+      /** Rule D4: this category's cases already overdue at horizon start (excluded from primaryEligible and the ASA mean). */
+      overdueAtStartCount?: number;
     }
   >;
   

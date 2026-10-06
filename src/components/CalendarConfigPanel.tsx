@@ -4,6 +4,7 @@
  */
 
 import React, { useState } from 'react';
+import { NumberField } from './NumberField';
 import { CalendarConfig, LaborConfig } from '../types/wfm';
 import { Calendar as CalendarIcon, CheckCircle2 } from 'lucide-react';
 
@@ -253,15 +254,13 @@ export function CalendarConfigPanel({
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-slate-700 block">Daily Open Time (24h format)</label>
               <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="0"
-                  max="23"
+                <NumberField
+                  min={0}
+                  max={23}
+                  integer
                   disabled={!!calendar.is24x7}
                   value={calendar.is24x7 ? 0 : dailyOpenH}
-                  onChange={(e) => {
-                    const raw = parseInt(e.target.value, 10);
-                    const val = Number.isNaN(raw) ? 0 : Math.min(23, Math.max(0, raw));
+                  onCommit={(val) => {
                     onUpdateCalendar({
                       ...calendar,
                       dailyOpenHour: val,
@@ -270,16 +269,14 @@ export function CalendarConfigPanel({
                   className="w-20 px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded font-mono"
                 />
                 <span className="text-xs text-slate-400">:</span>
-                <input
-                  type="number"
-                  min="0"
-                  max="59"
-                  step="5"
+                <NumberField
+                  min={0}
+                  max={59}
+                  step={5}
+                  integer
                   disabled={!!calendar.is24x7}
                   value={calendar.is24x7 ? 0 : dailyOpenM}
-                  onChange={(e) => {
-                    const raw = parseInt(e.target.value, 10);
-                    const val = Number.isNaN(raw) ? 0 : Math.min(59, Math.max(0, raw));
+                  onCommit={(val) => {
                     onUpdateCalendar({
                       ...calendar,
                       dailyOpenMinute: val,
@@ -307,15 +304,13 @@ export function CalendarConfigPanel({
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="0"
-                  max="24"
+                <NumberField
+                  min={0}
+                  max={24}
+                  integer
                   disabled={!!calendar.is24x7}
                   value={calendar.is24x7 ? 24 : dailyCloseH}
-                  onChange={(e) => {
-                    const raw = parseInt(e.target.value, 10);
-                    const val = Number.isNaN(raw) ? 18 : Math.min(24, Math.max(0, raw));
+                  onCommit={(val) => {
                     onUpdateCalendar({
                       ...calendar,
                       dailyCloseHour: val,
@@ -325,16 +320,14 @@ export function CalendarConfigPanel({
                   className="w-20 px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded font-mono"
                 />
                 <span className="text-xs text-slate-400">:</span>
-                <input
-                  type="number"
-                  min="0"
-                  max="59"
-                  step="5"
+                <NumberField
+                  min={0}
+                  max={59}
+                  step={5}
+                  integer
                   disabled={!!calendar.is24x7 || dailyCloseH === 24}
                   value={calendar.is24x7 || dailyCloseH === 24 ? 0 : dailyCloseM}
-                  onChange={(e) => {
-                    const raw = parseInt(e.target.value, 10);
-                    const val = Number.isNaN(raw) ? 0 : Math.min(59, Math.max(0, raw));
+                  onCommit={(val) => {
                     onUpdateCalendar({
                       ...calendar,
                       dailyCloseMinute: val,

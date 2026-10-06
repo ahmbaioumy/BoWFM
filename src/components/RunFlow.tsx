@@ -4,6 +4,7 @@
  */
 
 import React from 'react';
+import { NumberField } from './NumberField';
 import {
   CalendarConfig,
   CategoryConfig,
@@ -311,15 +312,15 @@ export function RunFlow({
                   <Sparkles className="w-3.5 h-3.5 text-purple-600" />
                   Statistical Replications (≥30)
                 </label>
-                <input
-                  type="number"
-                  min="1"
-                  max="100"
-                  value={simParams.replications || 30}
-                  onChange={(e) =>
+                <NumberField
+                  min={1}
+                  max={100}
+                  integer
+                  value={Math.max(1, simParams.replications)}
+                  onCommit={(val) =>
                     onUpdateSimParams({
                       ...simParams,
-                      replications: Math.max(1, parseInt(e.target.value) || 30),
+                      replications: val,
                     })
                   }
                   className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded font-mono font-bold"
@@ -335,15 +336,15 @@ export function RunFlow({
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
                   Search Ceiling (userMaxHC)
                 </label>
-                <input
-                  type="number"
-                  min="1"
-                  max="5000"
-                  value={simParams.maxHCSearch || 500}
-                  onChange={(e) =>
+                <NumberField
+                  min={1}
+                  max={5000}
+                  integer
+                  value={Math.max(1, simParams.maxHCSearch)}
+                  onCommit={(val) =>
                     onUpdateSimParams({
                       ...simParams,
-                      maxHCSearch: Math.max(1, parseInt(e.target.value) || 500),
+                      maxHCSearch: val,
                     })
                   }
                   className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded font-mono font-bold"
@@ -358,13 +359,13 @@ export function RunFlow({
                 <label className="text-xs font-bold text-slate-700 block">
                   Base PRNG Seed
                 </label>
-                <input
-                  type="number"
+                <NumberField
+                  integer
                   value={simParams.seed}
-                  onChange={(e) =>
+                  onCommit={(val) =>
                     onUpdateSimParams({
                       ...simParams,
-                      seed: parseInt(e.target.value) || 12345,
+                      seed: val || 12345,
                     })
                   }
                   className="w-full px-3 py-1.5 text-xs bg-white border border-slate-200 rounded font-mono font-bold"
