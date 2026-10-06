@@ -364,3 +364,64 @@ May edit only: `src/utils/number-input.ts` (new), `src/components/NumberField.ts
 | 18 | Every number input converted | `grep -c 'type="number"'` over `src/components` → only inside `NumberField.tsx` |
 
 Strongest surviving objection (challenger): commit-on-blur alone silently loses typed values on unmount and spinner clicks — addressed by the commit rule above; criteria 12, 13 and 16 prove it.
+
+---
+
+# J0 result — dispatch-order mutation re-test (2026-10-06)
+
+Mutations applied to the functions that really dispatch (`compareByUrgency`, `pickNextCase`), in a scratch copy; real repo untouched.
+
+| Mutation | Caught by `npm test`? | By what |
+|---|---|---|
+| EDF → FIFO (`compareByUrgency` by arrival) | **Yes** | 11 checks in `verify-sizing-fixes` (D43.7 order digest, D43.14, D45.2, D49.1b) — digests and pinned numbers only; trusted-source does not catch it |
+| Reversed deadlines | **Yes** | 5 + 19 + 8 checks across three suites |
+| Parked-first rule removed | Yes, by **one** check | `verify-fixes` Suite 30 Test B only |
+| Priority step removed from `compareByUrgency` | **No — survived all 939 checks** | — |
+| Control: `CaseMinHeap.compare` deadline reversed | No (expected) | Confirms that method does not decide dispatch |
+
+**TEST-4 is corrected:** frozen decision 2 (EDF) IS protected by `npm test`. What remains open: the priority tie-break has no test (new, TEST-9), the business-calendar `latestSafeStart` (mutation B2) has no test, and FIFO is caught only indirectly.
+
+# BUILD PLAN — G12: tests that protect the frozen decisions
+
+Weekly cap 25% (hard stop). Meter at start: 19%. No new agent at a reading of 24%.
+
+**Task:** add the missing tests so that breaking a frozen sizing rule makes `npm test` fail; add the trusted-source suite to `npm test`.
+**End user:** the WFM planner (indirectly: a future change cannot silently alter headcount rules).
+**Tier 1** (tests and one script line; no product behaviour). Reviewer: `tester` — re-runs the surviving mutations; each must now be killed.
+
+## Steps (builder: `sonnet-executor`)
+
+New suite(s) appended to `scripts/verify-sizing-fixes.mts` (next free D-number after D54), in that file's style, each test written against the PUBLIC exported functions:
+
+| # | Rule protected | Test | Mutation it must kill |
+|---|---|---|---|
+| T1 | Priority tie-break in dispatch | `pickNextCase` with two new cases, same `latestSafeStart`, different priority → higher-priority first; and same again through a tiny `runBackofficeDES` run | M4 (priority line removed) |
+| T2 | EDF directly | `pickNextCase`: case A arrives first with a LATER deadline, case B arrives later with an EARLIER deadline → B first | M1 (FIFO) directly, not via digests |
+| T3 | `latestSafeStart` walks the business calendar | Mon–Fri 08–18 calendar, business-hours SLA, case due Monday 10:00 needing more handling time than Monday morning allows → `latestSafeStart` falls on Friday, not on a weekend clock time | B2 (wall-clock subtraction) |
+| T4 | CI gate, SLA | `computeStatisticalEvaluation` (or the exported gate function actually used by the search) with samples [78, 82, 80, 79, 81], target 80: mean 80 passes a mean test, the 95% lower bound is below 80 → must FAIL; and a set whose lower bound clears → PASS | B4 (mean), B5 (upper bound) |
+| T5 | CI gate, per-category / occupancy cap / ASA | Same shape for each of the three other gates: mean on the passing side, bound on the failing side → gate fails (occupancy and ASA use the UPPER bound against the cap) | B4b, B4c, B4d |
+| T6 | Common Random Numbers | Search (or the helper that builds `precomputedCaseSets`) at N and N+1 with the same seed → identical arrival realisations (same case count, same arrival times, same handle times per replication) | B6 |
+| T7 | Unfinished cases count as SLA failures | Tiny run with capacity for 6 of 10 cases inside horizon + drain → achieved % = 60 (denominator 10), not 100 | B15 |
+| T8 | Gross HC total: per-category gross-up → sum → one round (harmonic effective shrinkage) | Two categories, shrinkage 10% and 40%, equal operational HC 10 each → gross total `round(10/0.9 + 10/0.6)` = 28 (arithmetic-blend answer `20/0.75` = 26.67 → 27 must NOT appear) | M3c (arithmetic blend) |
+| T9 | Volume rounding rule | Interval volume 2.5 / 2.4 → generated case count follows `Math.round` | B13 (round → floor) |
+
+- `package.json`: `scripts.test` also runs `test:trusted-source` (before the artifact-freshness check). Scripts only — `dependencies` untouched.
+- If a needed function is not exported, the builder may add the `export` keyword ONLY (no logic change) in `src/utils/hc-search.ts` or `des-engine.ts`, must list each one, and must then rebuild (`npm run build:standalone`) because `src/` changed. Preferred: test through already-exported functions.
+- Docs: `PRD.md` §9.1 and `project_context.md` §9 / lines 56, 78, 173-176, 849-856 — one correct suite table (counts as measured after this change; trusted-source now part of `npm test`); `project_context.md` §11 one "recently fixed" row. Bump PRD version/date only if the project's own convention bumps for test-only changes (follow existing practice).
+- Every new test must be shown to FAIL against its mutation before it is accepted (builder applies each mutation temporarily in a scratch copy or with a local revert, records the failing output, restores).
+
+## Scope lock
+
+`scripts/verify-sizing-fixes.mts` (append only — no existing test changed or removed), `package.json` (`scripts.test` line only), `PRD.md`, `project_context.md`; `export`-keyword-only edits in `src/utils/hc-search.ts` / `des-engine.ts` if unavoidable, plus the rebuilt `BoWFM.html` in that case. No other file. No engine logic, default, or guard changed.
+
+## Acceptance criteria and proof
+
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | All suites green on the real code | `npm run lint` clean; `npm test` exit 0 and now includes the 164 trusted-source checks; counts reported |
+| 2 | Each listed mutation is now killed by `npm test` | Tester re-applies, one at a time in a scratch copy: M4, M1 (must fail a T2 check directly), B2, B4, B5, B4b, B4c, B4d, B6, B15, M3c, B13 → each produces at least one failure in a NEW test, named |
+| 3 | No existing test weakened | `git diff` of `verify-sizing-fixes.mts` shows additions only |
+| 4 | Tests are not tautologies | Auditor-style read by the tester: each new test calls engine code and compares to an independently stated expected value |
+| 5 | Sample headcounts unchanged | `npm run test:audit` (or the three samples 31/40, 27/34, 31/39) unchanged |
+| 6 | Docs and artifact | Suite counts in both docs equal the real output; `npm run check:artifact` passes |
+| 7 | Scope respected | `git diff <checkpoint>..HEAD --stat` lists only scope-lock files |
