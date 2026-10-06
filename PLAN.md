@@ -621,3 +621,11 @@ Weekly cap 35% (hard stop). Meter at plan time: 30%. No new agent at a reading o
 | 7 | Mutation proof | Tester re-adds the midnight branch in a scratch copy: new tests fail |
 | 8 | Gates, docs, artifact | lint, `npm test`, `check:artifact` green; docs updated |
 | 9 | Scope respected | `git diff <checkpoint>..HEAD --stat` only scope-lock files |
+
+## F2 plan — challenger verdict: PASS (no blockers). Revisions accepted:
+
+- No livelock: a budget park uses up the whole remaining budget (`des-engine.ts:1489`), the agent goes off (`:1662-1669`), and dispatch skips agents with no budget (`:1341-1349`, `:1445`). Parks per case per day are bounded by the number of agents.
+- Design 2 reworded: the case still passes through `parkedWIP` and a `CaseResume` scheduled for the same instant; with no capacity it then waits in the live queue for the next `AgentAvailable` (budget reset: once a day, or per cohort at shift start in staggered mode). The existing `try/catch` around `nextOpen` stays untouched.
+- Criterion 5 restated: "measured on the listed fixtures: SLA at fixed headcount not lower; any recommendation that RISES is listed with an explanation" — a direction is not guaranteed by the engine.
+- Added tests: (g) bounded work on a stress fixture (24x7, many cases, small budgets): parks per case no more than agents x days, total event count bounded, run completes; (h) determinism: two runs with the same seed give identical case results (same-instant resume ordering); (i) zero budget everywhere: resume only at the reset.
+- Before deleting the `DayClose` copy: confirm by grep that no 24x7 path schedules `DayClose`.
