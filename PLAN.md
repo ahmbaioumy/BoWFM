@@ -333,3 +333,34 @@ May edit only: `src/utils/number-input.ts` (new), `src/components/NumberField.ts
 | 9 | No regression | `npm run lint` clean; `npm test` all green with the new suite; `npm run test:trusted-source` 164 green; `npm run test:audit` sample HCs unchanged; page loads with zero console errors; three samples still give 31/40, 27/34, 31/39 |
 | 10 | Docs and artifact in sync | `PRD.md`, `project_context.md` updated; `npm run check:artifact` passes |
 | 11 | Scope respected | `git diff <checkpoint>..HEAD --stat` lists only the scope-lock files |
+
+## H1 plan — revision after challenger (FAIL → all points accepted; this section overrides the steps above where they differ)
+
+**Commit rule (replaces "on blur or Enter" only):**
+- On every change the draft string is kept as typed. **If the draft already parses to a number that satisfies the field's rule (finite, within `[min, max]`, integer when required), it is committed immediately.** So typing `8`,`5` into a 50–100 field holds "8" as a draft and commits 85 on the second key; arrow keys / spinner clicks commit at once.
+- On blur, Enter and **unmount** (effect cleanup), a pending draft is committed through `commitNumberDraft` (clamped; empty or unparseable → the current stored value). Escape restores the stored value.
+- The draft is re-synced whenever the displayed stored value changes from outside while the field is not being edited (settings import, toggle flip, sample load).
+- Integer rule: `Math.round`. Decided.
+
+**Units:** `NumberField` works in DISPLAY units only. Callers pass `value` already converted for display (adherence and shrinkage: `Math.round(fraction * 1000) / 10`, i.e. percent to one decimal) and convert back inside `onCommit` (`/ 100`). Stored units do not change. Each existing handler body is kept: `onCommit` receives the committed number and the caller writes the same fields it writes today (working days still writes `offDaysPerWeek = 7 − value`; window fields still write what they write today, including any `primaryWindowMinutes`; occupancy cap still displays 100 when its toggle is off). Fallback for empty/invalid is always the CURRENT stored value, never a hard-coded default.
+
+**Seed:** no range change. Integer only, any sign, as today; an emptied field restores the current seed; `0` keeps today's behaviour (stored as 12345). Replications and search ceiling get the upper bounds the PRD already states (1–100, 1–5000); a stored 0 from an imported file is displayed as stored after clamping to the minimum (1), not as a made-up default.
+
+**Scope lock — extended:** also `src/components/CalendarConfigPanel.tsx` (its 4 number inputs) and `src/components/DemandFlow.tsx` (the 1 manual-backlog "remaining minutes" input only — closes UI-33; integer ≥ 1 as today, no other backlog change, that is H2). Every `type="number"` input in `src/` must go through `NumberField` after this change (26 today); the builder lists each one with its range in the hand-back. Rows rendered in lists pass a stable `key` (category id).
+
+**Tests (replaces step 5's regex guard):** new suite for `commitNumberDraft` and for a second pure helper `draftIsCommittable(draft, opts)` (the "commit immediately" rule): "8" with min 50 → not committable; "85" → committable 85; "" → not; "-" → not; "1e" → not; "12.5" integer → not committable, commits 13 on blur; "99999" max 100 → not committable, commits 100; "0" min 0 → committable 0; stored 0.925 displays 92.5 and commits back to 0.925 (round-trip helper). Source guard, labelled as a guard not proof: no `<input` with `type="number"` remains in `src/components/*.tsx` outside `NumberField.tsx`.
+
+**Acceptance criteria — added / changed:**
+
+| # | Criterion | Proof |
+|---|---|---|
+| 4 (source) | Reference numbers 37 / 48 / 36 and 31 / 40 / 30 | Recorded in `FINDINGS.md`, section "P3-7", row "UI-41 size of effect" (pasted-85 run on the shipped file before the fix) |
+| 12 | No Tab needed | Adherence: select all, type `8`,`5`, then click the Run step in the sidebar and Run with the mouse (no Tab, no Enter) → run uses 85 (recommended 37) |
+| 13 | Unmount keeps the value | Occupancy cap: type `3`,`0` (out of range, pending), click another Settings tab, return → field shows 50 (clamped), not the old value and not 30 |
+| 14 | Two-field handlers intact | Working days: type `6`, Tab → off days reads 1; type `5` → off days 2 |
+| 15 | Toggle re-sync | Occupancy cap: toggle off → field 100 disabled; toggle on → stored cap shown |
+| 16 | Arrow keys | Focus replications, ArrowUp once → 31 stored without leaving the field |
+| 17 | Calendar and backlog fields | Calendar open hour: clear, type `9` → 9 stored; backlog remaining minutes: clear (stays empty), type `4`,`5` → 45 |
+| 18 | Every number input converted | `grep -c 'type="number"'` over `src/components` → only inside `NumberField.tsx` |
+
+Strongest surviving objection (challenger): commit-on-blur alone silently loses typed values on unmount and spinner clicks — addressed by the commit rule above; criteria 12, 13 and 16 prove it.
