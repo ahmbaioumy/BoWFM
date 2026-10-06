@@ -314,3 +314,41 @@ All kills were behavioural (a computed number changed) — none relied on a sour
 | OFF-6 | minor (docs/strays) | `npm test` omits the trusted-source suite and no doc says so; check counts disagree across docs (PRD 856, `project_context.md` 251 and 613; actual 916). `package.json` name is still `react-example`; `clean` script references a removed `server.js`; `test.mts` and `test_complaint.csv` are tracked but unreferenced; `.env.example` carries an empty `GEMINI_API_KEY=`; `metadata.json` stale capability (known P1-5). | Docs/internals. | `PRD.md:1115-1124`; `project_context.md:78`, `:849` |
 
 Note for the owner: `.claude/hooks/auto-push.mjs` is a Stop hook in this repo that copies changed files to the `auto/agent-updates` branch and pushes it to GitHub. The audit branch itself has not been pushed (remote has only `main` and `auto/agent-updates`, last auto-sync 2026-09-30), but that hook may publish `PLAN.md` / `FINDINGS.md` when a turn ends.
+
+### P2-2 — test strength B: mutation test of simulation and search rules (tester, scratch copy)
+
+Harness re-verified (gross mutation → 84 failures). 21 mutations run, none skipped. "Caught" means a check in `npm test` failed.
+
+| Mutation | Rule broken | Caught? | By |
+|---|---|---|---|
+| **B1 EDF → FIFO (order by arrival)** | decision 2 | **NO — all 916 checks green** | — |
+| **B1b deadline order reversed (latest first)** | decision 2 | **NO** | — |
+| **B2 `latestSafeStart` by wall-clock instead of business calendar** | decision 2 | **NO** | — |
+| B3 presence needs remaining budget | decision 11 | yes | D36.x, D37.4, BUG-OCC-ROOT (31) |
+| B4 SLA gate uses mean, not CI lower bound | decision 8 | barely — 1 unrelated assertion | D52.1c (a roster-polish check) |
+| B5 SLA gate uses CI upper bound | decision 8 | barely — same 1 assertion | D52.1c |
+| **B4b per-category gate uses mean** | decision 8 | **NO** | — |
+| **B4c occupancy gate uses mean** | decision 8 | **NO** | — |
+| **B4d ASA gate uses mean** | decision 8 | **NO** | — |
+| **B6 Common Random Numbers broken (seed depends on N, case sets regenerated)** | decision 9 | **NO** | — |
+| B7 floor opt-out ignored | decision 4 | yes | D47.0c, D47.2a–e (6) |
+| B8 / B8a `belowWorkloadFloor` never set (both / async only) | decision 4 warning | yes | D47.2c / D47.3a (1 each) |
+| B9 / B9a answer + 1 (both / async only) | smallest passing N | yes | Suite 29, BUG-R, D34.4, D36.5, D42.10 (20–41) |
+| B10 async-only seed constant changed | sync = async | narrowly | D50.9d, D51.2f, D52.2c (roster-polish parity only) |
+| B11 async-only polish adoption skipped | sync = async | yes | D50.3, D50.9d, D51.x (5) |
+| B12 occupancy cap gate always passes | cap gate | yes | BUG-OCC-CAP, D26.2 (4) |
+| **B13 volume `round` → `floor`** | L1 | **NO** | — |
+| B14 opening backlog ignored | backlog | yes, by one test that crashes the suite | BUG-B |
+| **B15 unfinished cases dropped from the SLA denominator** | SLA maths | **NO** | — |
+
+| ID | Severity (my verdict) | Finding | Effect | Evidence |
+|---|---|---|---|---|
+| TEST-4 | **major (tests)** | **Dispatch order is not tested at all.** Switching the simulator from Earliest-Deadline-First to first-in-first-out, or reversing the deadline order, or computing `latestSafeStart` by wall-clock, changes no result in any of 916 checks (including the hand-traced trusted-source scenarios). | Frozen decision 2 has zero protection. Also means every fixture is insensitive to dispatch order. | B1, B1b, B2 |
+| TEST-5 | **major (tests)** | **Confidence-interval gating is almost untested.** SLA gate: one incidental assertion. Per-category, occupancy and ASA gates: nothing. Replacing the CI bound with the mean passes everything. | Frozen decision 8 effectively unprotected. Cheap fix: call `computeStatisticalEvaluation` directly with samples [78,82,80,79,81] vs target 80 — mean passes, lower bound must fail. | B4, B4b, B4c, B4d, B5 |
+| TEST-6 | **major (tests)** | **Common Random Numbers is untested.** Seeding per candidate N and regenerating arrivals passes everything. | Frozen decision 9 unprotected. | B6 |
+| TEST-7 | **major (tests)** | "Unfinished cases count as SLA failures" is untested — excluding them (which would inflate SLA % for under-sized teams) passes everything. | An under-staffing bug of this kind would ship silently. | B15 |
+| TEST-8 | minor (tests) | Volume rounding rule, opening-backlog generation (1 test), and async seed parity (3 roster-polish assertions) are thinly covered. | Internal. | B13, B14, B10 |
+
+Well protected: presence rule (decision 11), workload floor and its opt-out/warning (decision 4), smallest-passing-N incl. async-only, occupancy cap gate, polish adoption parity.
+
+**Combined result of P2-1 + P2-2 — frozen decisions vs `npm test`:** protected: 3, 4, 5, 7, 10 (one assertion), 11, calendar half-open. Unprotected or barely protected: **2 (EDF), 8 (CI gate), 9 (CRN)**, and the Gross HC total under 6–7 (TEST-1).
