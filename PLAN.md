@@ -509,3 +509,16 @@ Weekly cap 25% (hard stop). Meter at plan time: 21%. No new agent at a reading o
 | D1 | Stray date inside the demand file (hole of more than 30 days) | **Block the run** with a message naming the dates — the sizing is meaningless otherwise | Warning only (run allowed; headcount still understated) |
 | D2 | Hole size that triggers it | **More than 30 calendar days** with no rows | 14 days (stricter) or 60 (looser) |
 | D3 | Backlog-only data (no demand rows) | **Keep today's behaviour** (horizon = 7 days from the earliest backlog arrival) | Block the run |
+
+## G1 plan — challenger verdict: FAIL (accepted). Build NOT started; owner decisions required first.
+
+| Challenge | Ruling |
+|---|---|
+| **Blocker:** backlog that arrived before the horizon (ordinary Friday carry-over) keeps its old deadline, so after the fix it is already overdue when the first agents start and fails at EVERY headcount. `findImpossibleCategories` (`hc-search.ts:2268-2320`) does not see such cases. Enough of them push the search to the cap: infeasible or inflated result on normal data. Today they pass only because phantom pre-horizon agents work them. | **Accepted.** The plan needs an explicit rule for backlog already overdue at horizon start — owner decision D4. |
+| Wait-time (ASA) for old backlog is measured from its original clock start (`des-engine.ts:1969-1978`): one 14-day-old case adds days to the mean and can fail the ASA gate at any headcount. | **Accepted.** Same rule as D4 must cover ASA. |
+| Case `arrival` stays in the past while the case is injected at horizon start; consumers of `arrival` (exports, tie-breaks at `des-engine.ts:200`, `:252`) not listed. | **Accepted.** Builder lists every consumer; clamp approach kept (simpler than blocking dispatch). |
+| Data-quality hole rule: a stray date 10-30 days out still stretches the horizon silently; a real multi-week shutdown would be blocked. | **Accepted.** Revised rule: block only when the hole is longer than 30 days AND one side of it is isolated (a few rows); warn on any stray span below that. Placement stated relative to early returns. |
+| Acceptance criteria 2 and 4 depend on the D4 rule; add a Friday-backlog + Monday-demand fixture that must not hit the cap; pin the SLA target. | **Accepted.** |
+| Workload already includes backlog remaining minutes (`hc-search.ts:2441-2460`); horizon end unaffected; frozen decisions 3 and 4 not altered in logic (numbers change — owner confirmation recorded). | Noted. |
+
+**Owner decisions now required:** D1 (stray date: block vs warn), D4 (backlog already overdue at horizon start: exclude from the SLA/ASA gates and report separately — recommended; or restart its clock at horizon start; or keep as failures with a clear infeasible message). D2 and D3 keep the recommended defaults unless changed.
