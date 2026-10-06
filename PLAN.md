@@ -439,3 +439,73 @@ New suite(s) appended to `scripts/verify-sizing-fixes.mts` (next free D-number a
 - **package.json:** chain `npx tsx scripts/verify-trusted-source.mts` before the freshness check; confirm it exits non-zero on a failure; re-measure its check count.
 - **Rule for acceptance:** every new test is shown RED under its own mutation (definitions in the scratch harness `mut.mjs` / `mut2.mjs` and the J0 table) before it counts. A test that stays green under its mutation is reported, not kept as proof.
 - Deferred (not in G12): sync/async parity test (belongs to F9).
+
+---
+
+# BUILD PLAN — G1: planning horizon comes from the demand data only (CSV-13 + CSV-14)
+
+Weekly cap 25% (hard stop). Meter at plan time: 21%. No new agent at a reading of 24%. If the build cannot finish inside the cap it stops after a committed, green step and resumes after the weekly reset.
+
+**Task:** empty days before the demand data starts (or after a stray date) must never count as planned capacity; a backlog case's own arrival still drives its deadline.
+**End user:** the WFM planner opening `BoWFM.html` from disk.
+**Tier 3** (engine numbers). Reviewers: `tester` + `auditor` + `user-side` + final `challenger`.
+**Skills:** `wfm-engine-testing` (fail-first protocol), `wfm-sizing-simulation` (builder reads before touching the DES), `browser-automation` (free gate, tester).
+
+## Facts established (investigator, with probes; scratch `g1/`)
+
+- The stretch lives in three copies: `calendar.ts:488-516` (`computeIntervalHorizon`, lines 507-513 take the minimum with backlog arrival), `hc-search.ts:2391-2414` (sync search) and `:3045-3067` (async search), `ConfigFlow.tsx:71-89` (preview). `generateCaseEntities` (`des-engine.ts:530`) and `validateDataQuality` (`csv-parser.ts:895`) call the shared one.
+- Consumers of the working-day count: `N_min`, `N_occ`, the occupancy denominator (`des-engine.ts:2100-2102`), Gross HC inputs, agent day scheduling from `horizonStart` (`des-engine.ts:1119-1174`), simulation start (`:833`), drain end (`:829`).
+- Before-baseline (Mon–Fri week, 6 cases per interval, AHT 30): no backlog → 5 working days, `N_min` 7, recommended 8. One backlog case 14 days old → 15 days, `N_min` 2, recommended 7 (6 h SLA) or 5 (3-day SLA). One stray demand interval 2 years out → 524 days, `N_min` 1, recommended 7 / 5; data quality "passed".
+- **Hazard that the fix must also close:** every case is injected at its own arrival time (`des-engine.ts:820-822`) and agents are seeded idle regardless of the clock (`:918`). If only the horizon is moved, an old backlog case arriving in open hours is worked BEFORE the horizon by agents who are not rostered yet (probe: 16 timeline slices before the horizon start, case counted as passed). That is free capacity — under-sizing by another route.
+- No test asserts the stretching and no document calls it deliberate (`docs/wfm/07:921` says the horizon uses validated intervals). The fix reverses no recorded decision.
+
+## Design
+
+1. **One horizon function.** `computeIntervalHorizon(intervals, openingWIP?)` in `calendar.ts`: start = earliest valid interval start, end = latest valid interval end. Backlog arrivals no longer move it. Fallback when there are NO valid intervals (backlog-only data, used by existing tests): start = earliest valid backlog arrival, end = start + 7 days, exactly as today; with neither, today's behaviour is kept unchanged.
+2. **Three copies become one.** Both search functions and `ConfigFlow.tsx` call the shared function (sync and async edited identically; no third copy).
+3. **Backlog older than the horizon.** In the simulation each case is injected at `max(arrival, horizonStart)`. Its `arrival`, `clockStart`, deadline and `latestSafeStart` are NOT changed — an overdue backlog case still counts as an SLA failure and still sorts first under EDF. No work can start before the horizon.
+4. **Data quality (new rules):**
+   - **Blocking error** — "Date gap in demand data": the demand data contains a run of more than 30 consecutive calendar days with no rows between two dated rows. Message names the last date before the gap, the first date after it, and the row of the isolated date ("check for a mistyped date"). This stops the stray-date case, which the fix above cannot repair by itself.
+   - **Warning** — "Old backlog arrival": the oldest backlog arrival is more than 30 calendar days before the first demand interval (names the case and date). Harmless to capacity after the fix; flags typos such as year 2006.
+   - The existing "coverage gap" warning stays as is.
+5. No change to any frozen decision: occupancy is still demand ÷ planned capacity (the planned horizon is now the data's own span), the `N_min` floor logic, EDF, CRN, gross-up are untouched.
+
+## Steps (builder `sonnet-executor`, fail-first)
+
+1. Tests first, shown red on today's code (new suite in `scripts/verify-sizing-fixes.mts`): (a) horizon of a Mon–Fri week + one backlog case 14 days old = the week itself, 5 working days; (b) `N_min` and `N_occ` equal the no-backlog values (7 / 8 in the baseline fixture); (c) recommended HC with one old backlog case ≥ the no-backlog recommendation, at 6 h and at 3-day SLA, sync and async equal; (d) the old backlog case keeps its original deadline, is scored failed if overdue, `firstStartTime >= horizonStart`, zero timeline slices before `horizonStart`; (e) 50 old backlog cases → recommended HC ≥ baseline (they are real extra work); (f) backlog arriving inside the horizon behaves exactly as before (digest of case results unchanged); (g) backlog-only dataset: horizon as today; (h) data quality: 31-day hole → blocking error naming both dates, 30-day hole → no error; backlog 31 days old → warning, 30 → none; (i) sync search and async search read the horizon from the shared function (same result object fields).
+2. `calendar.ts` — remove the backlog pull-back (keep the backlog-only fallback).
+3. `hc-search.ts` — both searches call the shared function. `ConfigFlow.tsx` — preview calls it.
+4. `des-engine.ts` — inject at `max(arrival, horizonStart)`.
+5. `csv-parser.ts` — the two data-quality rules.
+6. Full verification: `npm run lint`; `npm test` (987 + new); `npm run test:audit` — every sample-file headcount unchanged (samples have no backlog); explain any existing test that had to change (expected: none that assert old behaviour; any expected-value edit must be justified one by one and is reviewed).
+7. Docs + artifact: `PRD.md` (§5 data-quality table: two new rules, count 18 → 20; §6 horizon definition; §10 note; version + date bump — product behaviour changes), `project_context.md` (§5 horizon, §11 recently fixed, duplication note), `docs/wfm/07-known-defects-and-decisions.md` (new entry), rebuild `BoWFM.html`, `npm run check:artifact`.
+
+## Scope lock
+
+`src/utils/calendar.ts` (`computeIntervalHorizon` only), `src/utils/hc-search.ts` (the two horizon blocks only), `src/utils/des-engine.ts` (case-arrival scheduling line(s) only), `src/utils/csv-parser.ts` (`validateDataQuality`: two new rules only), `src/components/ConfigFlow.tsx` (horizon preview block only), `scripts/verify-sizing-fixes.mts` (append; existing expected values only with per-line justification), `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`, rebuilt `BoWFM.html`. Nothing else.
+
+## Acceptance criteria and proof
+
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | Old backlog no longer lowers the floor | Baseline fixture + 1 backlog case 14 days old: working days 5, `N_min` 7, `N_occ` 8 (were 15 / 2 / 3) — test + tester's independent script |
+| 2 | Recommendation not lowered by old backlog | Same fixture: recommended ≥ 8 at 6 h SLA and at 3-day SLA (were 7 and 5); sync = async |
+| 3 | Backlog is real work | 50 old backlog cases → recommended ≥ baseline and workload hours include them |
+| 4 | Deadline clock intact | Old backlog case: deadline unchanged vs today's code, scored failed when overdue, sorted first; hand-computed deadline for one case shown |
+| 5 | No work before the horizon | Zero timeline slices and zero busy minutes before `horizonStart`; `firstStartTime >= horizonStart` for every case |
+| 6 | In-horizon backlog unchanged | Case-result digest identical before/after for backlog arriving on or after the first interval |
+| 7 | Stray date is stopped | File with one row 2 years out → blocking error naming the dates; Run disabled in the browser; the same file without that row runs and gives the baseline HC |
+| 8 | Old-backlog typo is visible | Backlog case dated 2006 → warning naming the case; run still allowed; headcount equals the run without the typo's capacity effect |
+| 9 | No regression | lint clean; `npm test` all green; `npm run test:audit` sample HCs unchanged; three built-in samples in the browser still 31/40, 27/34, 31/39; zero console errors |
+| 10 | One implementation | `grep` shows no hand-rolled min/max horizon loop left in `hc-search.ts` or `ConfigFlow.tsx`; sync and async call the same function |
+| 11 | Mutation proof | Tester re-adds the backlog pull-back, and separately removes the injection clamp, in a scratch copy → new tests fail each time |
+| 12 | Docs and artifact | PRD, project_context, docs/wfm/07 updated; `npm run check:artifact` passes |
+| 13 | Scope respected | `git diff <checkpoint>..HEAD --stat` lists only scope-lock files |
+
+## Decisions needed from the owner before the build
+
+| # | Decision | Recommended | Alternative |
+|---|---|---|---|
+| D1 | Stray date inside the demand file (hole of more than 30 days) | **Block the run** with a message naming the dates — the sizing is meaningless otherwise | Warning only (run allowed; headcount still understated) |
+| D2 | Hole size that triggers it | **More than 30 calendar days** with no rows | 14 days (stricter) or 60 (looser) |
+| D3 | Backlog-only data (no demand rows) | **Keep today's behaviour** (horizon = 7 days from the earliest backlog arrival) | Block the run |
