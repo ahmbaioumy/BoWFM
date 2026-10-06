@@ -629,3 +629,53 @@ Weekly cap 35% (hard stop). Meter at plan time: 30%. No new agent at a reading o
 - Criterion 5 restated: "measured on the listed fixtures: SLA at fixed headcount not lower; any recommendation that RISES is listed with an explanation" — a direction is not guaranteed by the engine.
 - Added tests: (g) bounded work on a stress fixture (24x7, many cases, small budgets): parks per case no more than agents x days, total event count bounded, run completes; (h) determinism: two runs with the same seed give identical case results (same-instant resume ordering); (i) zero budget everywhere: resume only at the reset.
 - Before deleting the `DayClose` copy: confirm by grep that no 24x7 path schedules `DayClose`.
+
+---
+
+# BUILD PLAN — F3: statistics describe the roster that is actually recommended (HC-15)
+
+Weekly cap 40% (owner: "increase and resume", +5 step assumed). Meter at plan time: 33-34%. No new agent at a reading of 39%.
+
+**Task:** when shift placement adopts a polished roster, the confidence block and the search-history row for the recommended headcount must describe that adopted roster, not the one before polish.
+**End user:** the WFM planner using shift placement (opt-in setting `labor.shiftPlacementEnabled`). Runs without it are unaffected.
+**Tier 3** (search result fields; sync + async). Reviewers: `tester` + `auditor`.
+
+## Facts (investigator, probe in scratch `f3/p.mts`)
+
+- Polish blocks: sync `hc-search.ts:2768-2800`, async `:3529-3577`. Every polish candidate is already evaluated with the full R-replication CI evaluation on the shared case sets (`:2779-2783`, `:3552-3556`), but only `{passes, reasons, median}` is kept (`:2791-2792`, `:3568-3569`); the full evaluation is discarded.
+- On adoption only the roster map is updated (`:2799`, `:3576`). `primaryPassedResult` and `evalCache` keep the PRE-polish evaluation, so `primaryStatistical` (`:2965` / `:3773`), every history row (`:2898-2910` / `:3691-3702`), the occupancy/ASA binding-constraint branches (`:2887-2892` / `:3680-3684`) and the representative replication index (`:2803-2807` / `:3597-3601`) are PRE, while the headline simulation (`:2808-2821`) is POST.
+- Probe (D50 fixture, seed 42, N = 9, polish adopted 7/7): confidence block shows mean 94.3, CI [94.1, 94.5]; the adopted roster really scores 100, CI [100, 100]; headline shows 100. Same for seeds 7 and 99.
+- Decision is not affected: adoption requires the polished roster to pass the full CI evaluation (pooled path confirmed; siloed path to be confirmed by the builder). Only displayed numbers are wrong (pessimistic in the probe).
+- No test asserts these fields under polish; no document records the behaviour as deliberate.
+
+## Design
+
+1. Keep the full evaluation of each polish candidate (pooled: by k; siloed: by vector key) in a small map inside the polish block.
+2. One shared helper next to `finalizeRosterPolish` returns the evaluation of the ADOPTED roster (or nothing when nothing is adopted). Both search functions call it identically right after the roster is adopted and then set `primaryPassedResult` to it and overwrite `evalCache` for the recommended headcount. No new evaluation is run (zero extra simulations).
+3. Consequences, all intended: `primaryStatistical`, the history row for N, the occupancy/ASA binding branches and the representative replication index now describe the adopted roster. The audit (headline) run therefore uses the adopted roster representative replication. One history row per N as before (replaced, not added).
+4. The pre-polish median stays visible as today (`rosterPolish.currentSlaPct`, "SLA x -> y" status line). No new result fields, no type change, no UI change.
+5. If the adopted evaluation is missing for any reason (should not happen), keep today behaviour — never substitute a made-up value.
+
+## Steps (builder `sonnet-executor`, fail-first)
+
+1. Tests first, red on today code (new suite before the RESULTS block of `scripts/verify-sizing-fixes.mts`), D50 fixture seed 42 with placement ON: (a) `primaryStatistical` (mean, median, CI low/high, R) equals an INDEPENDENT `evaluateCandidateStatistical` call for the adopted roster at N on the same seed and case sets, and equals the literals mean 100 / CI [100, 100]; (b) the history row for N carries the same numbers; rows for other N unchanged vs today (pin literals measured before the change); (c) `rosterPolish` object byte-identical to today (pin a digest before the change); (d) recommended HC and adopted roster identical to today; (e) sync result deep-equals async result; (f) no-adoption scenarios (`no_improvement`, placement OFF): entire result identical to today (digest); (g) one siloed polish scenario if a fixture exists in D51/D52: same assertions (a)-(e); (h) the representative-run consistency: headline SLA % of the audit run lies within the CI of the reported block or the existing `infeasibleAdjacentWarning` rule fires — no contradiction of the kind "CI [94.1, 94.5] with headline 100".
+2. Implement design 1-2 in BOTH functions identically; confirm for the siloed path that the adopted vector is always an evaluated-and-passing one (if not: STOP and report).
+3. Verify: lint; build; `npm test`; `npm run test:audit` (24/24 identical expected — the audit samples run with placement OFF; report otherwise); `check:artifact`. Any existing expectation that changes must be a placement-ON polish-adopted scenario, listed with before/after and justification.
+4. Docs: `PRD.md` Stage 3b (~861-890) one sentence + version bump; `project_context.md` §6.4b and §11; `docs/wfm/07-known-defects-and-decisions.md` new entry with the probe numbers.
+
+## Scope lock
+
+`src/utils/hc-search.ts` (the two polish blocks + one helper beside `finalizeRosterPolish`; the candidate-evaluation record type if needed), `scripts/verify-sizing-fixes.mts` (append; listed expectation updates only), `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`, rebuilt `BoWFM.html`. No UI file, no `wfm.ts`, no engine file.
+
+## Acceptance criteria and proof
+
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | Confidence block describes the adopted roster | Tester own script: D50 fixture seeds 42, 7, 99: reported mean / CI equal an independent evaluation of the adopted roster (probe values 100 / [100, 100]; were 94.3 / [94.1, 94.5]) |
+| 2 | History row for N matches | Same numbers in the row for N; other rows unchanged |
+| 3 | Decision untouched | Recommended HC, adopted roster and `rosterPolish` identical before / after on all probe scenarios |
+| 4 | Nothing changes without adoption | Placement OFF and `no_improvement` runs: full result digest identical before / after; three built-in samples 31/40, 27/34, 31/39; sample audit 24/24 |
+| 5 | Sync = async | Deep-equal results on the polish fixtures |
+| 6 | Screen | Browser: placement ON run where polish is adopted: confidence block and headline no longer contradict each other |
+| 7 | Mutation proof | Remove the two assignments in a scratch copy: new tests fail |
+| 8 | Gates, docs, artifact, scope | lint, `npm test`, `check:artifact` green; docs updated; diff only scope-lock files |
