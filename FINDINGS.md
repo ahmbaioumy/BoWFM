@@ -229,3 +229,23 @@ Meter at phase start: 9%. Challenger on the phase 2 plan: fail -> plan re-cut (a
 | P2-A4 | minor (docs) | Apportionment is Webster **after a guaranteed 1 seat per category** (differs from pure Webster only for tiny categories). CLAUDE.md decision 10 does not mention the 1-seat guarantee. | No. | `des-engine.ts:464` |
 
 Matched an independent recompute exactly: siloed seat split for N=28..34 (7/7, plus a 0.86% category); isolation (0 wrong-category assignments in ~1,450 per N); per-category and overall SLA; all primary deadlines; `N_occ` on 10 cap/adherence combinations; reported occupancy vs handled minutes ÷ planned capacity (10/10, adherence applied once); CI upper-bound gate at rec and rec−1; mean ASA from per-case records (5 targets); monotonicity of HC in cap and in ASA target.
+
+### P2-3 — `csv-parser.ts:1-535` (raw parsing, column mapping, dates; run under UTC, New York, Dubai)
+
+| ID | Severity (my verdict) | Finding | Effect on the planner | Evidence |
+|---|---|---|---|---|
+| CSV-1 | **major** | Timestamps with `Z` or an offset are shifted into the machine's timezone. `2026-03-04T08:30:00Z` lands at 08:30 on a UTC machine, 12:30 in Dubai, 03:30 in New York; `…+04:00` lands on the **previous day** in New York. PRD FR-1.3 says `Z`/offsets are accepted but not that they shift. | **Demand silently lands on different intervals/days** depending on the PC. Reachable with any system/BI export in ISO-UTC. | `csv-parser.ts:431-451`; not tested |
+| CSV-2 | **major** | Ragged rows and duplicate headers are mangled without warning: a short row shifts cells (volume becomes 0); extra cells are dropped; two `Volume` columns → the second silently overwrites the first. | **Wrong numbers or lost data, no warning.** Normal file with one missing delimiter. | `csv-parser.ts:148-157`; not tested |
+| CSV-3 | **major** | An unterminated quote (e.g. a category named `5" screen`) swallows the rest of the file into one cell — 1 row loaded, no error. | **Rows lost silently.** | `csv-parser.ts:77-95` |
+| CSV-4 | **major** | Comma-decimal volumes are read ~10× too high with no warning: `12,5` → 125; `1.234,5` → 1.2345. (Consumer at `:~598`; confirm in P2-4.) | **Wrong volumes silently** for European-locale files (semicolon delimiter). | `csv-parser.ts:~598` |
+| CSV-5 | major (unusual file) | A title row above the header is not detected: the real header becomes data; no error from the parser. | Garbage or defaults; DQ may flag bad dates later. Common in BI exports. | `csv-parser.ts:144-145` |
+| CSV-6 | major (unusual file) | Pipe-delimited file loads as one column; volume parsed as 2026 from the date text; no error. | Wrong numbers silently. | `csv-parser.ts:58-64` |
+| CSV-7 | major (user error path) | A binary `.xlsx` (renamed, or accept-filter bypassed) loads as 55 garbage "intervals" with volume 0; no binary check in the upload handlers; `App.tsx:182-190` then syncs categories from it. Downstream DQ not yet checked. | Confusing garbage dataset instead of "this is not a CSV". | `csv-parser.ts:28-160` |
+| CSV-8 | minor | Other cells read as numbers silently: `30 min` → 30, `12abc` → 12, `1e3` → 1000, `0x10` → 0 with no warning. | Rare. | P2-4 slice |
+| CSV-9 | minor | Compact datetimes misread as Unix epoch: `202603040830` → 1976; `20260304083000` → year 2612; `20260304` rejected. | Unusual file; valid-looking wrong dates. | `csv-parser.ts:405-409` |
+| CSV-10 | minor | Separate time column ignored when the date cell already carries `T00:00:00`; hours-only offset `+04` accepted but ignored (while `+04:00` is applied). | Unusual file. | `csv-parser.ts:413-454` |
+| CSV-11 | minor | A local time inside a DST gap (`2026-03-08 02:30` in New York) is rejected as invalid — machine-dependent. | Row lost with a bad-date warning, only on DST-zone machines. | `csv-parser.ts:369-379` |
+| CSV-12 | minor | Auto-mapping picks wrong defaults on some headers (`Actual AHT` → volume; `Service Level` or `Day Type` → category; `Due Date` before `Created Date`). Planner can correct on the mapping tab. | Wrong silent default. | `csv-parser.ts:192`, `:222-271` |
+
+Clean: comma/semicolon/tab detection; quoted delimiters and newlines; `""` escapes; BOM; CRLF/LF/CR; empty and header-only files; leap years and impossible dates; AM/PM; dd/mm applied consistently per file and US `MM/DD` with day > 12 rejected as documented (L9); no `Date.now`/`Intl`. Not accepted (rejected as invalid, not a defect): `04-Mar-2026`, `Mar 4 2026`, `20260304`, Excel serials.
+Baseline: all four `test_files/*.csv` parse fully (2976 / 7440 / 4464 / 4464 rows), zero bad dates, zero volume issues.
