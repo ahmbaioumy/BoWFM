@@ -429,3 +429,32 @@ Clean and proven in phase 2: workload floor never breached (18 runs, sync = asyn
 ## Usage
 
 Weekly meter: 9% at phase 2 start → 15% after P2-8. Cap 20% respected.
+
+---
+
+# Phase 3 — UI and the shipped file
+
+Weekly meter at start: 15%. Hard stop 20%; no new audit agent at or above 17%.
+
+### P3-1 — shipped `BoWFM.html` driven in a real headless browser from `file:///` (tester; every number checked against a direct engine run and a hand calculation) — PASS
+
+| ID | Severity (my verdict) | Finding | Effect on the planner | Evidence |
+|---|---|---|---|---|
+| P3-T3 | **major** | An empty file and a header-only file give no message at all. Empty file: page stays on Upload, no error. Header-only: jumps to Column Map with empty dropdowns, no explanation. Data quality keeps its generic "Upload and map…" text. | Planner cannot tell why nothing happened. Product — input handling (fix with G4). | scratchpad `p3/d_empty.csv`, `p3/e_header.csv`; zero console errors, no error text on screen |
+| P3-T2 | minor | Pooled run: Agent Browser category dropdown returns "No agents match" for every real category, because pooled agents carry the category "Pooled", which that dropdown does not offer. Same control as UI-2, different symptom. | Filter looks broken. Product — display (fix with G7). | support sample, default run, Agent Browser → Billing_Support |
+| P3-T1 | minor | Healthcare sample card says "4 Segs … 10-day horizon"; the data has 3 categories and data quality shows 8 working days. | Wrong card text only (add to UI-7). | data-quality screen after loading healthcare |
+
+Confirmed in the browser (known items, no new ID): UI-1 (added an opening-backlog case after the claims run; Results still Net 31 / Gross 40, no banner); UI-2; CSV-4 (`12,5`, `10,5`, `8,25` read as 125, 105, 825 — true total 31.25 shown as 1,055, "PASSED DQ GATE", 0 issues); CSV-5 (title row becomes the only column header, no error); CSV-6/7 (`.xlsx` shows raw binary text in the mapping dropdowns, no error).
+
+Clean and proven:
+- Loads from disk; zero console errors through every step; zero requests to any non-file origin; only identifier URLs in the file.
+- Screen = direct engine = hand calculation on all three samples:
+
+| Sample | Recommended | Gross | N_min | SLA | Occupancy (hand check) |
+|---|---|---|---|---|---|
+| Claims | 31 | 40 | 30 | 100% | 99.1% (69,125 / 69,750) |
+| Support | 27 | 34 | 20 | 88.7% | 77.6% (47,160 / 60,750) |
+| Healthcare | 31 | 39 | 18 | 86.7% | 58.9% (65,700 / 111,600) |
+
+- Claims per-category net 4.16 / 9.48 / 17.36 and gross 5.2 / 11.86 / 23.14 match the engine; harmonic shrinkage 22.9%.
+- Reset-confirm modal, progress modal, "View Results", sidebar READY badge all work. No crash, NaN, Infinity or undefined seen.
