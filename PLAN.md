@@ -146,3 +146,5 @@ Approved by owner 2026-10-06 ("approve, continue to phase 2"). Same rules as pha
 | P2-8 | Final challenge | `challenger` | Attacks phase 2 findings |
 
 Order is risk order; steps not reached are marked "not audited" and carried to phase 3.
+
+Phase 2 re-cut after challenger review (all accepted): run order is P2-0, P2-5a (siloed + ASA + occupancy-cap recompute), P2-3 (`csv-parser.ts:1-535`), P2-4 (`csv-parser.ts:536-1121`) plus an .xlsx-upload probe, P2-1 (mutations A), P2-6 (offline contract, plus stray scripts and `trusted-source-validation.json`), P2-2 (mutations B), P2-5b (staggered fuzz, holidays in drain, peaky 24x7), P2-7 (adds `default-config.ts`, `sample-data.ts`), P2-8. Mutation harness rules: scratch copy with a `node_modules` junction, `cd` into the copy, prove each mutation applied by diff, run `verify-sizing-fixes` + `verify-fixes` first and stop at first kill, skip the freshness check, never rebuild, classify source-text kills separately, max ~8 mutations per run. Added mutations: wall-clock instead of `subtractWorkingTime` for `latestSafeStart`; CI upper bound to mean for occupancy/ASA; floor opt-out flag. Dropped: SLA `<=` to `<`.
