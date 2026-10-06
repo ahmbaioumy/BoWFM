@@ -867,3 +867,20 @@ Rule: an isolated date (no more than 1% of rows, 1 to 20 rows) separated from th
 Residual (minor, by design): a stray block of more than 20 rows, or a stray row within 7 empty days, still only warns (probe: 30 stray rows 10 days out stretch 5 working days to 11).
 
 Usage: weekly meter 30% after the build.
+
+---
+
+# FIX F2 — 24x7 parked work resumes when capacity exists — BUILT, awaiting owner approval (2026-10-06)
+
+Branch `fix/f2-24x7-resume` (from `main`), commit `de1a7c3` (checkpoint `819d592`). Closes DES-8. Engine change: two `is24x7` midnight-resume branches in `des-engine.ts` (`CasePark`, dead copy in `DayClose`) replaced by the same `nextOpen` call every other calendar uses. Hand-rolled date maths removed with them.
+
+| Check | Result |
+|---|---|
+| Plan challenger | pass: no livelock (a budget park uses the whole remaining budget; agents with no budget are skipped) |
+| Builder gates | red-first: 5 new checks failed on the old engine; lint clean; `npm test` 174 + 671 + 60 + 164 = 1,069; sample audit 24/24 identical; artifact fresh. One existing expectation re-pinned: D43.14 digest (24x7, budget parks; SLA 100% before and after, parks 12 to 9). No business-hours or trusted-source value changed. |
+| Supervisor diff read | engine diff is exactly the two branch removals |
+| Tester (own tally + browser) | **pass**: avoidable waits 4 to 0 (one shift) and 5 to 0 (staggered, 4,132 avoidable minutes to 0); CASE-000002 now resumes Mon 08:00 on the next cohort, was Tue 00:00; legitimate waits kept (single agent exhausted resumes at the midnight reset); 0 over-budget, 0 out-of-shift, 0 overlap, work conserved 3,840 = 3,840; SLA now non-decreasing in headcount (16 agents 100%, was 98%); deterministic; re-adding the branch fails D64.1, .2, .5, .6, .11 and D43.14; page loads clean, claims 31 / 40. |
+
+Not run: final challenger (meter 32-33%, cap 35%). Builder skipped test (i) (zero budget everywhere cannot be built: adherence is clamped at 0.1); covered by the single-agent exhausted case.
+
+Unchanged and still open (known HC-14, fix F1/G8): the claims sample switched to 24x7 with Min-coverage ON (the default) returns "search infeasible" at the 500 cap (coverage: 0 agents on shift in an open interval). This is the documented single-shift-cannot-cover-24-hours limit, present before F2; F2 does not address it.
