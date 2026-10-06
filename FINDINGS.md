@@ -651,3 +651,114 @@ Clean: engine errors during a run are caught and shown (no white screen or stuck
 ## Usage
 
 Weekly meter: 17% at phase 3b start → see final reading in the report. Cap 20% respected.
+
+---
+
+# Phase 4 — docs vs code
+
+Weekly meter at start: 17%. No new agent at a reading of 19%; hard stop 20%.
+
+### P4-1 — `PRD.md` lines 1-684 (sections 1–5) vs code (investigator; about 120 statements checked) — minors only
+
+| ID | Severity | PRD says | Code does | Fix side | Evidence |
+|---|---|---|---|---|---|
+| DOC-1 | minor | FR-11.2 (line 664): slice export has "local and ISO timestamps" | Only `From` / `To` in local time; FR-9.3a (line 579) already says ISO columns were removed — the PRD contradicts itself | doc | `export-rows.ts:52-67` |
+| DOC-2 | minor | FR-5.12 (line 328): min agents per interval "0–operationalHC" | Input accepts 0–999 typed and beyond; engine caps it later | doc | `ConfigFlow.tsx:1113-1120`; `des-engine.ts:717` |
+| DOC-3 | minor | FR-8.2 / FR-8.3 (lines 498-499): replications 1–100, search ceiling 1–5000 | Only the lower bound is enforced; 99999 is accepted (same as UI-54) | **code** (doc is the intended contract) | `RunFlow.tsx:316-322`, `:340-346` |
+| DOC-4 | minor | FR-11.5 (line 667): settings import restores keys "defensively" | Only `sla` is sanitised; calendar, labor, categories, sim params, mapping taken as-is (HC-4, UI-56) | doc now, code with H10 | `App.tsx:419-455` |
+| DOC-5 | minor | §5.11 (lines 661-666) | Undocumented: the JSON carries `exportedAt`; file name uses epoch milliseconds | doc | `App.tsx:386`, `:399` |
+| DOC-6 | minor | Lines 668-669 | Two different rows both numbered FR-11.6 | doc | `PRD.md:668-669` |
+
+Verified matching: all 18 data-quality checks and their blocking/warning severities; parsing rules (delimiters, file types, date pivots, default 30-minute end); **every default** (calendar, labor, SLA, sim params, seeded categories); documented clamps; navigation, tab names, the six pre-run checks; Results filters and page sizes; CSV file names and columns; sensitivity grid steps. Note: the PRD's "productive hours 1–24" matches the HTML limits only — typed/pasted values bypass them (UI-43).
+
+### P4-2 — `PRD.md` lines 684-1465 (sections 6–12) vs code (investigator; about 70 statements checked) — 2 majors (doc side)
+
+| ID | Severity | PRD says | Code does | Fix side | Evidence |
+|---|---|---|---|---|---|
+| DOC-20 | **major (doc)** | §9.1 (lines 1115, 1124): "856 checks (174 + 518 + 164 trusted-source)", "Run with `npm test`" | `npm test` runs 174 + 518 + 60 (agent analytics, missing from the PRD table) = 752 and does **not** run the 164 trusted-source checks. The PRD implies the hand-traced ground-truth suite runs on every test. Same root as TEST-1. | doc now; code with G12 (add the suite to `npm test`) | `package.json:14`, `:17` |
+| DOC-21 | **major (doc)** | §9 and backlog P0-1 (lines 1157-1160, 1197-1199): invariants panel "renders four statically-passing cards… M1–M4" | Panel is titled "M1–M3", three cards, interpolating live values with an unconditional "Passed" (UI-12). The described state no longer exists; the underlying problem (nothing is evaluated) remains. | doc | `ResultsFlow.tsx:1143-1175` |
+| DOC-22 | minor | Line 1078: file is "~513 KB" | `BoWFM.html` is 627,984 bytes (~613 KB) | doc | file size |
+| DOC-23 | minor | Lines 1317-1318: unused `DataTable.tsx` 308 lines, `NativeCharts.tsx` 363 | 309 and 372; both still unreferenced (dead code confirmed) | doc | `wc -l`, grep |
+| DOC-24 | minor | Line 726: "probes at 5 replications, confirmed at full 30"; "leap in doubling steps" | 5 and 30 are defaults (`min(R, 5)`, R configurable); step doubles only after a failure | doc (one word) | `hc-search.ts:3460-3482` |
+| DOC-25 | minor | Stage 2 formula | Omits that `N_min` is floored at 1 | doc | `hc-search.ts:131` |
+| DOC-26 | not confirmed | Backlog P2-4 (Summary grid) | May be stale: grid shows 4 cards in a 4-column layout | check | `ResultsFlow.tsx:958` |
+
+**Does the PRD's limitations / backlog list (§10, §11) already tell the reader about the audit's main findings?**
+
+| Audit finding | Listed in PRD? |
+|---|---|
+| Old backlog date / stray date stretches the horizon (CSV-13/14) | **No** |
+| 24x7 + coverage ON + short SLA gives no answer (HC-14); 24x7 coverage OFF assumes any-hour scheduling (HC-20) | **No** |
+| 24x7 parked case resumes only at midnight (DES-8) | **No** |
+| 14-day drain window; holidays after the horizon inflate HC (DES-10) | **No** (glossary defines the window, no length) |
+| Opening backlog treated as part-worked, served first (DES-7) | **No** (stated as the model, not as a limitation) |
+| Comma decimals misread (CSV-4); `Z` timestamps depend on PC timezone (CSV-1) | **No** |
+| 30-minute rule cannot fire (CSV-15) | **No** — L8 states the rule as working |
+| Replications = 1 removes the confidence gate (HC-9) | **No** |
+| Sync / async search duplication | Yes — P2-7 (line 1343) |
+| Trusted-source suite not in `npm test`; EDF / CI gate / CRN barely tested | **No** — line 1124 implies the opposite (DOC-20) |
+| Build tools under `dependencies`; freshness gate time-based only | **No** — NFR-2.2 (line 1072) says devDependency-only, which is false today |
+| Results not flagged after backlog / mapping edits (UI-1, UI-49) | **No** |
+| Gross HC `.5` tie float noise (HC-1) | **No** |
+
+**12 of 13 are absent.** Whatever is not fixed must be added to §10 (limitations) or §11 (backlog) so the "as-built" PRD stops overstating.
+
+Verified matching: Stage 2 `N_min` and `N_occ` formulas; Stage 4 integer OFF floor and single `round`; confidence clamp; search start from `resolveSearchBounds`; limitations L1, L5, L8 (as written), L9; backlog items P1-1, P1-2, P1-3, P1-5, P2-3, P2-5 still true; the seven `docs/wfm` files and audit scripts exist.
+
+### P4-3 — `project_context.md` + `CLAUDE.md` vs code (investigator; about 45 statements checked; DOC-40 re-checked by me) — 3 majors (doc side)
+
+| ID | Severity | Doc says | Code does | Fix side | Evidence |
+|---|---|---|---|---|---|
+| DOC-40 | **major (doc) — and it corrects a phase 2 finding, see below** | `CLAUDE.md` decision 2 and the Code Conventions bullet: "`CaseMinHeap.compare` (real dispatch) and `pickNextCase`/`compareByUrgency` (test harnesses only)". `project_context.md` §6.2 (line 515) and §12 (line 1091) say the same. | **The reverse.** Real dispatch calls `pickNextCase` (`des-engine.ts:1334`), which scans the queue with `compareByUrgency` (`:247`, `:272`, `:275`). `CaseMinHeap.compare` only keeps the heap array ordered and does not decide who is served. `project_context.md` §5 (line 297) and §11 (lines 1029-1035, "corrected, D16") already say this — the file contradicts itself. | doc | `des-engine.ts:185`, `:247`, `:258`, `:1334` |
+| DOC-41 | **major (doc)** | `project_context.md` gives three different test totals: "251 checks" (lines 56, 78), "613 checks" (line 849), tree "156 + 95" (lines 173-175) | Actual `npm test` = 174 + 518 + 60 = 752, plus 164 trusted-source run separately | doc | `package.json:14` |
+| DOC-42 | **major (doc)** | Lines 139-141: "There is no git repository… no `.git` anywhere" | A git repository exists, with history and a GitHub remote; a Stop hook auto-pushes to `auto/agent-updates` | doc | `.git/HEAD`; `.claude/hooks/auto-push.mjs` |
+| DOC-43 | minor | "No console output in `src/`… enforced by suite D9"; network ban enforced | D9.3 scans `src/utils` only — a `console.log` in a component or `App.tsx` passes; D9.1 covers six network names, not remote `import()`, fonts, images | doc, or widen the scan (with G13) | `verify-sizing-fixes.mts:652-684`, `:705-715` |
+| DOC-44 | minor | "Never use `Date.now()` for anything affecting a computed result" | `csv-parser.ts:716` builds category IDs from `Date.now()` — IDs differ per run; not checked whether any result depends on the ID | check, then code or doc | `csv-parser.ts:716` |
+| DOC-45 | minor (stale) | Lines 906-907, 1098: defaults live in `App.tsx` (`DEFAULT_*`) | They live in `src/utils/default-config.ts` | doc | `default-config.ts:15-98` |
+| DOC-46 | minor | "Ten frozen decisions" (lines 324, 504) | Eleven (6.11 added 2026-09-29) | doc | `project_context.md:725` |
+| DOC-47 | minor | Line 73: "The four commands that matter" | Table lists five | doc | — |
+| DOC-48 | minor (stale) | Line 974: "Net Op = ceil(N×(1+extraOff/7))" | `floor(N × openDays / coverageDays)`; §5 and §6.4a of the same file are correct | doc | `hc-search.ts:1587` |
+| DOC-49 | minor (stale) | Lines 997, 1024: line references to deleted / moved code | Off-hours warning now at `csv-parser.ts:848` | doc | — |
+| DOC-50 | minor | Scripts tree lists 5 scripts | Also present: `verify-trusted-source.mts`, `audit-compare.mts`, `audit-sample-hc.mts`, `test-harness.mts`, `ci-*.mts` | doc | `scripts/` |
+
+Doc lines made false by earlier findings: "dependencies is closed / build tooling devDependency-only" (OFF-2); "Suite D9 enforces this" for dependencies and `Math.random`/`Date.now` (OFF-3); "check:artifact fails if older" is time-only (OFF-1); "never duplicate an algorithm" vs three horizon copies (CSV-13/14).
+
+Verified matching: all `package.json` commands; every named engine function exists with the stated role (apportionment, presence, search bounds, CRN case sets, roster helpers); Stage 4 code equals decision 7; `BUG-OCC-ROOT` asserts the planned-horizon denominator; no `console.log`, `fetch`, storage or `process.env` anywhere in `src`; decisions 10 and 11 match the code.
+
+### CORRECTION to phase 2 finding TEST-4 (my error in judging, found through DOC-40)
+
+- Phase 2 mutation **B1 (EDF → FIFO)** and **B1b (reversed deadlines)** changed the text inside `CaseMinHeap.compare` — I checked the mutation script (`scratchpad/mut.mjs:7`): it replaces the first match, which is the heap method, not `compareByUrgency`.
+- Since the heap comparator does not decide dispatch, those two mutations surviving all 916 checks proves **nothing** about dispatch-order testing. The claim "switching EDF to FIFO changes no result" is **withdrawn as unproven**.
+- Still valid: B2 (`latestSafeStart` by wall-clock) survived — that value is computed outside the comparator. TEST-5, TEST-6, TEST-7 are unaffected.
+- **Required before G12 is scoped:** re-run B1/B1b against `compareByUrgency` (`des-engine.ts:247`). If killed → dispatch order is tested and TEST-4 shrinks to B2 only. If it survives → TEST-4 stands.
+- Side finding **DES-15 (minor, internal):** `CaseMinHeap.compare` is a second copy of the urgency ordering that no longer drives anything, and `pickNextCase` scans the whole queue on every dispatch (linear, not heap-fast). Duplicate-algorithm hazard named in `CLAUDE.md`; candidate for removal.
+
+---
+
+## Phase 4 — final ranked list
+
+No final challenger for phase 4 (meter at 18%; reserve kept for write-up). Majors DOC-40 re-checked by me in the code.
+
+| Rank | ID | Severity | Who is misled | Product or internal? |
+|---|---|---|---|---|
+| 1 | PRD §10/§11 gap | **major (doc)** | 12 of the audit's 13 main findings are absent from the "as-built" limitations and backlog; three PRD lines state the opposite (30-minute rule works; build tools devDependency-only; trusted-source runs in `npm test`) | Docs — planner and owner expectations |
+| 2 | DOC-40 | major (doc) | The guardrail file names the wrong function as "real dispatch" for frozen decision 2 — a developer or AI agent would protect or test the wrong code (it already misled this audit's mutation test) | Docs — safety rule |
+| 3 | DOC-20, DOC-41 | major (doc) | Test totals wrong in both documents (856, 613, 251 vs real 752 + 164 separate); PRD implies the ground-truth suite runs on every test | Docs — what is tested |
+| 4 | DOC-21 | major (doc) | Backlog item P0-1 describes an invariants panel that no longer exists in that form | Docs |
+| 5 | DOC-42 | major (doc) | "No git repository" — false; there is one, with an auto-push hook to GitHub | Docs — developer safety |
+| — | DOC-1..6, DOC-22..26, DOC-43..50, DES-15 | minor | Counts, stale line references, wording | Docs / internal |
+
+The code-facing content of both documents is otherwise accurate: every default, all 18 data-quality rules, the sizing formulas, gate directions and the named engine functions match the code.
+
+## Not audited (end of audit)
+
+- `docs/wfm/*.md` (1,742 lines) against the code.
+- `AgentAnalyticsPanel.tsx`, `NativeCharts.tsx` (dead), `DataTable.tsx` (dead), `Sidebar.tsx`, `ResetConfirmModal.tsx` line by line.
+- Re-run of mutations B1/B1b on `compareByUrgency` (see correction above).
+- UI-17 index alignment; UI-49 with the Category dropdown; UI-38; UI-32; DOC-26; DOC-44 consequence.
+- Staggered-mode stale-event fuzz; `.xlsx` sample files; personal data in `test_complaint.csv`.
+- PRD measured figures (roster results, "0 of 18", "533 of 540") were not re-measured.
+
+## Usage
+
+Weekly meter: 17% at phase 4 start → 18% after P4-3. Cap 20% respected across all four phases (6% → 18%).

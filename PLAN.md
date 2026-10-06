@@ -262,3 +262,34 @@ State at start: weekly meter 17%. Hard stop 20%. No new agent at a meter reading
 | P4-4 | Final challenge | challenger | Only if meter reads below 19% |
 
 Not in scope this session unless budget remains: `docs/wfm/*.md` (1742 lines), leftover UI panels. Steps not reached are listed as not audited.
+
+---
+
+# Phase 4 status and fix plan (docs) — audit complete
+
+Done: P4-1, P4-2, P4-3. P4-4 challenger not run (budget). All four audit phases are finished; leftovers are listed under "Not audited (end of audit)" in `FINDINGS.md`.
+
+| # | Finding | What changes | Where | Tier | Proof it is fixed | Needs your decision? |
+|---|---|---|---|---|---|---|
+| J0 | TEST-4 correction | Re-run mutations B1/B1b against `compareByUrgency` before scoping G12. Read-only test, no product change. | scratch copy only | — | Mutation killed or survives, recorded in `FINDINGS.md` | No. **Do first — it decides how big G12 is.** |
+| J1 | DOC-40, DES-15 | Correct `CLAUDE.md` decision 2 and the Code Conventions bullet, `project_context.md` §6.2 and §12: real dispatch is `pickNextCase` / `compareByUrgency`. Optionally remove the duplicate ordering in `CaseMinHeap.compare` (engine change, Tier 3, both orderings proven equal first). | `CLAUDE.md`; `project_context.md:515`, `:1091`; `des-engine.ts:185-197` | 1 (docs) / 3 (code) | Docs name the function at `des-engine.ts:1334` | **Yes** — `CLAUDE.md` frozen-decision wording is yours to approve; removal of the duplicate is optional. |
+| J2 | PRD §10/§11 gap | Add every unfixed audit finding to PRD §10 (limitations) or §11 (backlog) in the existing ID style; correct L8 (30-minute rule), NFR-2.2 (build tools), §9.1 (suites). Shrinks as fixes land. | `PRD.md:1072`, `:1115-1124`, `:1164-1366` | 1 | Each of the 13 items in the P4-2 table has a PRD line | No. **Cheap and honest — recommend doing right after H1.** |
+| J3 | DOC-20, DOC-41, DOC-50 | One correct test table in both documents (174 + 518 + 60 in `npm test`; 164 trusted-source — separate until G12 adds it); scripts tree completed. | `PRD.md:1115-1124`; `project_context.md:56`, `:78`, `:173-176`, `:849-856` | 1 | Numbers equal the suite output | No. |
+| J4 | DOC-21, DOC-42, DOC-45..49, DOC-1, DOC-2, DOC-4..6, DOC-22..25 | Stale text sweep: invariants panel description / P0-1, "no git repository", defaults location, "ten decisions", stale formula and line references, export columns, file size, line counts. | `PRD.md`, `project_context.md` | 1 | Each quoted line corrected | No. |
+| J5 | DOC-43, DOC-44, DOC-3 | Small code items: widen the D9 console/network scan to all of `src/` (with G13); category ID without `Date.now()`; upper clamps on replications and search ceiling (with H1). | `scripts/verify-sizing-fixes.mts:652-684`; `csv-parser.ts:716`; `RunFlow.tsx:316-346` | 2 | D9 fails on a `console.log` in a component | No. |
+
+# Whole-audit fix order (phases 1–4)
+
+1. **H1** — typed settings stored wrong (browser-confirmed, under-staffs ~16%).
+2. **J0** then **G12** — tests that protect the frozen decisions, so later fixes are safe.
+3. **G1** — planning horizon stretched by old backlog dates (under-staffs).
+4. **J2 + J3** — make the PRD honest about what is still open (docs only).
+5. F2, F3 — 24x7 midnight resume; post-polish statistics.
+6. G2–G5 + H2 + H6 — input safety (demand file and backlog file).
+7. G6 + H9, G7 + H5 — stale results; agent tables.
+8. H3, H4, H10, H11 — Results colours and warnings; dead control; lost-work guards; run warnings.
+9. G8 / F1 — coverage-repair roster (owner decision).
+10. F4–F6, G9, G10 — ties, config validation, gate rounding, drain window, backlog priority (owner decisions).
+11. J1, J4, J5, H7, H8, H12, G11, G13, F7–F10 and the minor backlog.
+
+Owner decisions still open: F1/G8, F4, F6, F7, G1, G2, G3, G5, G9, G10, 30-minute rule (G11), G13 (`package.json`), H2, H4, J1.
