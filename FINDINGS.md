@@ -849,3 +849,21 @@ Open after G1:
 - G1-e (minor): wait time for attainable old backlog is measured from the plan start; label it. Case CSV still shows FAIL for a late flagged case next to the new column; per-case wait is still listed for flagged cases.
 - G1-f (minor): data-quality check swallows an engine error silently when counting overdue backlog on a broken calendar; hand-rolled day arithmetic in `csv-parser.ts` (message and block decision only, DST-safe).
 - Correction to my brief: a Friday 15:00 backlog case with a 6-business-hour SLA is NOT overdue on Monday under the default 08:00-18:00 calendar (due Monday 11:00); the engine handled it correctly.
+
+---
+
+# FIX G1-a — tighter stray-date rule — BUILT, awaiting owner approval (2026-10-06)
+
+Branch `fix/g1a-stray-date` (stacked on `fix/g1-horizon`), commit `64c3acd` (checkpoint `555a10c`). Weekly cap raised by the owner to 35%.
+
+Rule: an isolated date (no more than 1% of rows, 1 to 20 rows) separated from the rest of the data by more than 7 empty calendar days blocks the run (was more than 30). Closes G1-a.
+
+| Check | Result |
+|---|---|
+| Builder gates | red-first (5 new checks failed on the old rule); lint clean; `npm test` 174 + 652 + 60 + 164 = 1,050; sample audit 24/24 identical; artifact fresh. Two existing expectations changed, both stating the old 30-day rule (D62.42, D62.44) — necessary consequence, accepted. |
+| Supervisor diff read | one condition (`+32` days to `+9`), message text, and a guard keeping the separate long-gap warning at more than 30 days. Nothing else. |
+| Tester (own script + browser) | **pass** 10/10: stray row 10 days after, 9 days before, and a month typo all block with the date, row count, range and empty-day count; exactly 7 empty days does not block, 8 does; consecutive weeks, a 9-day closure with data both sides, and small two-day files do not block; three samples unaffected; blocking message and disabled Run seen on screen; claims still 31 / 40. |
+
+Residual (minor, by design): a stray block of more than 20 rows, or a stray row within 7 empty days, still only warns (probe: 30 stray rows 10 days out stretch 5 working days to 11).
+
+Usage: weekly meter 30% after the build.
