@@ -884,3 +884,22 @@ Branch `fix/f2-24x7-resume` (from `main`), commit `de1a7c3` (checkpoint `819d592
 Not run: final challenger (meter 32-33%, cap 35%). Builder skipped test (i) (zero budget everywhere cannot be built: adherence is clamped at 0.1); covered by the single-agent exhausted case.
 
 Unchanged and still open (known HC-14, fix F1/G8): the claims sample switched to 24x7 with Min-coverage ON (the default) returns "search infeasible" at the 500 cap (coverage: 0 agents on shift in an open interval). This is the documented single-shift-cannot-cover-24-hours limit, present before F2; F2 does not address it.
+
+---
+
+# FIX F3 — statistics describe the adopted roster — BUILT, awaiting owner approval (2026-10-07)
+
+Branch `fix/f3-post-polish-stats` (from `main`), commit `c062491` (checkpoint `630b697`). Closes HC-15. Weekly cap raised by the owner to 40% (assumed +5 step). Only runs with shift placement ON (default OFF) and an adopted polished roster are affected.
+
+| Check | Result |
+|---|---|
+| Plan challenger | fail on test design, plan revised (headline-vs-block agreement redefined; full list of fields that may change) |
+| Builder gates | red-first on 3 pooled seeds and 1 siloed fixture; lint clean; `npm test` 174 + 722 + 60 + 164 = 1,120; sample audit 24/24 identical; artifact fresh; no existing expectation changed |
+| Supervisor diff read | one key helper, one lookup helper, parallel edits in sync and async; no extra simulations |
+| Tester | **pass**: seeds 42 / 7 / 99: confidence block and history row for N now 100, CI [100, 100], equal to an independent evaluation of the adopted roster (were 94.3, [94.1, 94.5]); recommended N, adopted roster and polish status unchanged; headline equals the representative run; sync = async; three samples 31/40, 27/34, 31/39; removing the assignment fails 12 checks, removing it in async only fails the 4 sync = async checks; page runs clean with placement ON |
+
+Before / after on the polish fixture (seed 42, N = 9): block 94.3 [94.1, 94.5] to 100 [100, 100]; history row wait time 29.9 to 5.9 min; headline wait time 7.7 to 5.9 min; N-1 evidence wait time 14.8 to 14.2 min. Siloed fixture (N = 19): block 99.9 [99.9, 100] to 99.5 [99.5, 99.6], headline 99.6 to 99.5 — the old block was optimistic there.
+
+Open (not F3):
+- F3-a (minor, to investigate): with placement OFF the search reports 94.3 at N = 9 on this fixture while a direct evaluation with no roster gives 100 — same before F3. Probable cause: the default pre-polish roster is the min-coverage repair roster, not a uniform one (related to P2-A2 / F1). Not confirmed.
+- Final challenger not run (meter 34-35%). Browser evidence is weak for this fix (claims sample shows 100 to 100); the engine-level checks carry the proof.
