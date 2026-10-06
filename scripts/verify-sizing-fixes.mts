@@ -4190,6 +4190,368 @@ console.log('\n--- Suite D54: number fields keep what is typed ---');
   assert(existsSync(join(compDir54, 'NumberField.tsx')), 'D54.8 NumberField.tsx exists', '');
 }
 
+// =================================================================
+// Suites D55-D61 — Tests that protect the frozen sizing decisions (G12; audit TEST-1, TEST-4..7, TEST-9)
+//
+// Each check calls engine code and compares against a value derived by hand in the check's own
+// message, never against the code under test. Each was proven RED against its own mutation
+// (see project_context.md section 11, 2026-10-06 row). Local-time Date construction mirrors calendar.ts.
+// =================================================================
+
+// ---------------------------------------------------------------
+// Suite D55 — Dispatch order: EDF, priority tie-break, parked-first (frozen decision 2)
+// pickNextCase / compareByUrgency is what really dispatches (CaseMinHeap.compare does not — DES-15).
+// ---------------------------------------------------------------
+console.log('\n--- Suite D55: dispatch order (EDF, priority tie-break, parked-first) ---');
+{
+  const at = (h: number, m: number = 0) => new Date(2026, 9, 12, h, m);
+  const mkCase = (id: string, syn: number, o: { lss: Date; priority: number; arrival: Date; parked?: boolean }): any => ({
+    id,
+    syntheticId: syn,
+    category: 'A',
+    priority: o.priority,
+    arrival: o.arrival,
+    clockStart: o.arrival,
+    totalAhtMinutes: 30,
+    remainingWorkMinutes: o.parked ? 10 : 30,
+    primaryDeadline: new Date(o.lss.getTime() + 30 * 60000),
+    latestSafeStart: o.lss,
+    firstStartTime: null,
+    completeTime: null,
+    parkCount: o.parked ? 1 : 0,
+    isOpeningWip: false,
+  });
+  const drain = (cases: any[]): string[] => {
+    const q = new desNs.CaseMinHeap();
+    for (const c of cases) q.push(c);
+    const out: string[] = [];
+    while (q.length > 0) out.push(desNs.pickNextCase(q, at(12))!.id);
+    return out;
+  };
+
+  // T1 — same latestSafeStart: lower priority number goes first, even though the other case arrived earlier.
+  const tieA = mkCase('A', 1, { lss: at(12), priority: 2, arrival: at(9) });
+  const tieB = mkCase('B', 2, { lss: at(12), priority: 1, arrival: at(9, 30) });
+  const t1 = drain([tieA, tieB]);
+  assert(t1.join() === 'B,A', 'D55.1a equal deadline: priority 1 (arrived 09:30) goes before priority 2 (arrived 09:00)', `got ${t1.join()}; expected B,A`);
+  const t1r = drain([tieB, tieA]);
+  assert(t1r.join() === 'B,A', 'D55.1b same result with the push order reversed', `got ${t1r.join()}; expected B,A`);
+  // Equal deadline AND equal priority: FIFO by arrival.
+  const fifo = drain([mkCase('L', 1, { lss: at(12), priority: 1, arrival: at(9, 30) }), mkCase('E', 2, { lss: at(12), priority: 1, arrival: at(9) })]);
+  assert(fifo.join() === 'E,L', 'D55.1c equal deadline and priority: earlier arrival first', `got ${fifo.join()}; expected E,L`);
+
+  // T2 — EDF directly: the case that arrived LATER but is due EARLIER goes first.
+  const edfA = mkCase('A', 1, { lss: at(15), priority: 1, arrival: at(9) });
+  const edfB = mkCase('B', 2, { lss: at(11), priority: 1, arrival: at(10) });
+  const t2 = drain([edfA, edfB]);
+  assert(t2.join() === 'B,A', 'D55.2a arrived 10:00 / due 11:00 goes before arrived 09:00 / due 15:00 (EDF, not FIFO)', `got ${t2.join()}; expected B,A`);
+  const t2r = drain([edfB, edfA]);
+  assert(t2r.join() === 'B,A', 'D55.2b same result with the push order reversed', `got ${t2r.join()}; expected B,A`);
+  // Deadline dominates priority: priority 3 due 11:00 beats priority 1 due 15:00.
+  const dom = drain([mkCase('hi', 1, { lss: at(15), priority: 1, arrival: at(9) }), mkCase('lo', 2, { lss: at(11), priority: 3, arrival: at(9) })]);
+  assert(dom.join() === 'lo,hi', 'D55.2c earlier deadline beats better priority', `got ${dom.join()}; expected lo,hi`);
+
+  // Parked-first: a resumed case with a LATER deadline goes before a new case with an earlier one.
+  const parkedLate = mkCase('P', 1, { lss: at(15), priority: 1, arrival: at(9), parked: true });
+  const freshEarly = mkCase('N', 2, { lss: at(11), priority: 1, arrival: at(10) });
+  const pf = drain([parkedLate, freshEarly]);
+  assert(pf.join() === 'P,N', 'D55.3a parked case (due 15:00) goes before new case (due 11:00)', `got ${pf.join()}; expected P,N`);
+  const pf2 = drain([mkCase('P2', 1, { lss: at(15), priority: 1, arrival: at(9), parked: true }), mkCase('P1', 2, { lss: at(13), priority: 1, arrival: at(9), parked: true }), freshEarly]);
+  assert(pf2.join() === 'P1,P2,N', 'D55.3b among parked cases the earlier deadline goes first, then the new case', `got ${pf2.join()}; expected P1,P2,N`);
+
+  // Through the real event loop: one agent busy with a blocker until 09:30; two contenders with the SAME
+  // latestSafeStart queue up (priority-2 arrives 09:05, priority-1 arrives 09:10). At 09:30 the priority-1 case must start first.
+  const cat55: CategoryConfig[] = [{ id: 'a', name: 'A', ahtMinutes: 30, shrinkagePct: 0.2, priority: 1, primaryWindowMinutes: 600 }];
+  const mkRun = (id: string, syn: number, pri: number, arr: Date, lss: Date): any => ({ ...mkCase(id, syn, { lss, priority: pri, arrival: arr }), primaryDeadline: at(17) });
+  const run55 = runBackofficeDES({
+    operationalHC: 1,
+    intervals: [],
+    openingWIP: [],
+    categories: cat55,
+    calendar: BIZ_CAL,
+    labor: LABOR,
+    sla: { ...DEFAULT_SLA },
+    seed: 1,
+    precomputedCases: {
+      horizonStart: at(9),
+      horizonEnd: at(17),
+      cases: [mkRun('BLOCK', 1, 1, at(9), at(9)), mkRun('P2', 2, 2, at(9, 5), at(14)), mkRun('P1', 3, 1, at(9, 10), at(14))],
+    },
+  });
+  const start55 = (id: string) => run55.caseResults.find((c) => c.caseId === id)?.firstStartTime?.getTime() ?? NaN;
+  assert(
+    start55('P1') === at(9, 30).getTime() && start55('P2') === at(10, 0).getTime(),
+    'D55.4 event loop: priority-1 contender starts 09:30 (right after the 30-min blocker), priority-2 starts 10:00',
+    `P1 start ${new Date(start55('P1')).toTimeString().slice(0, 5)}, P2 start ${new Date(start55('P2')).toTimeString().slice(0, 5)}; expected 09:30 / 10:00`
+  );
+}
+
+// ---------------------------------------------------------------
+// Suite D56 — latestSafeStart walks the BUSINESS calendar (frozen decision 2)
+// Deadline Mon 10:00, 180 handling minutes, Mon-Fri 08:00-18:00: Monday 08:00-10:00 holds 120 of them,
+// the remaining 60 are taken from the end of the previous working day -> Friday 17:00 (not Monday 07:00 wall clock).
+// ---------------------------------------------------------------
+console.log('\n--- Suite D56: latestSafeStart walks the business calendar ---');
+{
+  const slaBiz: SLAPolicyConfig = { ...DEFAULT_SLA, clockBasis: 'business_time', clockStartPolicy: 'next_open' };
+  const friday1700 = new Date(2026, 9, 9, 17, 0).getTime();
+  const monday1000 = new Date(2026, 9, 12, 10, 0).getTime();
+
+  // Demand site: one case, interval Mon 08:00 for 1 second -> arrival within 1 s of 08:00; window 120 business minutes.
+  const catDemand: CategoryConfig[] = [{ id: 'a', name: 'A', ahtMinutes: 180, shrinkagePct: 0.2, priority: 1, primaryWindowMinutes: 120 }];
+  const genDemand = generateCaseEntities({
+    intervals: [{ intervalIndex: 0, start: new Date(2026, 9, 12, 8, 0, 0), end: new Date(2026, 9, 12, 8, 0, 1), volume: 1, category: 'A' }],
+    openingWIP: [],
+    categories: catDemand,
+    calendar: DEFAULT_CALENDAR,
+    sla: slaBiz,
+    seed: 42,
+  });
+  const cd = genDemand.cases[0];
+  assert(genDemand.cases.length === 1 && Math.abs(cd.primaryDeadline.getTime() - monday1000) < 1000, 'D56.1a demand case: deadline is Monday 10:00 (08:00 + 120 business min)', `deadline ${cd?.primaryDeadline.toString()}`);
+  assert(Math.abs(cd.latestSafeStart.getTime() - friday1700) < 1000, 'D56.1b demand case: latestSafeStart is Friday 17:00 (within 1 s), not a Monday-early wall-clock time', `got ${cd.latestSafeStart.toString()}; expected Fri 2026-10-09 17:00`);
+  assert(cd.latestSafeStart.getDay() === 5, 'D56.1c demand case: latestSafeStart falls on a Friday (getDay 5)', `getDay ${cd.latestSafeStart.getDay()}`);
+
+  // Opening-backlog site: remaining work 180 min while the category AHT is 300 -> remaining minutes are used, not total AHT.
+  const catWip: CategoryConfig[] = [{ id: 'a', name: 'A', ahtMinutes: 300, shrinkagePct: 0.2, priority: 1, primaryWindowMinutes: 120 }];
+  const genWip = generateCaseEntities({
+    intervals: [],
+    openingWIP: [{ id: 'W1', category: 'A', priority: 1, arrival: new Date(2026, 9, 12, 8, 0), clockStart: new Date(2026, 9, 12, 8, 0), remainingWorkMinutes: 180 }],
+    categories: catWip,
+    calendar: DEFAULT_CALENDAR,
+    sla: slaBiz,
+    seed: 42,
+  });
+  const cw = genWip.cases[0];
+  assert(!!cw && cw.primaryDeadline.getTime() === monday1000, 'D56.2a backlog case: deadline is exactly Monday 10:00', `deadline ${cw?.primaryDeadline.toString()}`);
+  assert(!!cw && cw.latestSafeStart.getTime() === friday1700, 'D56.2b backlog case: latestSafeStart is exactly Friday 17:00 (180 remaining min; 300 total would give Fri 15:00)', `got ${cw?.latestSafeStart.toString()}; expected Fri 2026-10-09 17:00`);
+}
+
+// ---------------------------------------------------------------
+// Suite D57 — CI-gated acceptance (frozen decision 8)
+// computeStatisticalEvaluation with hand-built replication results (R = 5, t(df 4, 95%) = 2.776).
+// Samples [78,82,80,79,81]: mean 80, sd sqrt(2.5)=1.581, SE 0.7071, half-width 1.963 -> CI [78.04, 81.96].
+// A mean-based gate passes target 80; the lower-bound gate must fail it. One fixture per gate; all other gates pass.
+// ---------------------------------------------------------------
+console.log('\n--- Suite D57: CI gates use the confidence bound, not the mean ---');
+{
+  const catsCI: CategoryConfig[] = [
+    { id: 'a', name: 'A', ahtMinutes: 30, shrinkagePct: 0.2, priority: 1, primaryPct: 80 },
+    { id: 'b', name: 'B', ahtMinutes: 30, shrinkagePct: 0.2, priority: 2, primaryPct: 80 },
+  ];
+  const slaCI: SLAPolicyConfig = { ...DEFAULT_SLA, primaryPct: 80, slaAcceptanceSlackEnabled: false, boAsaEnabled: false, occupancyCapEnabled: false, confidenceLevelPct: 95 };
+  const failing = [78, 82, 80, 79, 81];
+  const passing = [81, 81, 81, 82, 82]; // mean 81.4, sd 0.5477, SE 0.2449, half-width 0.680 -> [80.72, 82.08]
+  const allGood = [100, 100, 100, 100, 100];
+  const reps = (p: number[], o: { occ?: number[]; asa?: number[]; catA?: number[]; catB?: number[] } = {}): any[] =>
+    p.map((v, i) => ({
+      primaryAchievedPct: v,
+      rawOccupancyPct: o.occ ? o.occ[i] : 50,
+      boAsaMeanMinutes: o.asa ? o.asa[i] : 0,
+      minCoverageObserved: Infinity,
+      categoryStats: { A: { primaryPct: o.catA ? o.catA[i] : 100 }, B: { primaryPct: o.catB ? o.catB[i] : 100 } },
+    }));
+  const evalCI = (rs: any[], sla: SLAPolicyConfig) =>
+    hcNs.computeStatisticalEvaluation(4, rs, rs.map((r) => r.primaryAchievedPct), rs.length, sla, BIZ_CAL, catsCI);
+
+  // T4 — primary gate.
+  const pf = evalCI(reps(failing), slaCI);
+  assert(pf.primaryStats.achievedPctMean === 80, 'D57.1a primary fixture: mean is 80 (sum 400 / 5)', `got ${pf.primaryStats.achievedPctMean}`);
+  assert(approx(pf.primaryStats.ci95Low, 78.0, 0.2) && approx(pf.primaryStats.ci95High, 82.0, 0.2), 'D57.1b primary fixture: CI is [78.0, 82.0] (80 -/+ 2.776*0.7071)', `got [${pf.primaryStats.ci95Low}, ${pf.primaryStats.ci95High}]`);
+  assert(pf.passesPrimaryCI === false, 'D57.1c mean 80 meets target 80 but the lower bound 78.0 does not -> passesPrimaryCI false', `got ${pf.passesPrimaryCI}`);
+  assert(pf.passesAllConstraints === false && pf.passesOrgGates === false && pf.passesCategorySLA === true && pf.passesCoverage === true, 'D57.1d only the primary gate fails (category, coverage pass; org and overall verdict fail)', JSON.stringify({ c: pf.passesCategorySLA, cov: pf.passesCoverage, o: pf.passesOrgGates, all: pf.passesAllConstraints }));
+  assert(pf.failingReasons.length === 1 && /^Primary SLA 95% CI/.test(pf.failingReasons[0]), 'D57.1e exactly one failing reason, the primary one', pf.failingReasons.join(' | '));
+  const pp = evalCI(reps(passing), slaCI);
+  assert(approx(pp.primaryStats.ci95Low, 80.7, 0.2) && approx(pp.primaryStats.ci95High, 82.1, 0.2), 'D57.2a passing fixture: CI is [80.7, 82.1] (81.4 -/+ 2.776*0.2449)', `got [${pp.primaryStats.ci95Low}, ${pp.primaryStats.ci95High}]`);
+  assert(pp.passesPrimaryCI === true && pp.passesAllConstraints === true && pp.failingReasons.length === 0, 'D57.2b lower bound 80.7 >= 80 -> primary passes, nothing fails', JSON.stringify({ p: pp.passesPrimaryCI, all: pp.passesAllConstraints, r: pp.failingReasons }));
+
+  // T5a — per-category gate: org primary perfect, category A is the failing fixture, category B passes.
+  const cf = evalCI(reps(allGood, { catA: failing, catB: passing }), slaCI);
+  assert(cf.passesPrimaryCI === true && cf.passesCategorySLA === false, 'D57.3a category A mean 80 / lower bound 78.0 -> category gate fails while the org primary gate passes', JSON.stringify({ p: cf.passesPrimaryCI, c: cf.passesCategorySLA }));
+  assert(cf.categoryPasses.A === false && cf.categoryPasses.B === true, 'D57.3b categoryPasses: A false, B true (B lower bound 80.7)', JSON.stringify(cf.categoryPasses));
+  assert(cf.failingReasons.length === 1 && /^Category 'A' Primary SLA 95% CI/.test(cf.failingReasons[0]), 'D57.3c exactly one failing reason, about category A', cf.failingReasons.join(' | '));
+  const cp = evalCI(reps(allGood, { catA: passing, catB: passing }), slaCI);
+  assert(cp.categoryPasses.A === true && cp.categoryPasses.B === true && cp.passesAllConstraints === true, 'D57.3d both categories with lower bound 80.7 pass', JSON.stringify(cp.categoryPasses));
+
+  // T5b — occupancy cap 85 uses the UPPER bound: samples [82,86,84,83,85] mean 84 <= 85 but upper 84 + 1.963 = 85.96 > 85.
+  const slaOcc: SLAPolicyConfig = { ...slaCI, occupancyCapEnabled: true, occupancyCapPct: 85 };
+  const of = evalCI(reps(allGood, { occ: [82, 86, 84, 83, 85] }), slaOcc);
+  assert(of.passesOrgGates === false && of.passesPrimaryCI === true && of.passesCategorySLA === true && of.passesCoverage === true, 'D57.4a occupancy mean 84 <= cap 85 but upper bound 85.96 > 85 -> only the occupancy gate fails', JSON.stringify({ o: of.passesOrgGates, p: of.passesPrimaryCI, c: of.passesCategorySLA }));
+  assert(of.failingReasons.length === 1 && /^Occupancy 95% CI/.test(of.failingReasons[0]) && /upper bound > cap 85%/.test(of.failingReasons[0]) && /Mean: 84%/.test(of.failingReasons[0]), 'D57.4b exactly one failing reason: occupancy, upper bound > cap 85%, mean 84%', of.failingReasons.join(' | '));
+  const op = evalCI(reps(allGood, { occ: [80, 80, 80, 81, 81] }), slaOcc);
+  assert(op.passesOrgGates === true && op.failingReasons.length === 0, 'D57.4c occupancy [80,80,80,81,81] (upper bound 81.1 <= 85) passes', op.failingReasons.join(' | '));
+
+  // T5c — BO ASA target 41 min uses the UPPER bound: samples [38,42,40,39,41] mean 40 <= 41 but upper 41.96 > 41.
+  const slaAsa: SLAPolicyConfig = { ...slaCI, boAsaEnabled: true, boAsaTarget: 41, boAsaUnit: 'minutes', asaClockBasis: 'business_window' };
+  const af = evalCI(reps(allGood, { asa: [38, 42, 40, 39, 41] }), slaAsa);
+  assert(af.passesOrgGates === false && af.passesPrimaryCI === true && af.passesCategorySLA === true && af.passesCoverage === true, 'D57.5a ASA mean 40 <= target 41 but upper bound 41.96 > 41 -> only the ASA gate fails', JSON.stringify({ o: af.passesOrgGates, p: af.passesPrimaryCI, c: af.passesCategorySLA }));
+  assert(af.failingReasons.length === 1 && /^BO ASA 95% CI/.test(af.failingReasons[0]) && /upper bound > target 41minutes \(41m\)/.test(af.failingReasons[0]), 'D57.5b exactly one failing reason: BO ASA upper bound > target 41 minutes', af.failingReasons.join(' | '));
+  const ap = evalCI(reps(allGood, { asa: [38, 38, 38, 39, 39] }), slaAsa);
+  assert(ap.passesOrgGates === true && ap.failingReasons.length === 0, 'D57.5c ASA [38,38,38,39,39] (upper bound 39.1 <= 41) passes', ap.failingReasons.join(' | '));
+  const aoff = evalCI(reps(allGood, { asa: [38, 42, 40, 39, 41] }), { ...slaAsa, boAsaEnabled: false });
+  assert(aoff.passesOrgGates === true, 'D57.5d same ASA samples with the ASA gate switched off -> no ASA verdict', aoff.failingReasons.join(' | '));
+}
+
+// ---------------------------------------------------------------
+// Suite D58 — Common Random Numbers through the search path (frozen decision 9)
+// evaluateCandidateStatistical must run every candidate N on the SAME shared replication case sets.
+// Hand-built sets with distinct sizes/outcomes per replication make that visible: rep0 2 cases all in time,
+// rep1 3 cases all late (deadline = arrival), rep2 4 cases all in time.
+// ---------------------------------------------------------------
+console.log('\n--- Suite D58: Common Random Numbers ---');
+{
+  const at58 = (h: number, m: number = 0) => new Date(2026, 9, 12, h, m);
+  const mk58 = (rep: number, i: number, late: boolean): any => ({
+    id: `R${rep}-${i}`,
+    syntheticId: i + 1,
+    category: 'A',
+    priority: 1,
+    arrival: at58(9),
+    clockStart: at58(9),
+    totalAhtMinutes: 30,
+    remainingWorkMinutes: 30,
+    primaryDeadline: late ? at58(9) : at58(17),
+    latestSafeStart: late ? at58(8, 30) : at58(16, 30),
+    firstStartTime: null,
+    completeTime: null,
+    parkCount: 0,
+    isOpeningWip: false,
+  });
+  const sizes = [2, 3, 4];
+  const sets58 = sizes.map((n, r) => ({ cases: Array.from({ length: n }, (_, i) => mk58(r, i, r === 1)), horizonStart: at58(9), horizonEnd: at58(17) }));
+  const cat58: CategoryConfig[] = [{ id: 'a', name: 'A', ahtMinutes: 30, shrinkagePct: 0.2, priority: 1, primaryWindowMinutes: 480 }];
+  const ints58: StandardInterval[] = [{ intervalIndex: 0, start: at58(9), end: at58(9, 30), volume: 7, category: 'A' }];
+  const evalAt = (n: number) =>
+    evaluateCandidateStatistical({
+      operationalHC: n,
+      intervals: ints58,
+      openingWIP: [],
+      categories: cat58,
+      calendar: BIZ_CAL,
+      labor: LABOR,
+      sla: { ...DEFAULT_SLA },
+      baseSeed: 99,
+      replications: 3,
+      precomputedCaseSets: sets58,
+    });
+  const e5 = evalAt(5);
+  const e6 = evalAt(6);
+  assert(e5.repResults.map((r) => r.totalCases).join() === '2,3,4' && e6.repResults.map((r) => r.totalCases).join() === '2,3,4', 'D58.1 N=5 and N=6 both run the shared sets: totalCases per replication 2,3,4 (the sizes of the sets handed in)', `N5 ${e5.repResults.map((r) => r.totalCases).join()}; N6 ${e6.repResults.map((r) => r.totalCases).join()}; expected 2,3,4`);
+  assert(e5.primaryStats.samples.join() === '100,0,100' && e6.primaryStats.samples.join() === '100,0,100', 'D58.2 N=5 and N=6 see the same outcomes: primary % per replication 100,0,100 (rep1 deadlines equal arrival, so every case is late)', `N5 ${e5.primaryStats.samples.join()}; N6 ${e6.primaryStats.samples.join()}; expected 100,0,100`);
+  // Generator side: the shared sets are a pure function of (baseSeed, replication) — same arrival times on a rebuild,
+  // different arrival times between replications.
+  const gen58 = (): any[] =>
+    hcNs.generatePrecomputedReplications({
+      intervals: [{ intervalIndex: 0, start: at58(9), end: at58(17), volume: 6, category: 'A' }],
+      openingWIP: [],
+      categories: cat58,
+      calendar: BIZ_CAL,
+      sla: { ...DEFAULT_SLA },
+      baseSeed: 99,
+      replications: 3,
+    });
+  const g1 = gen58();
+  const g2 = gen58();
+  const arr = (s: any): string => s.cases.map((c: any) => c.arrival.getTime()).join('|');
+  assert(g1.length === 3 && g1.every((s: any) => s.cases.length === 6) && g1.map(arr).join('#') === g2.map(arr).join('#'), 'D58.3 generatePrecomputedReplications: 3 sets of 6 cases, identical arrival times when rebuilt with the same seed', `${g1.map((s: any) => s.cases.length).join()}`);
+  assert(arr(g1[0]) !== arr(g1[1]), 'D58.4 replications differ from each other (replication 0 and 1 arrivals are not identical)', '');
+}
+
+// ---------------------------------------------------------------
+// Suite D59 — Unfinished cases count in the SLA denominator (TEST-9)
+// 10 cases, 1 agent, AHT 800 min, 8 productive h/day. Horizon Mon 12 Oct, drain until Mon 26 Oct 17:00 = 11 working days
+// x 480 min = 5280 min -> floor(5280 / 800) = 6 cases finish (all inside their long deadline); 4 do not.
+// ---------------------------------------------------------------
+console.log('\n--- Suite D59: unfinished cases stay in the SLA denominator ---');
+{
+  const at59 = (d: number, h: number, m: number = 0) => new Date(2026, 9, d, h, m);
+  const cases59: any[] = Array.from({ length: 10 }, (_, i) => ({
+    id: `U${i}`,
+    syntheticId: i + 1,
+    category: 'A',
+    priority: 1,
+    arrival: at59(12, 9),
+    clockStart: at59(12, 9),
+    totalAhtMinutes: 800,
+    remainingWorkMinutes: 800,
+    primaryDeadline: at59(30, 17),
+    latestSafeStart: at59(28, 9),
+    firstStartTime: null,
+    completeTime: null,
+    parkCount: 0,
+    isOpeningWip: false,
+  }));
+  const cat59: CategoryConfig[] = [{ id: 'a', name: 'A', ahtMinutes: 800, shrinkagePct: 0.2, priority: 1, primaryWindowMinutes: 100000 }];
+  const r59 = runBackofficeDES({
+    operationalHC: 1,
+    intervals: [],
+    openingWIP: [],
+    categories: cat59,
+    calendar: BIZ_CAL,
+    labor: LABOR,
+    sla: { ...DEFAULT_SLA },
+    seed: 7,
+    skipCaseResultsAndTimeline: true,
+    precomputedCases: { cases: cases59, horizonStart: at59(12, 9), horizonEnd: at59(12, 17) },
+  });
+  assert(r59.totalCases === 10 && r59.completedCases === 6 && r59.unfinishedCases === 4, 'D59.1 6 of 10 cases finish inside horizon + drain (floor(11 x 480 / 800) = 6), 4 unfinished', `total ${r59.totalCases}, completed ${r59.completedCases}, unfinished ${r59.unfinishedCases}; expected 10/6/4`);
+  assert(r59.primaryEligibleCount === 10 && r59.primaryPassCount === 6, 'D59.2 SLA denominator is all 10 cases, numerator the 6 finished in time', `eligible ${r59.primaryEligibleCount}, pass ${r59.primaryPassCount}; expected 10 / 6`);
+  assert(r59.primaryAchievedPct === 60, 'D59.3 primaryAchievedPct is 60 (6/10), not 100 (6/6)', `got ${r59.primaryAchievedPct}`);
+}
+
+// ---------------------------------------------------------------
+// Suite D60 — Gross HC: per-category gross-up, sum, one round; harmonic effective shrinkage (frozen decisions 5-7)
+// Two categories of equal workload, shrinkage 10% / 40%, 20 operational HC (10 each): 10/0.9 + 10/0.6 = 11.11 + 16.67 = 27.78 -> 28.
+// Effective shrinkage = 1 - 1 / (0.5/0.9 + 0.5/0.6) = 1 - 1/1.3889 = 0.28. An arithmetic blend would give 0.25 and round(20 / 0.75) = 27.
+// ---------------------------------------------------------------
+console.log('\n--- Suite D60: Gross HC and harmonic effective shrinkage ---');
+{
+  const st60 = calculateStaffingRequirement({
+    operationalHC: 20,
+    categories: [
+      { id: 'l', name: 'Low', ahtMinutes: 30, shrinkagePct: 0.1, priority: 1 },
+      { id: 'h', name: 'High', ahtMinutes: 30, shrinkagePct: 0.4, priority: 2 },
+    ],
+    intervals: [
+      { intervalIndex: 0, start: new Date(2026, 9, 5, 9, 0), end: new Date(2026, 9, 5, 9, 30), category: 'Low', volume: 100 },
+      { intervalIndex: 1, start: new Date(2026, 9, 6, 9, 0), end: new Date(2026, 9, 6, 9, 30), category: 'High', volume: 100 },
+    ],
+    openingWIP: [],
+    calendar: BIZ_CAL,
+    labor: LABOR,
+    horizonStart: new Date(2026, 9, 5, 9, 0),
+    horizonEnd: new Date(2026, 9, 9, 17, 0),
+    bindingConstraint: 'test',
+  });
+  assert(st60.operationalHCWithOff === 20 && st60.perCategory.length === 2, 'D60.1 5 open days / 5 labor days: OFF floor is the identity, 20 seats split over 2 categories', `got ${st60.operationalHCWithOff}`);
+  assert(approx(st60.perCategory[0].operationalHC, 10, 0.01) && approx(st60.perCategory[1].operationalHC, 10, 0.01), 'D60.2 equal workload -> 10 operational HC per category', JSON.stringify(st60.perCategory.map((c) => c.operationalHC)));
+  assert(approx(st60.perCategory[0].grossHC, 11.11, 0.01) && approx(st60.perCategory[1].grossHC, 16.67, 0.01), 'D60.3 per-category gross-up: 10/0.9 = 11.11 and 10/0.6 = 16.67', JSON.stringify(st60.perCategory.map((c) => c.grossHC)));
+  assert(st60.grossHCTotal === 28, 'D60.4 grossHCTotal = round(11.11 + 16.67) = round(27.78) = 28 (arithmetic blend would give 27)', `got ${st60.grossHCTotal}`);
+  assert(approx(st60.effectiveShrinkagePct, 0.28, 0.0006), 'D60.5 effectiveShrinkagePct = 0.28 (harmonic), not 0.25 (arithmetic)', `got ${st60.effectiveShrinkagePct}`);
+}
+
+// ---------------------------------------------------------------
+// Suite D61 — Volume rounding in case generation
+// Interval volumes are rounded half-up (Math.round) into whole cases: 2.5 -> 3, 2.4 -> 2, 0.4 -> 0.
+// ---------------------------------------------------------------
+console.log('\n--- Suite D61: interval volume rounding ---');
+{
+  const cat61: CategoryConfig[] = [{ id: 'a', name: 'A', ahtMinutes: 30, shrinkagePct: 0.2, priority: 1, primaryWindowMinutes: 480 }];
+  const countFor = (volume: number): number =>
+    generateCaseEntities({
+      intervals: [{ intervalIndex: 0, start: new Date(2026, 9, 12, 9, 0), end: new Date(2026, 9, 12, 9, 30), volume, category: 'A' }],
+      openingWIP: [],
+      categories: cat61,
+      calendar: BIZ_CAL,
+      sla: { ...DEFAULT_SLA },
+      seed: 5,
+    }).cases.length;
+  assert(countFor(2.5) === 3, 'D61.1 volume 2.5 generates 3 cases (half rounds up)', `got ${countFor(2.5)}`);
+  assert(countFor(2.4) === 2, 'D61.2 volume 2.4 generates 2 cases', `got ${countFor(2.4)}`);
+  assert(countFor(0.4) === 0, 'D61.3 volume 0.4 generates 0 cases', `got ${countFor(0.4)}`);
+  assert(countFor(3) === 3, 'D61.4 volume 3 generates 3 cases', `got ${countFor(3)}`);
+}
+
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');

@@ -1879,7 +1879,7 @@ export function generatePrecomputedReplications(params: {
   return sets;
 }
 
-function computeStatisticalEvaluation(
+export function computeStatisticalEvaluation(
   operationalHC: number,
   repResults: DESResult[],
   primarySamples: number[],

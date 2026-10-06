@@ -53,7 +53,7 @@ Four things make it unusual, and all four constrain how you work on it:
    "adherence", "headcount" and "FTE" are distinct quantities that are routinely conflated;
    conflating them yields a number that looks fine and is not.
 3. **Several design choices are deliberate and non-obvious** (§6).
-4. **Correctness is testable and tested** — 251 automated checks plus an independently
+4. **Correctness is testable and tested** — 987 automated checks plus an independently
    hand-derived ground-truth dataset.
 
 ---
@@ -75,7 +75,7 @@ npm run dev               # dev server on :3000
 | Command | What it does |
 |---|---|
 | `npm run dev` | Vite dev server with HMR |
-| `npm test` | Both regression suites (251 checks) + artifact freshness |
+| `npm test` | Four suites (987 checks: 174 + 589 + 60 + 164 trusted-source) + artifact freshness |
 | `npm run lint` | `tsc --noEmit` typecheck |
 | `npm run build:standalone` | Produces `BoWFM.html` — **the actual deliverable** |
 | `npm run check:artifact` | Fails if `BoWFM.html` is missing or older than `src/` / build inputs |
@@ -170,9 +170,10 @@ Bo_4Final-main/
 ├── docs/wfm/                     ← workforce-planning domain reference (7 files)
 ├── scripts/
 │   ├── build-standalone.mts      ← inlines everything into BoWFM.html
-│   ├── verify-fixes.mts          ← legacy regression suite (156 tests)
-│   ├── verify-sizing-fixes.mts   ← sizing-chain suite (95 tests)
+│   ├── verify-fixes.mts          ← legacy regression suite (174 tests)
+│   ├── verify-sizing-fixes.mts   ← sizing-chain suite (589 tests)
 │   ├── verify-agent-analytics.mts ← export-timestamp + agent-analytics suite (60 tests)
+│   ├── verify-trusted-source.mts ← ground-truth benchmark runner (164 checks; needs TZ Asia/Dubai)
 │   └── check-artifact-freshness.mts ← BoWFM.html mtime gate
 └── src/
     ├── App.tsx                   ← state machine, navigation, orchestration
@@ -844,26 +845,27 @@ Keep full precision through the chain. Compare floats with a tolerance, never `=
 
 ## 9. Testing
 
-### 9.1 Two suites, both must be green
+### 9.1 Four suites plus the freshness gate, all must be green
 
 ```bash
-npm test              # all suites — 613 checks + artifact freshness
+npm test              # four suites — 987 checks (174 + 589 + 60 + 164) + artifact freshness
 npm run test:sizing   # sizing-chain suite only (faster)
 ```
 
 | Suite | Tests | Covers |
 |---|---|---|
 | `scripts/verify-fixes.mts` | 174 | Legacy regression — CSV/date parsing, calendar arithmetic, CRN consistency, occupancy semantics, artifact integrity, analytical infeasibility diagnosis, 24x7 midnight budget accounting. **Treat as append-only.** |
-| `scripts/verify-sizing-fixes.mts` | 518 | Sizing chain — `D1` working-day counting, `D3` apportionment monotonicity, `D7` staffing-chain integrity, `D9` offline enforcement, `D20`-`D26` deadline-coverage shift placement (Stage 3a: valid-slap enumeration, no-regression, greedy monotonicity/optimality, I1/I2 invariants under staggering, seed determinism, positive control, I4 occupancy-ceiling regression guard), `D27` day-open telemetry off-by-one, `D28` fast-path/full-path attainment agreement, `D29` I5 per-agent stagger-offset compliance (check #8), `D30`/`D31` shift-end enforcement + in-flight case handover, `D32`/`D33` minimum-coverage floor + flag-independent redistribution repair, `D34` N_sla walk-down safety-net fix, `D35` adherence/capacity conflation closed-form pin, `D36` 24×7 coverage-gate regression fix, `D37` real 24×7 multi-start (staggering, shift-end, coverage repair), `D38` "exact minimum" wording pin (source-text based — the message is unreachable dead code), `D39` empirical monotonicity sweep for the uniform-only predicate (N=1..25, no violation found), `D40` extra-OFF coverage-ratio fix (ratio table sweep + integer-exactness cases — see §6.4a), `D41` non-blocking DQ warnings for zero off-days / override-vs-horizon scale / calendar-open days with no uploaded rows, `D47` Workload Floor toggle, `D48` clock-start derivation, `D49` pinned HC of `test_files/AJM_Only.csv`, `D50`/`D51`/`D52` roster polish at fixed HC (pooled / siloed guard / per-queue search), `D53` Results use run-time settings |
+| `scripts/verify-sizing-fixes.mts` | 589 | Sizing chain — `D1` working-day counting, `D3` apportionment monotonicity, `D7` staffing-chain integrity, `D9` offline enforcement, `D20`-`D26` deadline-coverage shift placement (Stage 3a: valid-slap enumeration, no-regression, greedy monotonicity/optimality, I1/I2 invariants under staggering, seed determinism, positive control, I4 occupancy-ceiling regression guard), `D27` day-open telemetry off-by-one, `D28` fast-path/full-path attainment agreement, `D29` I5 per-agent stagger-offset compliance (check #8), `D30`/`D31` shift-end enforcement + in-flight case handover, `D32`/`D33` minimum-coverage floor + flag-independent redistribution repair, `D34` N_sla walk-down safety-net fix, `D35` adherence/capacity conflation closed-form pin, `D36` 24×7 coverage-gate regression fix, `D37` real 24×7 multi-start (staggering, shift-end, coverage repair), `D38` "exact minimum" wording pin (source-text based — the message is unreachable dead code), `D39` empirical monotonicity sweep for the uniform-only predicate (N=1..25, no violation found), `D40` extra-OFF coverage-ratio fix (ratio table sweep + integer-exactness cases — see §6.4a), `D41` non-blocking DQ warnings for zero off-days / override-vs-horizon scale / calendar-open days with no uploaded rows, `D47` Workload Floor toggle, `D48` clock-start derivation, `D49` pinned HC of `test_files/AJM_Only.csv`, `D50`/`D51`/`D52` roster polish at fixed HC (pooled / siloed guard / per-queue search), `D53` Results use run-time settings, `D54` number fields keep what is typed, `D55`-`D61` (G12) tests that protect the frozen sizing decisions: dispatch order + priority tie-break + parked-first, business-calendar `latestSafeStart`, CI gates (primary / per-category / occupancy / ASA use the bound, not the mean), CRN, unfinished-in-denominator, Gross HC + harmonic shrinkage, volume rounding — each shown red under its own mutation (see §11) |
 | `scripts/audit-compare.mts` (`npm run test:audit`, opt-in, ~30 min) | 24 cells | All four `test_files/` samples × 6 settings, diffed against `docs/audit/sample-hc-after-2026-09-30.jsonl`; exits 1 on any difference |
 | `scripts/verify-agent-analytics.mts` | 60 | `EX` export timestamps == on-screen formatter (fixed UTC+4 TZ, midnight-crossing, real engine rows, static no-`toISOString` guard); `AA` agent analytics (reconciles to `completedCases`/`totalHandlingMinutes`/`agentFairness`, date/category/agent filters, determinism, late cohorts); `AW` work share (split case 0.75/0.25, totals == finished, slice-date attribution, avg handle) + single-agent-cover insight fixtures |
+| `scripts/verify-trusted-source.mts` (`npm run test:trusted-source`) | 164 | Hand-derived ground truth in `trusted-source-validation.json` (see §9.2); **part of `npm test` since 2026-10-06**. Aborts with exit 1 unless the host timezone is `Asia/Dubai` |
 | `scripts/check-artifact-freshness.mts` | gate | Fails if `BoWFM.html` is missing or older than `src/` / build inputs (`npm run check:artifact`) |
 
 If a legacy test fails after your change, the default assumption is that **your change is
 wrong**, not the test. Several encode deliberate decisions — `BUG-OCC-ROOT` pins the
 planned-horizon occupancy denominator (§6.3).
 
-**No test framework may be added** — that would breach the zero-dependency rule. Both suites
+**No test framework may be added** — that would breach the zero-dependency rule. The suites
 use a plain `assert(condition, name, detail)` helper and exit non-zero on failure.
 
 ### 9.2 Independent ground truth
@@ -956,6 +958,7 @@ Work down the chain in order — the fault is almost always upstream of where it
 
 | Defect | Impact when broken |
 |---|---|
+| **Frozen sizing rules had no test that failed when they were broken** (`verify-sizing-fixes.mts` D55-D61; `computeStatisticalEvaluation` now exported, keyword only; `npm test` now runs `verify-trusted-source.mts`; audit TEST-1, TEST-4..7, TEST-9, DOC-20, DOC-41; 2026-10-06) | Re-testing by mutation in a scratch copy showed: removing the priority tie-break in `compareByUrgency` survived all 939 checks; parked-first was guarded by one check; the business-calendar `latestSafeStart`, the CI gates (mean in place of the lower/upper bound, for primary, per-category, occupancy, ASA), Common Random Numbers, the unfinished-case SLA denominator, the harmonic Gross HC blend and volume `Math.round` were each pinned by nothing the mutation touched. Added 48 checks, each shown red under its own mutation: M4 (priority line removed) 3 failing, M1 (FIFO) 7, M3 (parked rule gone) 2, B2 (wall-clock `latestSafeStart`) 3, B4 (mean) 3, B5 (upper bound) 3, B4b/B4c/B4d (per-category / occupancy / ASA mean) 3/2/2, B6 (CRN broken) 2, B15 (unfinished dropped) 2, M3c (arithmetic blend) 1, B13 (`floor`) 1. `verify-trusted-source.mts` (164 checks) was a separate opt-in run; it is now chained into `npm test` (it exits 1 on any failing check or a wrong host timezone). No engine behaviour or default changed. Docs: suite totals now 987 = 174 + 589 + 60 + 164. |
 | **Number fields clamped on every keystroke** (`NumberField.tsx` + `utils/number-input.ts`; D54; UI-41/42/43/44/54, UI-33, DOC-3; 2026-10-06) | Select-all then typing `8`,`5` in a 50–100 field stored 100 (occupancy cap), adherence 85 → 100, confidence 95 → 99.9; emptied fields snapped to a default so retyping appended digits; negative productive hours and replications/ceiling above their documented maximum were accepted. All 26 number inputs (Config, Run, Calendar, backlog minutes) now keep the typed draft, store a value as soon as it is in range, clamp on blur/Enter/unmount, and fall back to the stored value (not a default) when empty. Adherence and shrinkage show/store one decimal |
 | **Results read live settings, not the run's** (`runInputs` + `diffRunInputs`, `App.tsx` / `src/utils/run-inputs.ts`; D53; 2026-09-30) | Editing the calendar after a run made the Agent Browser audit check old results against new hours: EGS_Only run at 08:00, open moved to 10:00 → **7,515** false "busy slice starts outside business window" warnings (0 when checked against the run's own calendar). Results now render from the run snapshot, show a "settings changed since this run" banner, and audit messages print local time instead of UTC `Z` |
 | **Shift placement never re-spread a passing roster** (Stage 3b roster polish; `hc-search.ts`; D50; 2026-09-30) | With placement ON, every sample file shipped all-but-one agents at open and **one agent for the last 2.5 business hours**, because placement only ran on failing candidates. Now re-spread at fixed HC as far as the CI gates allow: EGS_Only tail 1 → 14 agents (HC 100 unchanged); AJM_Only unchanged (next move breaks Tech HVC's 80% CI) |
