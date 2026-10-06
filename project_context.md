@@ -183,8 +183,9 @@ Bo_4Final-main/
     │   ├── calendar.ts           ← business-time arithmetic
     │   ├── csv-parser.ts         ← ingestion + data-quality validation + Excel CSV exporter (buildExcelCSV)
     │   ├── export-rows.ts        ← case/breach/slice export row builders (shared local-time formatter)
-    │   └── agent-analytics.ts    ← pure per-agent/per-date analytics over the audit run (UI layer only)
-    └── components/               ← UI, one component per flow
+    │   ├── agent-analytics.ts    ← pure per-agent/per-date analytics over the audit run (UI layer only)
+    │   └── number-input.ts       ← pure helpers for number fields: when a typed draft is storable, what blur/Enter commits, percent display (suite D54)
+    └── components/               ← UI, one component per flow; NumberField.tsx = the only number input (keeps the typed draft, validates on blur/Enter/unmount)
 ```
 
 ### Module responsibilities
@@ -955,6 +956,7 @@ Work down the chain in order — the fault is almost always upstream of where it
 
 | Defect | Impact when broken |
 |---|---|
+| **Number fields clamped on every keystroke** (`NumberField.tsx` + `utils/number-input.ts`; D54; UI-41/42/43/44/54, UI-33, DOC-3; 2026-10-06) | Select-all then typing `8`,`5` in a 50–100 field stored 100 (occupancy cap), adherence 85 → 100, confidence 95 → 99.9; emptied fields snapped to a default so retyping appended digits; negative productive hours and replications/ceiling above their documented maximum were accepted. All 26 number inputs (Config, Run, Calendar, backlog minutes) now keep the typed draft, store a value as soon as it is in range, clamp on blur/Enter/unmount, and fall back to the stored value (not a default) when empty. Adherence and shrinkage show/store one decimal |
 | **Results read live settings, not the run's** (`runInputs` + `diffRunInputs`, `App.tsx` / `src/utils/run-inputs.ts`; D53; 2026-09-30) | Editing the calendar after a run made the Agent Browser audit check old results against new hours: EGS_Only run at 08:00, open moved to 10:00 → **7,515** false "busy slice starts outside business window" warnings (0 when checked against the run's own calendar). Results now render from the run snapshot, show a "settings changed since this run" banner, and audit messages print local time instead of UTC `Z` |
 | **Shift placement never re-spread a passing roster** (Stage 3b roster polish; `hc-search.ts`; D50; 2026-09-30) | With placement ON, every sample file shipped all-but-one agents at open and **one agent for the last 2.5 business hours**, because placement only ran on failing candidates. Now re-spread at fixed HC as far as the CI gates allow: EGS_Only tail 1 → 14 agents (HC 100 unchanged); AJM_Only unchanged (next move breaks Tech HVC's 80% CI) |
 | **Clock Start Policy looked like a sizing lever under Business Time** (`resolveClockStartPolicy`, `des-engine.ts`; D48; 2026-09-30) | Planners flipped Arrival ↔ Next Open and saw no HC change — correct, because `addWorkingTime` already starts business-time deadlines at `nextOpen`. Measured on the four `test_files/` samples: identical HC/SLA/occupancy. Now derived and locked (Business → Next Open); Wall Clock keeps the choice, where it matters (Arrival + 6h window infeasible on all four samples, Next Open sizes 22/178/140/111) |

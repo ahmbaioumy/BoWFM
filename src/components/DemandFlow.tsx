@@ -16,6 +16,7 @@ import {
 import { generateNextWIPId, parseCSVRaw, parseFlexibleDate } from '../utils/csv-parser';
 import { formatDateTime24 } from '../utils/calendar';
 import { CalendarConfigPanel } from './CalendarConfigPanel';
+import { NumberField } from './NumberField';
 import {
   UploadCloud,
   FileSpreadsheet,
@@ -806,11 +807,11 @@ export function DemandFlow({
                     <label className="text-[11px] text-slate-600 font-semibold block">
                       Remaining Work (min)
                     </label>
-                    <input
-                      type="number"
-                      min="1"
+                    <NumberField
+                      min={1}
+                      integer
                       value={newWipRemAht}
-                      onChange={(e) => setNewWipRemAht(parseInt(e.target.value) || 30)}
+                      onCommit={(val) => setNewWipRemAht(val)}
                       className="w-full text-xs bg-white border border-slate-300 rounded px-2.5 py-1.5 font-mono"
                     />
                   </div>

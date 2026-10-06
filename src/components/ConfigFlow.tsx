@@ -4,6 +4,8 @@
  */
 
 import React from 'react';
+import { NumberField } from './NumberField';
+import { fractionToPercentDisplay, percentDisplayToFraction } from '../utils/number-input';
 import {
   CalendarConfig,
   CategoryConfig,
@@ -119,15 +121,13 @@ export function ConfigFlow({
                 <label className="text-xs font-semibold text-slate-700 block">
                   Scheduled Daily Productive Hours
                 </label>
-                <input
+                <NumberField
                   id="labor-daily-productive-hours"
-                  type="number"
-                  step="0.1"
-                  min="1"
-                  max="24"
+                  step={0.1}
+                  min={1}
+                  max={24}
                   value={labor.dailyProductiveHours}
-                  onChange={(e) => {
-                    const val = parseFloat(e.target.value) || 7.5;
+                  onCommit={(val) => {
                     onUpdateLabor({ ...labor, dailyProductiveHours: val });
                   }}
                   className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-400 font-mono font-medium"
@@ -143,16 +143,14 @@ export function ConfigFlow({
                   Schedule Adherence %
                 </label>
                 <div className="flex items-center gap-1.5">
-                  <input
+                  <NumberField
                     id="labor-adherence-pct"
-                    type="number"
-                    min="10"
-                    max="100"
-                    step="1"
-                    value={Math.round(adherence * 100)}
-                    onChange={(e) => {
-                      const val = Math.min(100, Math.max(10, parseFloat(e.target.value) || 100));
-                      onUpdateLabor({ ...labor, adherencePct: val / 100 });
+                    min={10}
+                    max={100}
+                    step={0.1}
+                    value={fractionToPercentDisplay(adherence)}
+                    onCommit={(val) => {
+                      onUpdateLabor({ ...labor, adherencePct: percentDisplayToFraction(val) });
                     }}
                     className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-400 font-mono font-medium"
                   />
@@ -166,14 +164,13 @@ export function ConfigFlow({
               {/* Working Days per Week */}
               <div className="space-y-1.5">
                 <label className="text-xs font-semibold text-slate-700 block">Working Days per Week</label>
-                <input
+                <NumberField
                   id="labor-working-days-per-week"
-                  type="number"
-                  min="1"
-                  max="7"
+                  min={1}
+                  max={7}
+                  integer
                   value={labor.workingDaysPerWeek}
-                  onChange={(e) => {
-                    const val = Math.min(7, Math.max(1, parseInt(e.target.value) || 5));
+                  onCommit={(val) => {
                     onUpdateLabor({
                       ...labor,
                       workingDaysPerWeek: val,
@@ -279,21 +276,19 @@ export function ConfigFlow({
                   Manual agent productive hours for this demand horizon (0 = ignore, use Derived):
                 </label>
                 <div className="flex items-center gap-3 flex-wrap">
-                  <input
-                    type="number"
-                    step="0.5"
-                    min="0"
+                  <NumberField
+                    step={0.5}
+                    min={0}
+                    emptyValue={0}
                     value={
                       Number.isFinite(labor.contractualProductiveHoursOverride)
-                        ? labor.contractualProductiveHoursOverride
+                        ? (labor.contractualProductiveHoursOverride as number)
                         : 0
                     }
-                    onChange={(e) => {
-                      const raw = e.target.value;
-                      const val = raw === '' ? 0 : parseFloat(raw);
+                    onCommit={(val) => {
                       onUpdateLabor({
                         ...labor,
-                        contractualProductiveHoursOverride: Number.isFinite(val) ? Math.max(0, val) : 0,
+                        contractualProductiveHoursOverride: val,
                       });
                     }}
                     className="w-40 px-3 py-1.5 text-xs bg-white border border-blue-300 rounded font-mono font-bold text-blue-900 focus:outline-none"
@@ -656,28 +651,28 @@ export function ConfigFlow({
                 <div className="p-3 bg-white rounded-lg border border-slate-200 space-y-1.5">
                   <span className="text-[11px] font-bold text-blue-900 block uppercase">Primary Baseline</span>
                   <div className="flex items-center gap-2">
-                    <input
-                      type="number"
-                      min="1"
-                      max="100"
+                    <NumberField
+                      min={1}
+                      max={100}
+                      integer
                       value={sla.primaryPct}
-                      onChange={(e) =>
+                      onCommit={(val) =>
                         onUpdateSLA({
                           ...sla,
-                          primaryPct: Math.min(100, Math.max(1, parseInt(e.target.value) || 80)),
+                          primaryPct: val,
                         })
                       }
                       className="w-16 px-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded font-mono font-medium"
                     />
                     <span className="text-xs text-slate-500">% in</span>
-                    <input
-                      type="number"
-                      min="1"
+                    <NumberField
+                      min={1}
+                      integer
                       value={sla.primaryWindow}
-                      onChange={(e) =>
+                      onCommit={(val) =>
                         onUpdateSLA({
                           ...sla,
-                          primaryWindow: Math.max(1, parseInt(e.target.value) || 6),
+                          primaryWindow: val,
                         })
                       }
                       className="w-14 px-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded font-mono font-medium"
@@ -700,14 +695,14 @@ export function ConfigFlow({
                     <span className="text-[11px] font-bold text-purple-900 block uppercase">BO ASA Baseline Target</span>
                     <div className="flex items-center gap-2">
                       <span className="text-xs text-slate-500">≤</span>
-                      <input
-                        type="number"
-                        min="1"
+                      <NumberField
+                        min={1}
+                        integer
                         value={sla.boAsaTarget}
-                        onChange={(e) =>
+                        onCommit={(val) =>
                           onUpdateSLA({
                             ...sla,
-                            boAsaTarget: Math.max(1, parseInt(e.target.value) || 60),
+                            boAsaTarget: val,
                           })
                         }
                         className="w-18 px-2 py-1 text-xs bg-slate-50 border border-slate-200 rounded font-mono font-medium"
@@ -778,13 +773,12 @@ export function ConfigFlow({
                             {/* Primary SLA Target % */}
                             <td className="py-2.5 px-3">
                               <div className="flex items-center gap-1">
-                                <input
-                                  type="number"
-                                  min="1"
-                                  max="100"
+                                <NumberField
+                                  min={1}
+                                  max={100}
+                                  integer
                                   value={targetPct}
-                                  onChange={(e) => {
-                                    const val = Math.min(100, Math.max(1, parseInt(e.target.value) || 80));
+                                  onCommit={(val) => {
                                     handleUpdateCatField(c.id, 'primaryPct', val);
                                   }}
                                   className="w-16 px-2 py-1 bg-white border border-slate-200 rounded text-xs font-mono font-medium"
@@ -796,12 +790,10 @@ export function ConfigFlow({
                             {/* Primary SLA Window */}
                             <td className="py-2.5 px-3">
                               <div className="flex items-center gap-1.5">
-                                <input
-                                  type="number"
-                                  min="1"
+                                <NumberField
+                                  min={1}
                                   value={priWinVal}
-                                  onChange={(e) => {
-                                    const val = Math.max(1, parseFloat(e.target.value) || 1);
+                                  onCommit={(val) => {
                                     const unit = c.primaryUnit || 'hours';
                                     const inMin = convertDurationToMinutes(val, unit);
                                     onUpdateCategories(
@@ -841,12 +833,10 @@ export function ConfigFlow({
                               <td className="py-2.5 px-3">
                                 <div className="flex items-center gap-1.5">
                                   <span className="text-slate-400">≤</span>
-                                  <input
-                                    type="number"
-                                    min="1"
+                                  <NumberField
+                                    min={1}
                                     value={asaTargetVal}
-                                    onChange={(e) => {
-                                      const val = Math.max(1, parseFloat(e.target.value) || 1);
+                                    onCommit={(val) => {
                                       const unit = c.boAsaUnit || sla.boAsaUnit;
                                       onUpdateCategories(
                                         categories.map((cat) =>
@@ -909,19 +899,15 @@ export function ConfigFlow({
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <input
-                  type="number"
+                <NumberField
                   min={50}
                   max={99.9}
                   step={0.1}
                   value={sla.confidenceLevelPct ?? 95}
-                  onChange={(e) =>
+                  onCommit={(val) =>
                     onUpdateSLA({
                       ...sla,
-                      confidenceLevelPct: Math.min(
-                        99.9,
-                        Math.max(50, Math.round((parseFloat(e.target.value) || 95) * 10) / 10)
-                      ),
+                      confidenceLevelPct: Math.round(val * 10) / 10,
                     })
                   }
                   className="w-24 px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded font-mono font-medium"
@@ -962,16 +948,16 @@ export function ConfigFlow({
               </div>
 
               <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="1"
-                  max="20"
+                <NumberField
+                  min={1}
+                  max={20}
+                  integer
                   disabled={sla.slaAcceptanceSlackEnabled !== true}
                   value={sla.slaAcceptanceSlackPct ?? 5}
-                  onChange={(e) =>
+                  onCommit={(val) =>
                     onUpdateSLA({
                       ...sla,
-                      slaAcceptanceSlackPct: Math.min(20, Math.max(1, parseInt(e.target.value, 10) || 5)),
+                      slaAcceptanceSlackPct: val,
                     })
                   }
                   className="w-24 px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded font-mono disabled:opacity-40"
@@ -1012,16 +998,16 @@ export function ConfigFlow({
               </div>
 
               <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="1"
-                  max="50"
+                <NumberField
+                  min={1}
+                  max={50}
+                  integer
                   disabled={sla.workloadReductionEnabled !== true}
                   value={sla.workloadReductionPct ?? 5}
-                  onChange={(e) =>
+                  onCommit={(val) =>
                     onUpdateSLA({
                       ...sla,
-                      workloadReductionPct: Math.min(50, Math.max(1, parseInt(e.target.value, 10) || 5)),
+                      workloadReductionPct: val,
                     })
                   }
                   className="w-24 px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded font-mono disabled:opacity-40"
@@ -1059,16 +1045,16 @@ export function ConfigFlow({
               </div>
 
               <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="50"
-                  max="100"
+                <NumberField
+                  min={50}
+                  max={100}
+                  integer
                   disabled={!sla.occupancyCapEnabled}
                   value={sla.occupancyCapEnabled ? sla.occupancyCapPct : 100}
-                  onChange={(e) =>
+                  onCommit={(val) =>
                     onUpdateSLA({
                       ...sla,
-                      occupancyCapPct: Math.min(100, Math.max(50, parseInt(e.target.value) || 85)),
+                      occupancyCapPct: val,
                     })
                   }
                   className="w-24 px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded font-mono disabled:opacity-40"
@@ -1108,16 +1094,16 @@ export function ConfigFlow({
               </div>
 
               <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="0"
-                  max="999"
+                <NumberField
+                  min={0}
+                  max={999}
+                  integer
                   disabled={sla.minCoverageEnabled === false}
                   value={sla.minCoverageEnabled === false ? 0 : (sla.minAgentsPerInterval ?? 1)}
-                  onChange={(e) =>
+                  onCommit={(val) =>
                     onUpdateSLA({
                       ...sla,
-                      minAgentsPerInterval: Math.max(0, parseInt(e.target.value, 10) || 0),
+                      minAgentsPerInterval: val,
                     })
                   }
                   className="w-24 px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded font-mono disabled:opacity-40"
@@ -1212,13 +1198,12 @@ export function ConfigFlow({
 
                           <td className="py-2.5 px-3">
                             <div className="flex items-center gap-1.5">
-                              <input
-                                type="number"
-                                min="1"
-                                step="1"
+                              <NumberField
+                                min={1}
+                                step={1}
                                 value={c.ahtMinutes}
-                                onChange={(e) =>
-                                  handleUpdateCatField(c.id, 'ahtMinutes', Math.max(1, parseFloat(e.target.value) || 1))
+                                onCommit={(val) =>
+                                  handleUpdateCatField(c.id, 'ahtMinutes', val)
                                 }
                                 className="w-20 px-2 py-1 bg-white border border-slate-200 rounded text-xs font-mono font-medium"
                               />
@@ -1228,15 +1213,13 @@ export function ConfigFlow({
 
                           <td className="py-2.5 px-3">
                             <div className="flex items-center gap-1.5">
-                              <input
-                                type="number"
-                                min="0"
-                                max="99"
-                                step="1"
-                                value={Math.round(c.shrinkagePct * 100)}
-                                onChange={(e) => {
-                                  const val = Math.min(99, Math.max(0, parseFloat(e.target.value) || 0));
-                                  handleUpdateCatField(c.id, 'shrinkagePct', val / 100);
+                              <NumberField
+                                min={0}
+                                max={99}
+                                step={0.1}
+                                value={fractionToPercentDisplay(c.shrinkagePct)}
+                                onCommit={(val) => {
+                                  handleUpdateCatField(c.id, 'shrinkagePct', percentDisplayToFraction(val));
                                 }}
                                 className="w-20 px-2 py-1 bg-white border border-slate-200 rounded text-xs font-mono font-medium"
                               />
@@ -1245,12 +1228,12 @@ export function ConfigFlow({
                           </td>
 
                           <td className="py-2.5 px-3">
-                            <input
-                              type="number"
-                              min="1"
+                            <NumberField
+                              min={1}
+                              integer
                               value={c.priority}
-                              onChange={(e) =>
-                                handleUpdateCatField(c.id, 'priority', parseInt(e.target.value) || 1)
+                              onCommit={(val) =>
+                                handleUpdateCatField(c.id, 'priority', val)
                               }
                               className="w-16 px-2 py-1 bg-white border border-slate-200 rounded text-xs font-mono font-medium"
                             />

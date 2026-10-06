@@ -4135,6 +4135,61 @@ console.log('\n--- Suite D53: results use run-time settings; local-time audit me
   assert(/buildConfigSnapshot/.test(appSrc53) && /onExportAssumptionsJSON=\{[^}]*\}/.test(resultsBlock53) && !/onExportAssumptionsJSON=\{handleExportParams\}/.test(resultsBlock53), 'D53.10 Results export is wired to a run-snapshot handler, not the live Config export', resultsBlock53);
 }
 
+// =================================================================
+// Suite D54 — Number fields keep what is typed (H1; audit UI-41/42/43/44/54, UI-33, DOC-3)
+//
+// Pre-fix every number input clamped on each keystroke (select-all, type 8,5 into the 50-100
+// occupancy cap stored 100) and snapped to a default when emptied. NumberField keeps a local
+// draft; pure helpers decide when a draft is committable and what a blur/Enter/unmount commits.
+// =================================================================
+console.log('\n--- Suite D54: number fields keep what is typed ---');
+{
+  let nim: any = null;
+  try {
+    nim = await import('../src/utils/number-input');
+  } catch (e) {
+    nim = null;
+  }
+  assert(!!nim && typeof nim.commitNumberDraft === 'function' && typeof nim.draftIsCommittable === 'function', 'D54.0 src/utils/number-input.ts exports commitNumberDraft + draftIsCommittable', 'module missing');
+  if (nim && typeof nim.commitNumberDraft === 'function' && typeof nim.draftIsCommittable === 'function') {
+    const { commitNumberDraft: c, draftIsCommittable: ok } = nim;
+    const occ = { min: 50, max: 100, integer: true };
+    assert(ok('8', occ) === false, 'D54.1a "8" in 50-100 -> not committable (partial of 85)', '');
+    assert(ok('85', occ) === true && c('85', { ...occ, fallback: 70 }) === 85, 'D54.1b "85" -> committable, commits 85', '');
+    assert(ok('', occ) === false && c('', { ...occ, fallback: 70 }) === 70, 'D54.2a empty -> not committable, commit returns the stored fallback', '');
+    assert(ok('-', occ) === false && c('-', { ...occ, fallback: 70 }) === 70, 'D54.2b "-" -> not committable, fallback', '');
+    assert(ok('1e', occ) === false && c('1e', { ...occ, fallback: 70 }) === 70, 'D54.2c "1e" -> not committable, fallback', '');
+    assert(c('abc', { ...occ, fallback: 70 }) === 70 && c('  ', { ...occ, fallback: 70 }) === 70, 'D54.2d "abc" / whitespace -> fallback', '');
+    assert(c('Infinity', { ...occ, fallback: 70 }) === 70 && ok('Infinity', occ) === false, 'D54.2e Infinity -> not committable, fallback', '');
+    assert(c('8', { ...occ, fallback: 70 }) === 50, 'D54.3a "8" on blur clamps up to min 50', '');
+    assert(c('30', { ...occ, fallback: 70 }) === 50 && ok('30', occ) === false, 'D54.3b "30" on blur -> 50, not committable while typing', '');
+    assert(c('99999', { min: 1, max: 100, integer: true, fallback: 5 }) === 100 && ok('99999', { min: 1, max: 100, integer: true }) === false, 'D54.3c "99999" max 100 -> commits 100 on blur, not committable', '');
+    assert(c('-3', { min: 1, fallback: 7 }) === 1, 'D54.3d "-3" min 1 -> 1', '');
+    assert(c('1e9', { min: 1, max: 5000, integer: true, fallback: 7 }) === 5000, 'D54.3e "1e9" -> max', '');
+    assert(ok('12.5', { min: 1, max: 100, integer: true }) === false && c('12.5', { min: 1, max: 100, integer: true, fallback: 5 }) === 13, 'D54.4 "12.5" integer -> not committable, blur commits 13 (Math.round)', '');
+    assert(ok('12.5', { min: 1, max: 100 }) === true && c('12.5', { min: 1, max: 100, fallback: 5 }) === 12.5, 'D54.4b "12.5" decimal field -> committable 12.5', '');
+    assert(ok('0', { min: 0 }) === true && c('0', { min: 0, fallback: 9 }) === 0, 'D54.5a "0" with min 0 -> 0 survives (no || default)', '');
+    assert(c('0', { min: 1, fallback: 9 }) === 1, 'D54.5b "0" with min 1 -> 1', '');
+    assert(ok('-7', { integer: true }) === true && c('-7', { integer: true, fallback: 1 }) === -7, 'D54.5c no range: negative integer kept (seed)', '');
+    assert(ok('1', { min: 0, max: 24 }) === true && ok('25', { min: 0, max: 24 }) === false, 'D54.5d range edges respected by draftIsCommittable', '');
+    // percent round trip
+    const { fractionToPercentDisplay: f2p, percentDisplayToFraction: p2f } = nim;
+    assert(typeof f2p === 'function' && typeof p2f === 'function' && f2p(0.925) === 92.5 && p2f(92.5) === 0.925, 'D54.6a 0.925 <-> 92.5 round trip', `${f2p?.(0.925)} ${p2f?.(92.5)}`);
+    assert(typeof f2p === 'function' && f2p(0.85) === 85 && p2f(85) === 0.85 && f2p(0.1) === 10 && f2p(0.999) === 99.9, 'D54.6b 0.85 -> 85, 0.1 -> 10, 0.999 -> 99.9 (no float noise)', `${f2p?.(0.85)} ${p2f?.(85)} ${f2p?.(0.999)}`);
+  }
+
+  // Source guard (a guard, not proof): every number input goes through NumberField.
+  const root54 = resolve(import.meta.dirname, '..');
+  const compDir54 = join(root54, 'src', 'components');
+  const offenders54: string[] = [];
+  for (const f of readdirSync(compDir54).filter((n) => n.endsWith('.tsx') && n !== 'NumberField.tsx')) {
+    const t = readFileSync(join(compDir54, f), 'utf-8');
+    if (/type=["']number["']/.test(t) || /type=\{["']number["']\}/.test(t)) offenders54.push(f);
+  }
+  assert(offenders54.length === 0, 'D54.7 no type="number" input remains in src/components outside NumberField.tsx', offenders54.join(', '));
+  assert(existsSync(join(compDir54, 'NumberField.tsx')), 'D54.8 NumberField.tsx exists', '');
+}
+
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');

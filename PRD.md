@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | **Status** | Draft — as-built specification |
-| **Version** | 1.14.0 |
-| **Date** | 2026-09-30 |
+| **Version** | 1.15.0 |
+| **Date** | 2026-10-06 |
 | **Owner** | _(unassigned)_ |
 | **Product** | Backoffice WFM Sizing Engine |
 | **Artifact** | `BoWFM.html` — single self-contained offline HTML file (~585 KB) |
@@ -222,6 +222,8 @@ These are real, verified behaviours a user will encounter:
 
 Acceptance criteria are written to be testable against current behaviour.
 
+**Number fields (all screens, 2026-10-06).** Every numeric input keeps exactly what is typed: a value that is already inside the field's range is stored as soon as it is typed (arrow keys and spinner clicks included); an out-of-range value is clamped to the nearest bound when the field is left (blur), Enter is pressed or the screen is switched; an empty or unreadable field returns to the stored value (never to a default). Escape restores the stored value. The bounds quoted below are enforced this way.
+
 ### 5.1 Data ingestion
 
 | ID | Requirement | Acceptance criteria |
@@ -288,7 +290,7 @@ on the Run pre-flight screen.
 | ID | Field | Bounds | Default |
 |---|---|---|---|
 | **FR-4.1** | Scheduled Daily Productive Hours | 1–24, step 0.1 | **7.5** |
-| **FR-4.2** | Schedule Adherence % | 10–100, step 1 | **100%** |
+| **FR-4.2** | Schedule Adherence % | 10–100, shown and stored to one decimal (e.g. 92.5 → 0.925) | **100%** |
 | **FR-4.3** | Working Days per Week | 1–7 | **5** (auto-sets off-days = 7 − value) |
 | **FR-4.4** | DES Present Hours / Day | read-only | `dailyProductiveHours × adherence` |
 | **FR-4.5** | Agent hours for Workload HC | `Derived (Horizon Default)` or `Manual Override` | **Derived**; override default **0** (ignored until user enters hours &gt; 0) |
@@ -469,7 +471,7 @@ at 10% → `floor(5.31)=5`, unchanged). Audit snapshot records
 | ID | Field | Bounds | Default (auto-discovered) |
 |---|---|---|---|
 | **FR-6.1** | AHT (Minutes) | ≥1 | **30** |
-| **FR-6.2** | Shrinkage % | 0–99 | **20%** |
+| **FR-6.2** | Shrinkage % | 0–99, shown and stored to one decimal | **20%** |
 | **FR-6.3** | Priority Rank | ≥1 | alphabetical index |
 
 **FR-6.4** — Primary SLA and BO ASA are displayed read-only here (centrally governed in the
@@ -494,9 +496,9 @@ Seeded defaults before any upload: `Claims_Auto` (AHT 35, shrinkage 20%, priorit
 | ID | Parameter | Bounds | Default |
 |---|---|---|---|
 | **FR-8.1** | Queue Architecture | `Pooled (Cross-Skilled)` / `Siloed (Dedicated)` | **Pooled** |
-| **FR-8.2** | Statistical Replications | 1–100 | **30** |
-| **FR-8.3** | Search Ceiling (userMaxHC) | 1–5000 | **500** |
-| **FR-8.4** | Base PRNG Seed | integer | **12345** |
+| **FR-8.2** | Statistical Replications | 1–100 integer (upper bound now enforced) | **30** |
+| **FR-8.3** | Search Ceiling (userMaxHC) | 1–5000 integer (upper bound now enforced) | **500** |
+| **FR-8.4** | Base PRNG Seed | integer, any sign, no range; `0` is stored as 12345 | **12345** |
 
 **FR-8.5 — Pre-flight checklist.** Six checks, each `PASSED` / `REQUIRED`, with a global
 `ALL GATES CLEARED` / `GATE BLOCKED` state:
