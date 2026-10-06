@@ -569,3 +569,43 @@ Proven clean in phase 3: the shipped file loads from disk with no errors and no 
 ## Usage
 
 Weekly meter: 15% at phase 3 start → 17% after P3-5. Soft line reached; stopped. Cap 20% respected.
+
+---
+
+# Phase 3b (continued same day, user-approved past the 17% soft line; new rule: no new agent at a meter reading of 19%, hard stop 20%)
+
+### P3-6 — `App.tsx`, `RunFlow.tsx`, `SensitivityFlow.tsx`, `SimulationProgressModal.tsx`, `run-inputs.ts` all lines (investigator; code reading) — 3 majors
+
+IDs renamed from the agent's A1..A12 to UI-49..UI-60. `ResetConfirmModal.tsx` not read.
+
+| ID | Severity (my verdict) | Finding | Effect on the planner | Evidence |
+|---|---|---|---|---|
+| UI-49 | **major — extends UI-1; corrects a phase 2 ruling** | Changing a column mapping by hand after a run (Demand → Mapping) rebuilds the demand data but neither clears results nor raises the "changed since run" banner — the mapping is not part of the run snapshot. Same when an imported settings file carries a mapping. I confirmed: `App.tsx:593` passes the raw setter; results are cleared only at upload, sample load, run start, reset, cancel, error. **Phase 2's P2-8 ruling "mapping changes do clear results" was right only for the automatic mapping at upload.** | Old headcount shown beside new data, unflagged. | `App.tsx:130-135`, `:452`, `:593`; `run-inputs.ts:14-41` |
+| UI-50 | **major (Sensitivity tab)** | The Sensitivity base cell (0%, 0%) can differ from the Results headline with no edit: every cell rounds AHT to whole minutes and per-interval volume to whole cases, even at 0%. AHT 7.5 → base cell runs at 8 (+6.7%). Small values flatten the ±10% cells (AHT 3 at −10% = 3). The cell is labelled "Baseline" and its SLA text hidden. | Sensitivity numbers wrong for decimal or small AHT/volumes; headline unaffected. | `SensitivityFlow.tsx:78`, `:84`, `:277`; `ConfigFlow.tsx:1221` |
+| UI-51 | **major (Sensitivity tab)** | Leaving the Sensitivity tab throws the finished matrix away (minutes of computing) and the hidden search keeps running (up to 25 full searches) with no cancel on leave. | Lost work, slow app. | `SensitivityFlow.tsx:45`, `:51-125`; `App.tsx:667` |
+| UI-52 | minor | Sensitivity Stop / engine error: no error handling — the grid stops silently with no message; Stop re-enables Compute at once and a second Compute un-cancels the first loop, so two loops race. | Confusing state. | `SensitivityFlow.tsx:53-129` |
+| UI-53 | minor | Infeasible Sensitivity cells show Gross HC computed at the search cap with no "infeasible" mark (the `passed` flag is stored, never read). | Cap value can be read as an answer (same family as UI-13). | `SensitivityFlow.tsx:110`, `:260`, `:351`; `hc-search.ts:2962` |
+| UI-54 | minor | Run-screen fields (replications, search ceiling, seed) snap back to the default when emptied, so retyping appends: clear "500", type 80 → "5008" (above the stated max 5000, accepted). Seed 0 becomes 12345. No upper limit (100000 replications would hang). No "85 → 100" style corruption here (minimums are 1). | Awkward typing; wrong value if not noticed. Fix with H1. | `RunFlow.tsx:318-323`, `:342-347`, `:363-368` |
+| UI-55 | minor (UI side of HC-9) | Replications = 1 is allowed with **no warning**, while labels still say "≥30 replications" and "computes the CI". Search ceiling below `N_min` has no pre-run message. | Planner can run without the confidence gate unknowingly. | `RunFlow.tsx:276`, `:312`, `:328` |
+| UI-56 | minor | Settings import: a foreign file (`{}`) reports "Configuration successfully loaded" with nothing applied; no version field; calendar/labor replaced wholesale — a partial file without `holidays` then crashes the calendar code, and **no error boundary exists** (white screen until reload); imported search ceiling 0 shows 500 on screen while the engine runs with 1. Concrete consequences of HC-4. | Crash or misleading success message on a bad settings file. | `App.tsx:414-467`, `:273`; `calendar.ts:56-64`; `RunFlow.tsx:342` |
+| UI-57 | minor | Run lifecycle: Cancel only sets a flag; starting a new run resets the flag before the cancelled run sees it, so both finish and the last one wins; the old run's cleanup re-enables the Run button mid-run. No re-entry guard beyond the disabled button. | Rare race; result still internally consistent. | `App.tsx:230-320` |
+| UI-58 | minor | Header chip "Net HC / Gross HC" shows on every screen with no stale marker (banner is on Results only). Run snapshot holds references, not a copy (safe only while no code mutates in place). | Stale number in the header after an edit. | `App.tsx:262`, `:517-526`, `:662` |
+| UI-59 | minor | Run gates: no gate for zero open days, close ≤ open, zero categories; `workingDaysPerWeek > 0` shown but not enforced; open = close = 0 with 0 productive hours counts as valid; gate 3 counts all configured categories, not those in the data. | Missing early checks (engine error is caught — see clean list). | `RunFlow.tsx:75`, `:89-106` |
+| UI-60 | minor | Progress modal says "binary search" (engine comments describe a step-up search — not confirmed); floor label shown even with the Workload Floor off; no "leave page" guard — a refresh loses all work. | Wording; lost work on refresh. | `SimulationProgressModal.tsx:156-161`, `:279` |
+
+Clean: engine errors during a run are caught and shown (no white screen or stuck modal) — this closes the UI-45 question for the Run path; progress modal repaints; blocking data-quality errors are enforced twice; seed comes only from the settings (no clock, no random); Sensitivity uses the same seed, replications and cap as the main run; exported settings contain no dates needing revival; no offline-contract breach in these files.
+
+### P3-7 — browser confirmation of code-read findings (tester; real key presses on the shipped `BoWFM.html`)
+
+| Check | Result | What happened |
+|---|---|---|
+| UI-41 occupancy cap | **CONFIRMED** | Select all, type `8`,`5` → field 50, then 100. `7`,`0` → 50, then 100. |
+| UI-41 adherence | **CONFIRMED** | `8`,`5` → 10, then 100. |
+| UI-41 confidence level | **CONFIRMED** | `9`,`5` → 50, then 99.9. |
+| UI-41 size of effect | **CONFIRMED — large** | Claims sample, adherence meant to be 85%: typed → field 100 → recommended **31**, gross **40**, `N_min` 30. Pasted 85 → recommended **37**, gross **48**, `N_min` 36. Typing under-sizes by 6 heads (−16%) / 8 gross (−17%). |
+| UI-54 search ceiling | **CONFIRMED** | From 500: Backspace ×3 → 50, 5, 500 (snaps back); then `8`,`0` → 5008, 50080 (stated max 5000). |
+| UI-49 mapping change after run | **CONFIRMED (date dropdown; category dropdown not tested)** | Support run 27 / 34; changed a mapping dropdown; Results still show 27 / 34 beside "DQ GATE BLOCKED", no "changed since run" banner. |
+| UI-45 no working days | **No crash** | All 7 days unticked: data-quality header still "CLEARED", Run enabled; pressing Run shows a red error panel "No open working window found in calendar configuration within 1830 days… check … the Data Quality gate" — which shows no issue. Dismissable; no console error. |
+| UI-38 drop outside the box | not tested | Not reliable headless. |
+
+**UI-41 is upgraded to the top finding of phase 3: major, confirmed, changes the headcount (under-staffs by about 16% in the tested case) through ordinary typing.**
