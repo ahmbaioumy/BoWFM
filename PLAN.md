@@ -943,3 +943,32 @@ Returns, besides `headers`, `rows`, `delimiter`, a list `problems: { severity: '
 | 14 | Mutation proof | Remove the cell-count check and the unterminated-quote check in a scratch copy → D68 fails each time |
 | 15 | Docs and artifact | PRD / project_context / docs 07 updated; `npm run check:artifact` passes |
 | 16 | Scope respected | `git diff <checkpoint>..HEAD --stat` lists only scope-lock files |
+
+## Input safety part 3 — challenger verdict: FAIL (accepted). Revised rules below override the plan above.
+
+**Accepted findings:** (1) blocker — a bad file picked on a loaded session would still trigger the reset prompt and replace good data with nothing; (2) R5 as written blocks files that load correctly today (short rows with empty trailing columns, footer rows); (3) empty file never reaches the reader (`if (text)` in both read paths); (4) encoding story incomplete (UTF-16 with BOM loads today and must keep loading; Latin-1 gives replacement characters silently); (5) where the problem list lives was undefined (stale-state risk); (6) R4 row number needs a line counter; balanced mid-cell quotes still merge cells; (7) delimiter detection reads the first line only; (8) upload traps interact with the reset prompt; (9) too big for one build.
+
+**Core change of design: a file with an ERROR is REFUSED at pick time.** The file is read and checked before anything else happens. Any error-severity problem → a red message under the upload box, the current session is left exactly as it is, no reset prompt, no state change. So errors never enter application state and need no data-quality carry-through. Only WARNINGS travel with an accepted file: stored together with the raw rows (set in the same places, cleared on sample load and on reset) and shown in data quality, not blocking.
+
+**Split into two builds.** Build A = reader rules + pick-time refusal + messages (demand and backlog) + warnings in data quality + tests + docs. Build B = upload traps (clear input after pick, page-level drop guard that ignores the drop box and file inputs, latest-pick-wins sequence guard that also supersedes a pending reset prompt) + UI-39 (name the unmapped column). The settings-import input in `Sidebar.tsx` is out of scope (H10).
+
+**Reader rules, final (Build A):**
+- E1 not readable text: any NUL character in the decoded text, or text starting with `PK` → error: "This is not a readable text file. It looks like an Excel workbook or a file saved in an unusual encoding. In Excel use Save As → CSV UTF-8, then upload that file." The "many control characters" test is dropped. UTF-16 with a byte-order mark (Excel "Unicode Text") is decoded by the browser and must keep loading (fixture: decoded tab-delimited text).
+- E2 empty file (including zero bytes: both read paths stop swallowing empty text; a failed read shows "The file could not be read.").
+- E3 header only, no data rows (blank lines ignored).
+- E4 unterminated quote at end of file → error naming the physical file row where that quote opened (the reader now tracks line numbers, counting lines inside quoted cells). Quote handling itself is NOT changed: balanced mid-cell quotes that merge cells remain as today (recorded as open item IS3-a; changing it is an owner decision).
+- E5 a row has MORE non-empty cells than the header → error naming up to 5 file rows with expected/found counts and the hint "a delimiter is extra on those rows, or there is a title row above the header". Extra cells that are all empty are ignored (trailing delimiter).
+- E6 only one column found while the file has 2+ data rows and the header or data contains another candidate separator → error: "Only one column was found. Columns must be separated by comma, semicolon, tab or |. If there is a title row above the header, remove it."
+- E7 title row: first non-blank line has exactly 1 non-empty cell and the following lines have 2 or more → error asking to remove the rows above the header.
+- W1 short rows (FEWER cells than the header): cells padded as empty exactly as today; warning "N row(s) have fewer columns than the header (file rows …); the missing cells were read as empty. Check those rows (missing delimiter, footer or total line)."
+- W2 duplicate header names → later ones renamed `Name (2)`, nothing overwritten; warning.
+- W3 replacement characters (U+FFFD) present → warning: "Some characters could not be read (the file is not saved as UTF-8). Names may look wrong; numbers and dates are not affected."
+- Delimiter detection: unchanged for every file that loads today; `|` added as a fourth candidate with the lowest tie-break priority; when the first line yields one column, detection looks at the next lines (up to 5) instead. For number reading `|` behaves like semicolon/tab.
+- Precedence: E1 > E2 > E3 > E7 > E6 > E4 > E5.
+- Same reader and refusal for the backlog file: message in the import area, nothing imported.
+
+**Build A tests (suite D68):** one fixture per rule with exact severity, code and rows named; trailing delimiter on every row → no problem; quoted delimiter and quoted line break → no problem and correct row numbers afterwards; UTF-16-decoded tab file → loads; duplicate header → both columns keep their own values; pipe file → correct columns, total = hand sum, comma decimals read per part 1; three built-in samples and clean comma / semicolon / tab files → zero problems and identical headers / rows / delimiter to the old reader (legacy copy in the test).
+
+**Build A acceptance (replaces 1–8, 12 above; 9–11 move to Build B):** each bad file refused with its message in the browser AND a previously loaded session still intact afterwards (same interval count, no reset prompt); short-row file loads with warning W1 and Run allowed; duplicate header both selectable; pipe file total = hand sum; samples 31/40, 27/34, 31/39; backlog binary file refused; mutation: remove the more-cells check, and the unterminated-quote check → D68 fails each time.
+
+**Scope lock, Build A:** `src/utils/csv-parser.ts`, `src/utils/number-cell.ts` (pipe only), `src/components/DemandFlow.tsx` (both read paths, messages under the upload box and in the backlog import area), `src/App.tsx` (pick-time check before the reset prompt; warning list stored with raw rows), `src/types/wfm.ts` (optional fields only if unavoidable), `scripts/verify-sizing-fixes.mts` (append D68), `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`, rebuilt `BoWFM.html`.
