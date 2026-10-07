@@ -5080,6 +5080,121 @@ console.log('\n--- Suite D65: F3 statistics describe the adopted roster ---');
   assert(!DEFAULT_LABOR.shiftPlacementEnabled, 'D65.7 default labor config: shiftPlacementEnabled is OFF', `got ${String(DEFAULT_LABOR.shiftPlacementEnabled)}`);
 }
 
+// ----------------------------------------------------
+// Suite D66 - Input safety part 1 (G2 + H2): numbers read from files. A volume / remaining-minutes
+// cell is either read exactly as meant or the planner is told; never silently misread. Semicolon
+// file `12,5` must be 12.5 (old behaviour: 125); `2h`, `30 min`, `1e9` blocked; backlog bad rows use
+// THEIR category's own handling time / priority (old: invented 30 / 1) and are counted.
+// ----------------------------------------------------
+import { parseCSVRaw, parseFlexibleDate } from '../src/utils/csv-parser';
+import { classifyNumberCell, readNumberColumn } from '../src/utils/number-cell';
+import { parseWipRows } from '../src/utils/wip-import';
+
+console.log('\n--- Suite D66: input safety part 1 (numbers read from files) ---');
+{
+  const map66 = { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any;
+  const fileFor = (delim: string, cells: string[]) =>
+    ['IntervalStart', 'Volume', 'Category'].join(delim) + '\n' +
+    cells.map((c, i) => `2026-10-05 ${String(9 + Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}${delim}${c}${delim}General`).join('\n');
+  const load66 = (delim: string, cells: string[]) => {
+    const p = parseCSVRaw(fileFor(delim, cells));
+    const ivs = mapRawRecordsToIntervals(p.rows, map66, 'General', p.delimiter);
+    const dq = validateDataQuality({ intervals: ivs, mapping: map66, categories: DEFAULT_CATEGORIES, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, openingWIP: [] });
+    return { p, ivs, dq, total: ivs.reduce((s, x) => s + x.volume, 0), err: dq.issues.find((i) => i.field === 'Unreadable volume') };
+  };
+  const vols = (r: { ivs: StandardInterval[] }) => r.ivs.map((x) => x.volume).join('|');
+
+  // 1. semicolon file with decimal commas
+  const a = load66(';', ['12,5', '10,5', '8,25']);
+  assert(a.p.delimiter === ';', 'D66.1a parseCSVRaw returns the detected delimiter', a.p.delimiter);
+  assert(Math.abs(a.total - 31.25) < 1e-9 && !a.err, 'D66.1b semicolon file 12,5 / 10,5 / 8,25 totals 31.25 (old: 1055) with no error', `total=${a.total}`);
+  assert(a.dq.issues.some((i) => i.field === 'Fractional volume'), 'D66.1c fractional volumes carry the rounding warning');
+  const aw = load66(';', ['12', '10', '8']);
+  assert(!aw.dq.issues.some((i) => i.field === 'Fractional volume') && aw.total === 30, 'D66.1d whole-number file: no fractional warning');
+
+  // 2. comma file: clean values unchanged, unclear blocked
+  const b = load66(',', ['"1,234"', '"$1,200"', ' 7 ', '$1200', '"12,345,678"', '12.5']);
+  assert(vols(b) === '1234|1200|7|1200|12345678|12.5' && !b.err, 'D66.2a comma file: "1,234", $1,200, " 7 ", $1200, 12,345,678, 12.5 read as today', vols(b));
+  for (const bad of ['"12,5"', '30 min', '12abc', '1e9', '2h', '0x10', '12..5', '1:30']) {
+    const r = load66(',', ['5', bad]);
+    assert(!!r.err && r.err.severity === 'error' && r.ivs.some((x) => x.volume === 0) && /row 3/.test(r.err.message), `D66.2b comma file cell ${bad} is a blocking Unreadable volume error naming row 3, stored 0`, r.err?.message);
+  }
+  const many = load66(',', ['1', '2h', '3', 'x', '5', 'y', '7', 'z']);
+  assert(many.err!.message.includes('row 3') && many.err!.message.includes('row 5') && many.err!.message.includes('row 7') && many.err!.message.includes('row 9'), 'D66.2c error names the offending rows', many.err?.message);
+
+  // 3. semicolon / tab: per-column convention
+  const c1 = load66(';', ['1.234', '2.345']);
+  assert(!!c1.err && c1.err.message.includes('1234') && c1.err.message.includes('1.234'), 'D66.3a ambiguous-only column blocks and shows both readings', c1.err?.message);
+  const c2 = load66(';', ['1.234', '12,5']);
+  assert(!c2.err && vols(c2) === '1234|12.5', 'D66.3b 1.234 + 12,5 reads 1234 and 12.5', vols(c2));
+  const c3 = load66(';', ['12,5', '12.5']);
+  assert(!!c3.err && /mixed number formats/.test(c3.err.message), 'D66.3c column mixing 12,5 and 12.5 blocks as mixed number formats', c3.err?.message);
+  const c4 = load66(';', ['1.234,5', '3,5']);
+  assert(!c4.err && vols(c4) === '1234.5|3.5', 'D66.3d 1.234,5 reads 1234.5', vols(c4));
+  const c5 = load66('\t', ['1,234.5', '2.5']);
+  assert(!c5.err && vols(c5) === '1234.5|2.5', 'D66.3e tab file 1,234.5 reads 1234.5', vols(c5));
+  const c6 = load66(';', ['1,234', '3.5']);
+  assert(!c6.err && vols(c6) === '1234|3.5', 'D66.3f ambiguous 1,234 follows the dot convention proven by 3.5', vols(c6));
+
+  // 4. large volume + negative
+  assert(load66(',', ['100001', '5']).dq.issues.some((i) => i.field === 'Very large volume'), 'D66.4a volume above 100,000 warns');
+  const neg = load66(',', ['-5', '5']);
+  assert(neg.dq.issues.some((i) => i.field === 'Volume Parsing') && neg.ivs.some((x) => x.volume === 0), 'D66.4b negative volume keeps today behaviour (warning, stored 0)');
+
+  // 5. helper table
+  const cls = (s: string, d = ',') => { const r = classifyNumberCell(s, d); return r.kind === 'number' ? r.value : r.kind; };
+  assert(cls('12') === 12 && cls('12.5') === 12.5 && cls('-5') === -5 && cls('') === 'blank' && cls(' 7 ') === 7, 'D66.5a helper: 12, 12.5, -5, empty, " 7 "');
+  assert(cls('12,5') === 'unreadable' && cls('12,5', ';') === 12.5 && cls('0x10') === 'unreadable' && cls('1e9') === 'unreadable' && cls('30 min') === 'unreadable', 'D66.5b helper: 12,5 by delimiter, 0x10, 1e9, 30 min');
+  assert(readNumberColumn(['1.234', '5.5'], ';').values.join('|') === '1.234|5.5', 'D66.5c helper: ambiguous cell follows dot convention proven in column');
+
+  // 6. clean data parses exactly as before: built-in samples vs the legacy reader
+  const legacy = (s: string) => { const v = parseFloat(String(s).trim().replace(/[\s$,]/g, '')); return Number.isFinite(v) && v >= 0 ? v : 0; };
+  for (const st of ['claims', 'support', 'healthcare'] as const) {
+    const ds = buildSampleDataset(st, new Date(2026, 9, 5, 8, 0));
+    const ivs = mapRawRecordsToIntervals(ds.rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+    const legacySum = ds.rows.reduce((s, r) => s + legacy(r['Volume']), 0);
+    assert(ivs.reduce((s, x) => s + x.volume, 0) === legacySum && !ivs.some((x) => x.volumeParsingIssue), `D66.6 built-in sample ${st}: volumes identical to the legacy reader, no issues`);
+  }
+
+  // 7. backlog import
+  const cats66 = [{ name: 'Email', ahtMinutes: 20, priority: 3 }, { name: 'Chat', ahtMinutes: 10, priority: 2 }];
+  const mapW = { caseIdCol: 'ID', categoryCol: 'Cat', dateCol: 'Date', timeCol: '', remainingWorkCol: 'Rem', priorityCol: 'Prio' };
+  const def66 = new Date(2026, 9, 1, 8, 0);
+  const row = (id: string, cat: string, rem: string, prio: string, date = '05/10/2026') => ({ ID: id, Cat: cat, Rem: rem, Prio: prio, Date: date });
+  const rowsW = [
+    row('A', 'Chat', '15', '2'),            // clean
+    row('', 'Foo', '', ''),                 // unknown category
+    row('', '', '', ''),                    // blank category
+    row('', 'Chat', '2h', ''),              // unreadable minutes
+    row('', 'Chat', '-5', ''),              // negative
+    row('', 'Chat', '0', ''),               // zero
+    row('', 'Chat', '1e9', ''),             // exponent
+    row('', 'Chat', '100001', ''),          // above limit
+    row('', 'Chat', '', 'high'),            // bad priority
+    row('', 'Chat', '', '', ''),            // blank date
+    row('', 'Chat', '', '', '31/31/2026'),  // impossible date: skipped
+  ];
+  const w = parseWipRows(rowsW, mapW, cats66, def66, [], ',');
+  assert(w.cases.length === 10 && w.invalidDates === 1, 'D66.7a impossible-date row skipped, 10 imported', `${w.cases.length}/${w.invalidDates}`);
+  assert(w.cases[0].id === 'A' && w.cases[0].remainingWorkMinutes === 15 && w.cases[0].priority === 2 && +w.cases[0].arrival === +parseFlexibleDate('05/10/2026'), 'D66.7b valid row unchanged');
+  assert(w.cases[1].category === 'Email' && w.cases[1].remainingWorkMinutes === 20 && w.cases[1].priority === 3 && w.cases[2].remainingWorkMinutes === 20, "D66.7c unknown/blank category uses the fallback category's own AHT 20 and priority 3 (old: 30 / 1)");
+  assert([3, 4, 5, 6, 7].every((i) => w.cases[i].remainingWorkMinutes === 10), 'D66.7d 2h, -5, 0, 1e9, 100001 minutes all fall back to the category AHT 10');
+  assert(w.cases[8].priority === 2 && +w.cases[9].arrival === +def66, 'D66.7e bad priority -> category priority; blank date -> default arrival');
+  assert(w.cases.map((c) => c.id).join(',') === 'A,WIP-0001,WIP-0002,WIP-0003,WIP-0004,WIP-0005,WIP-0006,WIP-0007,WIP-0008,WIP-0009', 'D66.7f ids and row order as before', w.cases.map((c) => c.id).join(','));
+  const s = w.summary;
+  assert(s.category.count === 2 && s.remainingMinutes.count === 5 && s.priority.count === 1 && s.date.count === 1 && s.noHandlingTime.count === 0, 'D66.7g each fallback counted per kind', JSON.stringify([s.category.count, s.remainingMinutes.count, s.priority.count, s.date.count]));
+  assert(s.adjustedRows === 9 && s.importedAsTyped === 1 && s.remainingMinutes.examples.length === 5 && s.remainingMinutes.examples[0].text === '2h', 'D66.7h summary: 1 as typed, 9 adjusted, examples listed', JSON.stringify([s.adjustedRows, s.importedAsTyped]));
+  const ws = parseWipRows([row('', 'Chat', '7,5', '')], mapW, cats66, def66, [], ';');
+  const wc = parseWipRows([row('', 'Chat', '7,5', '')], mapW, cats66, def66, [], ',');
+  assert(ws.cases[0].remainingWorkMinutes === 7.5 && wc.cases[0].remainingWorkMinutes === 10 && wc.summary.remainingMinutes.count === 1, 'D66.7i 7,5 reads 7.5 in a semicolon file; unreadable (category AHT, counted) in a comma file');
+  const noAht = parseWipRows([row('', 'Chat', '', '')], mapW, [{ name: 'Chat', ahtMinutes: 0, priority: 2 }], def66, [], ',');
+  assert(noAht.cases[0].remainingWorkMinutes === 30 && noAht.summary.noHandlingTime.count === 1, 'D66.7j category with no handling time: 30 assumed but counted');
+  const mk = (n: number, bad: number) => Array.from({ length: n }, (_, i) => row('', i < bad ? 'Foo' : 'Chat', '5', '2'));
+  assert(parseWipRows(mk(100, 30), mapW, cats66, def66, [], ',').summary.requiresConfirmation === true, 'D66.7k 30% fallback rows: confirmation required');
+  assert(parseWipRows(mk(100, 5), mapW, cats66, def66, [], ',').summary.requiresConfirmation === false, 'D66.7l 5% fallback rows: no confirmation');
+  assert(parseWipRows(mk(1000, 60), mapW, cats66, def66, [], ',').summary.requiresConfirmation === true, 'D66.7m 60 fallback rows (6%): confirmation required (more than 50 rows)');
+}
+
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');

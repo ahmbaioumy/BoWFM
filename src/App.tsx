@@ -93,6 +93,7 @@ export function App() {
   // Demand & Data State
   const [rawHeaders, setRawHeaders] = useState<string[]>([]);
   const [rawRows, setRawRows] = useState<Record<string, string>[]>([]);
+  const [rawDelimiter, setRawDelimiter] = useState<string>(',');
   const [columnMapping, setColumnMapping] = useState<ColumnMapping>({
     intervalStartCol: '',
     volumeCol: '',
@@ -131,8 +132,8 @@ export function App() {
     if (rawRows.length === 0 || !columnMapping.intervalStartCol || !columnMapping.volumeCol) {
       return [];
     }
-    return mapRawRecordsToIntervals(rawRows, columnMapping);
-  }, [rawRows, columnMapping]);
+    return mapRawRecordsToIntervals(rawRows, columnMapping, 'General', rawDelimiter);
+  }, [rawRows, columnMapping, rawDelimiter]);
 
   // Synchronize Categories Discovery when Intervals change
   useEffect(() => {
@@ -179,15 +180,16 @@ export function App() {
     setSearchOutput(null);
     setRunInputs(null);
 
-    const { headers, rows } = parseCSVRaw(text);
+    const { headers, rows, delimiter } = parseCSVRaw(text);
     setRawHeaders(headers);
     setRawRows(rows);
+    setRawDelimiter(delimiter);
 
     const autoMapping = autoSuggestColumnMapping(headers, rows);
     setColumnMapping(autoMapping);
 
     if (rows.length > 0 && autoMapping.intervalStartCol && autoMapping.volumeCol) {
-      const initialIntervals = mapRawRecordsToIntervals(rows, autoMapping);
+      const initialIntervals = mapRawRecordsToIntervals(rows, autoMapping, 'General', delimiter);
       if (initialIntervals.length > 0) {
         setCategories((prev) => discoverAndSyncCategories(initialIntervals, prev, sla));
       }
@@ -215,6 +217,7 @@ export function App() {
 
     setRawHeaders(headers);
     setRawRows(rows);
+    setRawDelimiter(',');
     const mapping: ColumnMapping = {
       intervalStartCol: 'IntervalStart',
       volumeCol: 'Volume',
@@ -222,7 +225,7 @@ export function App() {
     };
     setColumnMapping(mapping);
 
-    const sampleIntervals = mapRawRecordsToIntervals(rows, mapping);
+    const sampleIntervals = mapRawRecordsToIntervals(rows, mapping, 'General', ',');
     setCategories((prev) => discoverAndSyncCategories(sampleIntervals, prev, sla));
     setCurrentTab('dq');
   }
@@ -338,6 +341,7 @@ export function App() {
     setSimParams(DEFAULT_SIM_PARAMS);
     setRawHeaders([]);
     setRawRows([]);
+    setRawDelimiter(',');
     setColumnMapping({ intervalStartCol: '', volumeCol: '' });
     setOpeningWIP([]);
     setSearchOutput(null);

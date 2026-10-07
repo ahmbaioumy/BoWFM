@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft — as-built specification |
-| **Version** | 1.17.1 |
+| **Version** | 1.18.0 |
 | **Date** | 2026-10-07 |
 | **Owner** | _(unassigned)_ |
 | **Product** | Backoffice WFM Sizing Engine |
@@ -243,14 +243,14 @@ Acceptance criteria are written to be testable against current behaviour.
 **FR-2.1 — The DQ gate must block simulation on any error-severity issue.**
 `passed = !issues.some(i => i.severity === 'error')`. Warnings never block.
 
-**FR-2.2 — The following 21 checks must be performed.** Errors block; warnings inform.
+**FR-2.2 — The following 24 checks must be performed.** Errors block; warnings inform.
 
 | # | Field | Severity | Trigger |
 |---|---|---|---|
 | 1 | Column Mapping | **error** | Interval Start or Volume column unmapped |
 | 2 | Inflow Data | **error** | Zero intervals found *(early-returns; skips all later checks)* |
 | 3 | Operating Hours & Demand Distribution Diagnostic | warning | >15% of volume arrives outside operating hours |
-| 4 | Volume Parsing | warning | A volume cell needed correction (thousands separator/currency stripped, or a negative value rejected to 0) |
+| 4 | Volume Parsing | warning | A negative volume was rejected to 0 |
 | 5 | Timestamps | **error** | Any unparseable timestamp — message names `dd/mm/yyyy`, notes `mm/dd` is rejected |
 | 6 | Interval Length | **error** | Any interval whose duration differs from 30 minutes by >0.1 min |
 | 7 | Duplicate Slots | **error** | Repeated category + timestamp. Adds a hint when a separate time column exists but is unmapped ("…intervals do not all collapse to 00:00") |
@@ -268,6 +268,9 @@ Acceptance criteria are written to be testable against current behaviour.
 | 19 | Isolated Date(s) | **error** | A run of **more than 7 consecutive empty calendar days** (8 or more) separates the data and the smaller side holds at most 1% of the rows (minimum 1, maximum 20 rows) — a stray or mistyped date, including a near one such as a wrong month. Names the isolated date(s), their row count, the number of empty days and the main data range. Only when every timestamp parsed cleanly (G1, 2026-10-06; threshold tightened from 30 to 7 days in G1-a, same day) |
 | 20 | Old Backlog Arrival | warning | An opening-backlog case arrived more than 30 calendar days before the first demand interval; names the oldest case. Harmless to capacity (the horizon is the demand span) — flags typos such as a wrong year |
 | 21 | Opening WIP Overdue at Start | warning | N opening-backlog cases arrived before the first interval and cannot meet their deadline even if work starts at the first working instant (rule D4, §6): worked and counted as workload, excluded from the SLA % and the wait-time mean |
+| 22 | Unreadable volume | **error** | A volume cell is not a plain number (units, letters, exponent, hex), uses a comma that is not a thousands separator in a comma-separated file, mixes decimal-comma and decimal-point in one column of a semicolon/tab file, or is ambiguous (`1.234` / `1,234`) with nothing in the column to settle it. Names up to 5 file rows with the cell text (ambiguous cells show both readings); the cell is stored as 0 |
+| 23 | Fractional volume | warning | Any interval volume is not a whole number — the simulation rounds each interval to whole cases (the displayed total keeps the decimals) |
+| 24 | Very large volume | warning | An interval volume above 100,000 (likely a misread) |
 
 **FR-2.3 — The DQ tab must summarise the dataset**: Total Intervals, Total Case Volume,
 Working Days in Horizon, Total Workload (hours).
@@ -489,7 +492,7 @@ Seeded defaults before any upload: `Claims_Auto` (AHT 35, shrinkage 20%, priorit
 |---|---|---|
 | **FR-7.1** | Manual entry | Category (select), Remaining Work minutes (≥1, **default 30**), Arrival/Clock Start (`datetime-local`, defaults to first interval start). IDs auto-generate as `WIP-0001`. |
 | **FR-7.2** | Bulk CSV import | Six mappings: Category*, Arrival/Date*, Time, Case ID, Remaining Work, Priority. Auto-detected where possible. |
-| **FR-7.3** | Import validation feedback | Reports rows skipped for date-format violations and categories that will fall back to the first configured category. |
+| **FR-7.3** | Import validation feedback | Rows with an impossible date are skipped (day-first is assumed, so `03/04/2026` is 3 April). Every other bad value is replaced by a safe value and **counted**: unknown/blank category -> first configured category *with that category's own handling time and priority*; remaining minutes unreadable, zero or negative, or above 100,000 -> category handling time; priority not a positive whole number -> category priority; blank date -> default arrival (first demand interval); category with no handling time -> 30 minutes. The preview shows "N rows imported as typed; M rows adjusted" with a line and up to 5 example rows per reason. When more than 20% of rows, or more than 50 rows, fall back on category, Replace/Append stay disabled until the planner ticks "I understand these rows will be imported under <category>". Decimal commas are read in semicolon/tab files (same per-column rule as demand volumes). |
 | **FR-7.4** | Import preview | First four parsed cases shown before commit. |
 | **FR-7.5** | Import modes | `Replace WIP (n)` or `Append +n to existing (m)`. |
 | **FR-7.6** | WIP list management | Table of all WIP with per-row delete and Clear All; shows total pending work in minutes and hours. |

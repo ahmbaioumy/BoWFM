@@ -14,6 +14,7 @@ import {
   StandardInterval,
 } from '../types/wfm';
 import { generateNextWIPId, parseCSVRaw, parseFlexibleDate } from '../utils/csv-parser';
+import { parseWipRows } from '../utils/wip-import';
 import { formatDateTime24 } from '../utils/calendar';
 import { CalendarConfigPanel } from './CalendarConfigPanel';
 import { NumberField } from './NumberField';
@@ -86,6 +87,8 @@ export function DemandFlow({
   const [wipFileName, setWipFileName] = useState('');
   const [wipRawHeaders, setWipRawHeaders] = useState<string[]>([]);
   const [wipRawRows, setWipRawRows] = useState<Record<string, string>[]>([]);
+  const [wipDelimiter, setWipDelimiter] = useState<string>(',');
+  const [wipConfirmedFallback, setWipConfirmedFallback] = useState(false);
   const [wipMapping, setWipMapping] = useState<{
     caseIdCol: string;
     categoryCol: string;
@@ -177,6 +180,8 @@ export function DemandFlow({
         setWipFileName(file.name);
         setWipRawHeaders(parsed.headers);
         setWipRawRows(parsed.rows);
+        setWipDelimiter(parsed.delimiter);
+        setWipConfirmedFallback(false);
         setWipMapping(autoDetectWipMapping(parsed.headers));
       }
     };
@@ -184,98 +189,37 @@ export function DemandFlow({
   }
 
   function getParsedWipCases(baseWip: OpeningWIPCase[]) {
-    if (wipRawRows.length === 0) return { cases: [], invalidDates: 0, unmatchedCategories: [] };
-
-    const cases: OpeningWIPCase[] = [];
-    let invalidDates = 0;
-    const unmatchedSet = new Set<string>();
-    const defaultCat = categories.length > 0 ? categories[0] : { name: 'General', ahtMinutes: 30, priority: 1 };
-
-    wipRawRows.forEach((row, idx) => {
-      // Category matching
-      const rawCat = wipMapping.categoryCol ? (row[wipMapping.categoryCol] || '').trim() : '';
-      const matchedCat = categories.find((c) => c.name.toLowerCase() === rawCat.toLowerCase());
-      let categoryName = rawCat;
-
-      if (!matchedCat) {
-        if (rawCat) unmatchedSet.add(rawCat);
-        categoryName = defaultCat.name;
-      } else {
-        categoryName = matchedCat.name;
-      }
-
-      // Priority
-      let prio = matchedCat?.priority || 1;
-      if (wipMapping.priorityCol && row[wipMapping.priorityCol]) {
-        const parsedPrio = parseInt(row[wipMapping.priorityCol], 10);
-        if (!isNaN(parsedPrio) && parsedPrio > 0) prio = parsedPrio;
-      }
-
-      // Remaining work (min)
-      let remMins = matchedCat?.ahtMinutes || 30;
-      if (wipMapping.remainingWorkCol && row[wipMapping.remainingWorkCol] !== undefined && row[wipMapping.remainingWorkCol].trim() !== '') {
-        const parsedWork = parseFloat(row[wipMapping.remainingWorkCol]);
-        if (!isNaN(parsedWork) && parsedWork >= 0) {
-          remMins = parsedWork;
-        }
-      }
-
-      // Arrival Date & Time parsing (Strict dd/mm/yyyy)
-      const dateStr = wipMapping.dateCol ? (row[wipMapping.dateCol] || '').trim() : '';
-      const timeStr = wipMapping.timeCol ? (row[wipMapping.timeCol] || '').trim() : undefined;
-
-      let arrivalDate: Date;
-      if (dateStr) {
-        const parsed = parseFlexibleDate(dateStr, timeStr);
-        if (isNaN(parsed.getTime())) {
-          invalidDates++;
-          return;
-        }
-        arrivalDate = parsed;
-      } else if (intervals.length > 0 && !isNaN(intervals[0].start.getTime())) {
-        arrivalDate = new Date(intervals[0].start);
-      } else {
-        arrivalDate = new Date();
-      }
-
-      // Case ID
-      let caseId = wipMapping.caseIdCol && row[wipMapping.caseIdCol] ? row[wipMapping.caseIdCol].trim() : '';
-      const usedIds = new Set([...baseWip, ...cases].map((w) => w.id));
-      if (!caseId || usedIds.has(caseId)) {
-        caseId = generateNextWIPId([...baseWip, ...cases]);
-      }
-
-      cases.push({
-        id: caseId,
-        category: categoryName,
-        priority: prio,
-        arrival: arrivalDate,
-        clockStart: arrivalDate,
-        remainingWorkMinutes: remMins,
-      });
-    });
-
-    return {
-      cases,
-      invalidDates,
-      unmatchedCategories: Array.from(unmatchedSet),
-    };
+    // Pure parser in utils/wip-import.ts. The default arrival (first demand interval, else now)
+    // is chosen here so preview and apply agree.
+    const defaultArrival =
+      intervals.length > 0 && !isNaN(intervals[0].start.getTime()) ? new Date(intervals[0].start) : new Date();
+    return parseWipRows(
+      wipRawRows,
+      wipMapping,
+      categories.map((c) => ({ name: c.name, ahtMinutes: c.ahtMinutes, priority: c.priority })),
+      defaultArrival,
+      baseWip,
+      wipDelimiter
+    );
   }
 
   function handleApplyWipImport(mode: 'replace' | 'append') {
     const base = mode === 'append' ? openingWIP : [];
-    const { cases } = getParsedWipCases(base);
+    const { cases, summary } = getParsedWipCases(base);
+    if (summary.requiresConfirmation && !wipConfirmedFallback) return;
     if (cases.length > 0) {
       onUpdateOpeningWIP(mode === 'append' ? [...openingWIP, ...cases] : cases);
       // Reset wizard
       setWipRawRows([]);
       setWipRawHeaders([]);
       setWipFileName('');
+      setWipConfirmedFallback(false);
       setWipInputMode('manual');
     }
   }
 
   function handleCancelWipImport() {
+    setWipConfirmedFallback(false);
     setWipRawRows([]);
     setWipRawHeaders([]);
     setWipFileName('');
@@ -1071,7 +1015,7 @@ export function DemandFlow({
                             <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
                             <span>
                               {parsedResult.invalidDates} row{parsedResult.invalidDates === 1 ? '' : 's'} skipped:
-                              dates must be dd/mm/yyyy (mm/dd is rejected). {parsedResult.cases.length} valid case
+                              only impossible dates are rejected (day-first is assumed, so 03/04/2026 is read as 3 April). {parsedResult.cases.length} valid case
                               {parsedResult.cases.length === 1 ? '' : 's'} will import.
                             </span>
                           </div>
@@ -1088,6 +1032,44 @@ export function DemandFlow({
                             </span>
                           </div>
                         )}
+
+                        {/* Import summary: rows read as typed vs rows adjusted */}
+                        <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 space-y-1">
+                          <div className="font-semibold">
+                            {parsedResult.summary.importedAsTyped.toLocaleString()} row
+                            {parsedResult.summary.importedAsTyped === 1 ? '' : 's'} imported as typed;{' '}
+                            {parsedResult.summary.adjustedRows.toLocaleString()} row
+                            {parsedResult.summary.adjustedRows === 1 ? '' : 's'} adjusted.
+                          </div>
+                          {(
+                            [
+                              [parsedResult.summary.category, 'unknown or blank category: imported under "' + parsedResult.summary.fallbackCategoryName + '" with the handling time and priority'],
+                              [parsedResult.summary.remainingMinutes, 'remaining minutes missing, unreadable, zero or negative, or above 100,000: the category handling time was used'],
+                              [parsedResult.summary.priority, 'priority is not a positive whole number: the category priority was used'],
+                              [parsedResult.summary.date, 'blank arrival date: the default arrival (first demand interval) was used'],
+                              [parsedResult.summary.noHandlingTime, 'category has no handling time: 30 minutes was assumed'],
+                            ] as const
+                          ).map(([kind, label]) =>
+                            kind.count > 0 ? (
+                              <div key={label} className="text-amber-900">
+                                {kind.count.toLocaleString()} row{kind.count === 1 ? '' : 's'}: {label}. Examples (file row):{' '}
+                                {kind.examples.map((ex) => `${ex.row} "${ex.text}"`).join(', ')}
+                              </div>
+                            ) : null
+                          )}
+                          {parsedResult.summary.requiresConfirmation && (
+                            <label className="flex items-center gap-2 pt-1 font-semibold text-rose-800">
+                              <input
+                                type="checkbox"
+                                checked={wipConfirmedFallback}
+                                onChange={(e) => setWipConfirmedFallback(e.target.checked)}
+                              />
+                              <span>
+                                I understand these rows will be imported under "{parsedResult.summary.fallbackCategoryName}"
+                              </span>
+                            </label>
+                          )}
+                        </div>
 
                         {/* Preview Table of Parsed WIP cases */}
                         <div className="space-y-1.5">
@@ -1125,7 +1107,10 @@ export function DemandFlow({
                           <button
                             type="button"
                             onClick={() => handleApplyWipImport('replace')}
-                            disabled={parsedResult.cases.length === 0}
+                            disabled={
+                              parsedResult.cases.length === 0 ||
+                              (parsedResult.summary.requiresConfirmation && !wipConfirmedFallback)
+                            }
                             className="px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-semibold hover:bg-slate-800 transition flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
@@ -1136,7 +1121,8 @@ export function DemandFlow({
                             <button
                               type="button"
                               onClick={() => handleApplyWipImport('append')}
-                              className="px-4 py-2 bg-white text-slate-800 border border-slate-300 rounded-lg text-xs font-semibold hover:bg-slate-50 transition flex items-center gap-1.5"
+                              disabled={parsedResult.summary.requiresConfirmation && !wipConfirmedFallback}
+                              className="px-4 py-2 bg-white text-slate-800 border border-slate-300 rounded-lg text-xs font-semibold hover:bg-slate-50 transition flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               <Plus className="w-3.5 h-3.5" />
                               <span>Append +{parsedResult.cases.length} Cases to Existing ({openingWIP.length})</span>

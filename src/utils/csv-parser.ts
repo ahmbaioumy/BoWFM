@@ -26,9 +26,10 @@ import {
   isWorkingDay,
 } from './calendar';
 import { buildOpeningWipCases } from './des-engine';
+import { readNumberColumn } from './number-cell';
 
-export function parseCSVRaw(text: string): { headers: string[]; rows: Record<string, string>[] } {
-  if (!text || !text.trim()) return { headers: [], rows: [] };
+export function parseCSVRaw(text: string): { headers: string[]; rows: Record<string, string>[]; delimiter: string } {
+  if (!text || !text.trim()) return { headers: [], rows: [], delimiter: ',' };
 
   // 1. Delimiter detection (, or ; or \t) by analyzing unquoted delimiters
   let delimiter = ',';
@@ -140,7 +141,7 @@ export function parseCSVRaw(text: string): { headers: string[]; rows: Record<str
   const cleanRecords = records.filter((rec) => rec.some((cell) => cell.trim().length > 0));
 
   if (cleanRecords.length === 0) {
-    return { headers: [], rows: [] };
+    return { headers: [], rows: [], delimiter };
   }
 
   const rawHeaders = cleanRecords[0];
@@ -158,7 +159,7 @@ export function parseCSVRaw(text: string): { headers: string[]; rows: Record<str
     rows.push(rowObj);
   }
 
-  return { headers, rows };
+  return { headers, rows, delimiter };
 }
 
 export function autoSuggestColumnMapping(
@@ -560,9 +561,18 @@ export function generateNextWIPId(existingWIP: OpeningWIPCase[]): string {
 export function mapRawRecordsToIntervals(
   rawRows: Record<string, string>[],
   mapping: ColumnMapping,
-  defaultCategoryName: string = 'General'
+  defaultCategoryName: string = 'General',
+  delimiter: string = ','
 ): StandardInterval[] {
   const intervals: StandardInterval[] = [];
+
+  // Volume column is read as a whole: for semicolon/tab files the decimal convention
+  // (comma or dot) is decided per column (see number-cell.ts).
+  const volumeColumn = readNumberColumn(
+    rawRows.map((r) => String(r[mapping.volumeCol] ?? '')),
+    delimiter
+  );
+  const volumeProblems = new Map(volumeColumn.problems.map((p) => [p.index, p]));
 
   for (let i = 0; i < rawRows.length; i++) {
     const row = rawRows[i];
@@ -603,32 +613,22 @@ export function mapRawRecordsToIntervals(
 
     const startDate = parseFlexibleDate(dateStr, timeStr);
 
-    // Parse volume safely: strip thousands separators, currency symbols, whitespace
+    // Parse volume strictly: clear values are read, unclear ones are blocked (stored as 0).
     let volume = 0;
     let volumeParsingIssue: string | null = null;
     if (volStr) {
-      const stripped = volStr.trim().replace(/[\s$,]/g, '');
-      const parsed = parseFloat(stripped);
-      if (Number.isFinite(parsed)) {
+      const problem = volumeProblems.get(i);
+      const parsed = volumeColumn.values[i];
+      if (problem) {
+        volumeParsingIssue = `${problem.kind}:row ${i + 2}: "${problem.text}" — ${problem.detail}`;
+        volume = 0;
+      } else if (parsed !== null && parsed !== undefined) {
         if (parsed < 0) {
           volumeParsingIssue = `Negative volume ${volStr} (interpreted as ${parsed}) — must be non-negative`;
           volume = 0;
         } else {
-          // Check if the raw string has separators that parseFloat would have truncated
-          if (volStr.includes(',') && volStr.includes('.')) {
-            // Likely European format or contains thousands separator
-            if (!/^\d{1,3}(,\d{3})*(\.\d+)?$|^\d{1,3}(\.\d{3})*(,\d+)?$/.test(volStr.trim())) {
-              volumeParsingIssue = `Volume "${volStr}" may have been mis-parsed due to non-standard formatting`;
-            }
-          } else if (volStr.includes(',') && !/^\d+(,\d+)?$/.test(volStr.trim())) {
-            // Has a comma but not in expected position
-            volumeParsingIssue = `Volume "${volStr}" contains unexpected formatting — thousands separators will be stripped (parsed as ${parsed})`;
-          }
           volume = parsed;
         }
-      } else {
-        volumeParsingIssue = `Volume cell "${volStr}" is not numeric`;
-        volume = 0;
       }
     }
 
@@ -860,12 +860,51 @@ export function validateDataQuality(params: {
     });
   }
 
-  if (volumeParsingIssues.length > 0) {
+  const unreadableVolumes = volumeParsingIssues.filter((v) => /^(unreadable|ambiguous|mixed):/.test(v.message));
+  const otherVolumeIssues = volumeParsingIssues.filter((v) => !/^(unreadable|ambiguous|mixed):/.test(v.message));
+
+  if (unreadableVolumes.length > 0) {
+    const examples = unreadableVolumes
+      .slice(0, 5)
+      .map((v) => v.message.replace(/^(unreadable|ambiguous|mixed):/, ''))
+      .join('; ');
+    const hasMixed = unreadableVolumes.some((v) => v.message.startsWith('mixed:'));
+    issues.push({
+      severity: 'error',
+      field: 'Unreadable volume',
+      message: `${unreadableVolumes.length} volume cell(s) cannot be read with certainty${hasMixed ? ' (mixed number formats)' : ''}: ${examples}${unreadableVolumes.length > 5 ? ` (and ${unreadableVolumes.length - 5} more)` : ''}.`,
+      details: 'Volumes must be plain numbers. Units, letters and exponents are not accepted; in a comma-separated file a comma is only allowed as a thousands separator (1,234); in a semicolon or tab file the decimal convention is taken from the column and must not be mixed. These cells are stored as 0 and the run is blocked until the file is corrected.',
+    });
+  }
+
+  if (otherVolumeIssues.length > 0) {
     issues.push({
       severity: 'warning',
       field: 'Volume Parsing',
-      message: `Found ${volumeParsingIssues.length} volume cell(s) with non-standard formatting (e.g. row ${volumeParsingIssues[0].row}: ${volumeParsingIssues[0].message}).`,
-      details: `Thousands separators and currency symbols are stripped automatically; negative volumes are rejected and treated as 0. Verify the affected rows match your expectation.`,
+      message: `Found ${otherVolumeIssues.length} volume cell(s) with a problem (e.g. row ${otherVolumeIssues[0].row}: ${otherVolumeIssues[0].message}).`,
+      details: `Negative volumes are rejected and treated as 0. Verify the affected rows match your expectation.`,
+    });
+  }
+
+  const fractionalVolumeRows: number[] = [];
+  const hugeVolumeRows: number[] = [];
+  intervals.forEach((it, i) => {
+    if (Number.isFinite(it.volume) && Math.abs(it.volume - Math.round(it.volume)) > 1e-9) fractionalVolumeRows.push(i + 2);
+    if (it.volume > 100000) hugeVolumeRows.push(i + 2);
+  });
+  if (fractionalVolumeRows.length > 0) {
+    issues.push({
+      severity: 'warning',
+      field: 'Fractional volume',
+      message: `${fractionalVolumeRows.length} interval volume(s) are not whole numbers (e.g. row ${fractionalVolumeRows[0]}). The simulation rounds each interval to whole cases.`,
+      details: 'The displayed total keeps the decimals; the engine uses the rounded per-interval values, so the simulated total can differ slightly.',
+    });
+  }
+  if (hugeVolumeRows.length > 0) {
+    issues.push({
+      severity: 'warning',
+      field: 'Very large volume',
+      message: `${hugeVolumeRows.length} interval volume(s) exceed 100,000 (e.g. row ${hugeVolumeRows[0]}). No real 30-minute interval is that large — check for a misread number.`,
     });
   }
 
