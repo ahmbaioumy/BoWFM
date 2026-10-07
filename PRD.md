@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft — as-built specification |
-| **Version** | 1.20.3 |
+| **Version** | 1.20.4 |
 | **Date** | 2026-10-07 |
 | **Owner** | _(unassigned)_ |
 | **Product** | Backoffice WFM Sizing Engine |
@@ -606,7 +606,7 @@ and the Audit breach list.
   siloed). This is a per-agent view, distinct from the planned-capacity occupancy used to size.
 - An **Agent Analytics** panel (below the fairness panel), labelled "audit run (single seed)",
   derived purely in the UI layer (`src/utils/agent-analytics.ts`) from the audit run's
-  timeline/cases. Filters: date range (bounded to active dates, incl. post-horizon drain days),
+  timeline/cases. Filters: date range (bounded to active dates, incl. any part-day after the data ends),
   category, agent multi-select. Table per agent: **work share** (primary load metric: for each
   finished case an agent earns its busy minutes on the case / all agents' busy minutes on it,
   attributed to each slice's date; sums to the number of finished cases), **finished** (whole
@@ -627,8 +627,20 @@ and the Audit breach list.
   With shift placement off the engine has no shift end, so Scheduled runs to business close
   (L20), so utilisation reads low on a business day longer than the productive hours
   (expected; occupancy is the workload figure). With shift placement on, occupancy and
-  utilisation are identical except on budget-exhausted days (e.g. adherence below 100%) —
-  stated in the panel help text. The fairness panel's occupancy % is busy / on-shift
+  utilisation are identical except on budget-exhausted days (e.g. adherence below 100%).
+  **1.20.4 — the panel and the export say which case applies to the run** (display/export
+  only; no number, column or section order changed). `computeAgentAnalytics` returns three
+  facts: `staggered` (the run used fixed shifts: Shift Placement on, or the coverage-repair stagger that minimum coverage applies even with the switch off), `drainDates` (shown dates after the last day of
+  data) and `pooledCategoryFilter` (category filter on a shared pool). A header pill reads
+  "Shifts: fixed length" / "Shifts: open until close" (it describes what the run did, not the Shift Placement switch); the help text is one generic sentence plus the mode-specific
+  line (shown in amber, "expected, not an error; use Occupancy to judge workload; do not size
+  from this column", only when the run has no fixed shifts and the business day is longer than the
+  daily productive hours); the status line names part-days after the data ends only when the
+  range contains one ("Includes N part-day(s) after the data ends (dates) while leftover work
+  is cleared"; the minutes stay as actually on shift, not a full shift); a category note shows
+  only for a category filter on a shared pool (Busy/Occupancy/Utilisation count that
+  category's work; Idle is all idle time and Available = that Busy + Idle, so Available is below the agent's full time on shift and Occupancy/Utilisation read lower than unfiltered). The wording lives in
+  one function, `buildAgentAnalyticsNotes`, used by both the panel and the export. The fairness panel's occupancy % is busy / on-shift
   available; with shift placement on and adherence 100% this panel's utilisation now equals
   it, and the two differ only where the budget runs out before the shift ends. Utilisation CV
   and Jain's index in the insights and export change versus 1.20.2 for staggered runs (the
@@ -636,8 +648,10 @@ and the Audit breach list.
   charts (cases per agent by work share with team average; occupancy and utilisation; agent x date heatmap;
   daily team average with min-max band); a computed insights block (most/least loaded vs mean,
   agents outside +/-15%, late-coverage agents' share of last-2h work, fairness CV/Jain);
-  "Export agent summary" (one Excel-friendly CSV: summary table with both Work Share and Cases
-  Finished columns + agent x date work-share matrix). The fairness panel's case column is labelled
+  "Export agent summary" (one Excel-friendly CSV, three sections: summary table with both Work
+  Share and Cases Finished columns, agent x date work-share matrix, and "Notes - how to read this
+  file" with Item / Note rows for Scheduled, Utilisation vs Occupancy, On-Shift Days and, only
+  when they apply, the part-day after the data ends and the category filter). The fairness panel's case column is labelled
   "Cases finished" (engine counting unchanged).
 - An **Agent Performance Summary**: per-agent busy/idle/off minutes, occupancy %, cases
   handled (counted at completion, credited to the agent who finishes the case — a case parked
@@ -1155,13 +1169,13 @@ comment. Nothing else.
 
 ## 9. Validation and quality
 
-### 9.1 Automated test suites — 1,256 checks (174 + 858 + 60 + 164 trusted-source)
+### 9.1 Automated test suites — 1,283 checks (174 + 858 + 87 + 164 trusted-source)
 
 | Suite | Tests | Covers |
 |---|---|---|
 | `scripts/verify-fixes.mts` | 174 | Legacy regression: CSV parsing, date handling, calendar arithmetic, CRN consistency, occupancy semantics, standalone artifact integrity, analytical infeasibility diagnosis, 24x7 midnight budget accounting |
 | `scripts/verify-sizing-fixes.mts` | 858 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement, fair agent assignment (D43: spread bounds, determinism, EDF order pinned to the pre-change engine, OFF = original HC, HC pins on pooled/siloed/staggered/24x7; D44: no double-booking in gated 24x7 runs; D45: availability accrual and pinned HC of the three built-in samples; D47: Workload Floor toggle; D48: clock-start derivation; D49: pinned HC of `test_files/AJM_Only.csv`; D50/D51/D52: roster polish at fixed HC — pooled, siloed guard, per-queue search; D53: Results use run-time settings; D54: number fields keep what is typed; D55-D61 (G12): the frozen sizing decisions are guarded by tests — dispatch order incl. the priority tie-break, business-calendar `latestSafeStart`, CI-gated acceptance (primary / per-category / occupancy cap / ASA each use the confidence bound, not the mean), Common Random Numbers, unfinished cases in the SLA denominator, Gross HC and harmonic shrinkage, volume rounding; each proven red against its own mutation; D62 (G1) + D63 (G1-a: stray date blocks from 8 empty days): horizon from demand only, backlog injection clamp, rule D4 overdue-at-start scoring, search N_min/N_occ/recommendation with old and Friday backlog (sync = async), and the three new data-quality rules), `D64` (F2: 24x7 budget-exhausted parks hand back at once - zero avoidable waits, legitimate waits kept, SLA monotone in headcount, business-hours digest pinned, stress + determinism), `D65` (F3: statistics describe the adopted roster), `D66` (G2 + H2: numbers read from files), `D67` (input safety part 2: absolute-instant timezone checks, marker count and warning, category spelling merge, rename list, backlog match by key, samples unchanged), `D68` (input safety part 3: reader errors E1-E7 and warnings W1-W3 with exact rows, pipe delimiter, quoted delimiter/line-break row numbers, UTF-16-style tab file, duplicate headers, file warnings in data quality, identical to the legacy reader on clean files and the built-in samples; D69: unmapped required columns are named; D70: stale-results fingerprints for demand data and opening backlog, incl. the real mapping function) |
-| `scripts/verify-agent-analytics.mts` | 70 | Export timestamps equal the on-screen formatter; agent analytics reconcile to `completedCases` / `totalHandlingMinutes` / `agentFairness`; work-share case credit |
+| `scripts/verify-agent-analytics.mts` | 87 | Export timestamps equal the on-screen formatter; agent analytics reconcile to `completedCases` / `totalHandlingMinutes` / `agentFairness`; work-share case credit; scheduled minutes capped at the agent's own shift; run facts (`staggered`, `drainDates`, `pooledCategoryFilter`); the three-section export and the Notes wording (AA.40-AA.45) |
 | `scripts/verify-trusted-source.mts` (`npm run test:trusted-source`) | 164 | Hand-derived ground truth in `trusted-source-validation.json` (T0 invariants 35, T1 domain algebra 71, T2 hand-traced DES 31, T3 characterization 27). Authored under `Asia/Dubai`; on any other host timezone it prints a warning and continues (verified: all 164 pass under UTC, America/New_York, Asia/Tokyo, Pacific/Auckland, Europe/London) |
 | `scripts/audit-compare.mts` (`npm run test:audit`, opt-in, ~30 min) | 24 cells | Re-runs all four `test_files/` samples × 6 settings and fails on any difference from `docs/audit/sample-hc-after-2026-09-30.jsonl` |
 | `scripts/check-artifact-freshness.mts` | gate | Fails if `BoWFM.html` is missing or older than shippable sources (`npm run check:artifact`) |
@@ -1231,7 +1245,7 @@ Behaviours a user must understand to interpret results correctly.
 | **L17** | **Fair agent assignment no longer changes the recommended HC (resolved by C6, 1.12.0).** Until 1.12.0 fair assignment could raise the recommendation by 1 in near-capacity runs (a 20% workload-reduction fixture 13→14; `AJM_Simu.csv` pooled 103→104), because the coverage gate counted "budget remaining" as presence and fair dispatch drains every agent's daily budget together at ~98% occupancy. Presence is now the agent's own shift window (FR-5.12), so that artefact is gone. Re-measured 2026-09-29 after the change, fair ON vs OFF: **0 of 18 scenarios differ** (8 real-file runs and 6 built-in samples, each pooled/siloed as applicable, plus the 4 D43.13 pin fixtures); N_min is identical in both modes. The suite pins ON = OFF (D43.13, D45.2). | Fair assignment is HC-neutral. It still changes *who* gets each case (FR-4.7), not how many agents are needed. The toggle remains for reproducing legacy assignment. |
 | **L18** | **Workload Floor OFF can recommend an unsustainable team** (FR-5.13). Below `max(N_min, N_occ)` a team can pass the finite-horizon simulation by draining backlog after the horizon end. The always-on occupancy ceiling blocks most of this (anything whose demand exceeds planned capacity fails), so in default configs Off changes nothing; it bites with agent-hours overrides. | Leave the floor ON for committed plans. Treat any result with the red "below the workload floor" warning as optimistic. |
 | **L19** | **SLA % excludes backlog that was already overdue when the plan starts** (G1, rule D4). Opening-backlog cases that arrived before the first interval and cannot meet their deadline even if work starts at the first working instant are worked and counted as workload, but are not in the SLA % or the wait-time mean; they are reported separately (`overdueAtStartCount`, Results note, case CSV column, Data Quality warning). | A plan with a large overdue carry-over can show a high SLA % that says nothing about that backlog. Read the count beside the SLA headline; it is workload the team must still clear. |
-| **L20** | **Agent Analytics "Scheduled (min)" is the agent's own shift only when shift placement is on** (1.20.3). Without a shift distribution the engine has no shift end, so Scheduled runs to business close and Utilisation reads low on a long business day (e.g. ~50% on 08:00-22:00 with 9 productive hours). Also: a partial post-horizon drain day still counts as an on-shift day, and a partial day that ends in an off slice (horizon starting mid-shift, or a drain day ending after the budget ran out) is scheduled as a full shift. | Display only; sizing, recommended HC and Results occupancy are unaffected. Turn shift placement on to get per-shift utilisation; read occupancy (busy / available) when it is off. |
+| **L20** | **Agent Analytics "Scheduled (min)" is the agent's own shift only when the run used fixed shifts (Shift Placement on, or the coverage-repair stagger)** (1.20.3). Without a shift distribution the engine has no shift end, so Scheduled runs to business close and Utilisation reads low on a long business day (e.g. ~50% on 08:00-22:00 with 9 productive hours). Since 1.20.4 the panel and the export state this (amber note, Notes section); the number itself is unchanged. A part-day after the data ends keeps the minutes actually on shift (it is labelled, not scaled to a full shift). | Display only; sizing, recommended HC and Results occupancy are unaffected. Turn shift placement on to get per-shift utilisation; read occupancy (busy / available) when the pill says "Shifts: open until close". |
 
 ---
 
@@ -1394,6 +1408,13 @@ by an unrelated metric; ASA censoring measured only to horizon end; and two inde
 **P2-8 — Restore Headline Hiring FTE (M4) UI when a clean FTE product story exists.**
 Engine still computes `fteNet` / `fteGross*`. UI hides M4 so Manual Override is only the
 Workload HC agent-hours denominator (Option B). Re-expose FTE only without dual-role confusion.
+
+**P2-9 — Give runs without fixed shifts a shift end.**
+When the run has no fixed shifts the engine keeps agents on until business close, so Agent Analytics
+"Scheduled (min)" runs to close and Utilisation reads low on a long business day (L20; today only
+labelled). A true per-agent shift end for that mode is an engine change that would alter
+recommended headcount, so it needs explicit approval before any work. *Rationale: removes the
+last case where the Utilisation column cannot be read at face value.*
 
 ### Modelling fidelity gaps
 

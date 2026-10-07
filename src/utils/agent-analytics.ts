@@ -13,9 +13,10 @@
  *   Available (on-shift)  = busy + idle minutes: time the agent was in the queue on shift.
  *   Occupancy %           = busy / available. How hard the agent worked while in the queue.
  *   Scheduled             = available + the on-shift time after the agent's daily productive budget ran
- *                           out (out-of-queue but still on shift). Shift placement ON: capped at the agent's
- *                           own shift (daily productive hours from their own start). Shift placement OFF:
- *                           no shift end exists, so it runs to business close.
+ *                           out (out-of-queue but still on shift). Run on fixed shifts (Shift Placement on, or the
+ *                           coverage-repair stagger): capped at the agent's own shift (daily productive hours
+ *                           from their own start). Run without fixed shifts: no shift end exists, so it runs
+ *                           to business close.
  *   Utilisation %         = busy / scheduled. Lower than occupancy whenever an agent has scheduled
  *                           time outside the queue. NOT the Fairness panel figure: that panel's
  *                           "Occupancy %" is busy / on-shift available.
@@ -160,9 +161,17 @@ export interface AgentAnalytics {
   lateWindowMin: number;
   earliestCohortStart: string | null;
   filter: Required<AgentAnalyticsFilter>;
+  /** The run used fixed shifts (Shift Placement on, or the coverage-repair stagger): every agent works a fixed shift from their own start. */
+  staggered: boolean;
+  /** Dates in `dates` after the last day of data (leftover work cleared on a part-day). Empty when none are in range. */
+  drainDates: string[];
+  /** A category filter is set AND the rows are the shared pool (Busy/Occupancy/Utilisation count only that category's work). */
+  pooledCategoryFilter: boolean;
 }
 
 export const DEFAULT_LATE_WINDOW_MIN = 120;
+/** Category label of agents in the shared pool (pooled architecture). */
+const POOLED_CATEGORY = 'Pooled';
 const SOLO_MIN_MINUTES = 30;
 
 interface Cell {
@@ -214,9 +223,9 @@ export function computeAgentAnalytics(input: {
   const agentCategory = (id: number): string => {
     const f = fairnessCat.get(id);
     if (f) return f;
-    if (fairnessCat.has(id)) return 'Pooled';
+    if (fairnessCat.has(id)) return POOLED_CATEGORY;
     const set = sliceCats.get(id);
-    return set && set.size === 1 ? [...set][0] : 'Pooled';
+    return set && set.size === 1 ? [...set][0] : POOLED_CATEGORY;
   };
   const categories = Array.from(new Set(Array.from({ length: hc }, (_, i) => agentCategory(i)))).sort();
   if (des.caseResults) {
@@ -422,7 +431,7 @@ export function computeAgentAnalytics(input: {
     if (agentSel && !agentSel.has(id)) continue;
     const cat = agentCategory(id);
     // Siloed agents belong to one category; pooled agents ('Pooled') pass and are filtered by work instead.
-    if (catFilter && cat !== 'Pooled' && cat !== catFilter) continue;
+    if (catFilter && cat !== POOLED_CATEGORY && cat !== catFilter) continue;
     keptIds.push(id);
     const byDate = cells.get(id) ?? new Map<string, Cell>();
     let busy = 0;
@@ -532,6 +541,11 @@ export function computeAgentAnalytics(input: {
   const busyMin = rows.reduce((a, r) => a + r.busyMin, 0);
   const availableMin = rows.reduce((a, r) => a + r.availableMin, 0);
   const scheduledMin = rows.reduce((a, r) => a + r.scheduledMin, 0);
+  // Last day of data = the day the horizon end falls on (the -1 ms keeps a midnight end on the previous day).
+  const horizonEndMs = des.horizonEnd instanceof Date ? des.horizonEnd.getTime() : NaN;
+  const lastDataDay = Number.isFinite(horizonEndMs) ? formatDate24(new Date(horizonEndMs - 1)) : null;
+  const drainDates = lastDataDay === null ? [] : dates.filter((d) => d > lastDataDay);
+  const pooledCategoryFilter = catFilter !== null && rows.some((r) => r.category === POOLED_CATEGORY);
 
   return {
     allDates,
@@ -557,6 +571,9 @@ export function computeAgentAnalytics(input: {
     lateWindowMin,
     earliestCohortStart,
     filter: { fromDate, toDate, category: catFilter, agentIds: agentSel ? [...agentSel].sort((a, b) => a - b) : [] },
+    staggered,
+    drainDates,
+    pooledCategoryFilter,
   };
 }
 
@@ -638,8 +655,59 @@ export function buildAgentInsights(a: AgentAnalytics, opts: { bandPct?: number }
   return out;
 }
 
+const hoursText = (h: number) => `${Math.round(h * 10) / 10}`;
+
+/**
+ * Plain-language notes for the current run. Single source of wording for the panel and the export.
+ * Rows that do not apply to the run (part-day after the data ends, category filter) are omitted.
+ */
+export function buildAgentAnalyticsNotes(a: AgentAnalytics, labor: LaborConfig): Array<{ Item: string; Note: string }> {
+  const hours = hoursText(labor.dailyProductiveHours);
+  const mins = Math.round(labor.dailyProductiveHours * 60);
+  const out: Array<{ Item: string; Note: string }> = [];
+  out.push({
+    Item: 'Scheduled (min)',
+    Note: a.staggered
+      ? `The minutes the agent was on the plan to work. In this run each agent worked a fixed shift: the daily productive hours counted from their start time (${hours} h = ${mins} min per full day).`
+      : `The minutes the agent was on the plan to work. In this run agents had no fixed shift end, so this runs from the agent's start until business close. Shifts are fixed when Shift Placement is on, or when minimum coverage needs agents to start at different times.`,
+  });
+  out.push({
+    Item: 'Utilisation % vs Occupancy %',
+    Note: a.staggered
+      ? `Normally the same number. They differ only on days when an agent's daily productive hours are used up before their shift ends, which happens when adherence is below 100%.`
+      : `In this run agents had no fixed shift end, so utilisation is measured against the time until business close, so it reads low on a business day longer than the daily productive hours (${hours} h). This is expected, not an error. Use Occupancy to judge workload; do not size from this column.`,
+  });
+  out.push({
+    Item: 'On-Shift Days',
+    Note: `The number of dates on which the agent was on shift for any time in the range shown. The simulation puts every agent on shift every open day; rest days are added later in the headcount chain, not here.`,
+  });
+  if (a.drainDates.length > 0) {
+    out.push({
+      Item: 'Part-day after the data ends',
+      Note: `${a.drainDates.join(', ')}: leftover work was cleared after the last day of data. The day counts as a day on shift with only the minutes actually on shift, which is why agents on shift that day show one more day, with fewer minutes than a full day on it.`,
+    });
+  }
+  if (a.pooledCategoryFilter) {
+    out.push({
+      Item: 'Category filter',
+      Note: `On a shared pool, Busy counts only the selected category's work. Idle is all of the agent's idle time, and Available is that Busy plus Idle, so it is smaller than the agent's full time on shift. Occupancy and Utilisation therefore read lower than the unfiltered figures, and per-category figures do not add up to them.`,
+    });
+  }
+  return out;
+}
+
+/**
+ * True when the run has no fixed shifts AND the business day is longer than the daily productive hours,
+ * i.e. utilisation will read low by design. Day length comes from the calendar's configured open/close times.
+ */
+export function utilisationReadsLowByDesign(a: AgentAnalytics, labor: LaborConfig, calendar: CalendarConfig): boolean {
+  if (a.staggered) return false;
+  const dayMin = calendar.dailyCloseHour * 60 + calendar.dailyCloseMinute - (calendar.dailyOpenHour * 60 + calendar.dailyOpenMinute);
+  return dayMin > labor.dailyProductiveHours * 60 + 1e-9;
+}
+
 /** Export tables (rounded at the presentation boundary only). */
-export function buildAgentAnalyticsExport(a: AgentAnalytics): {
+export function buildAgentAnalyticsExport(a: AgentAnalytics, labor: LaborConfig): {
   sections: Array<{ title: string; rows: Array<Record<string, unknown>> }>;
 } {
   const rd = (n: number | null) => (n === null ? '' : Math.round(n * 10) / 10);
@@ -677,6 +745,7 @@ export function buildAgentAnalyticsExport(a: AgentAnalytics): {
     sections: [
       { title: `Agent summary - ${scope}`, rows: summary },
       { title: 'Work share (cases) per agent per date (blank = not on shift)', rows: matrix },
+      { title: 'Notes - how to read this file', rows: buildAgentAnalyticsNotes(a, labor) },
     ],
   };
 }

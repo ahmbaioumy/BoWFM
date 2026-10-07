@@ -9,9 +9,11 @@ import {
   AgentAnalytics,
   AgentAnalyticsRow,
   buildAgentAnalyticsExport,
+  buildAgentAnalyticsNotes,
   buildAgentInsights,
   computeAgentAnalytics,
   sortRowsByCases,
+  utilisationReadsLowByDesign,
 } from '../utils/agent-analytics';
 import { exportToExcelCSV } from '../utils/csv-parser';
 import { Download, Info, RotateCcw, Sparkles } from 'lucide-react';
@@ -27,9 +29,9 @@ const shortDate = (d: string) => d.slice(5); // MM-DD
 
 const DEFINITIONS =
   'Available = busy + idle minutes while the agent is on shift and ready for work. Occupancy = busy / available. ' +
-  'Utilisation = busy / scheduled. Scheduled = the minutes the agent was on the plan to work. With shift placement on: the agent\'s own shift, i.e. the daily productive hours from their start time (e.g. 9 h = 540 min per full day). With shift placement off: from the agent\'s start until business close. ' +
-  'With shift placement on, occupancy and utilisation are the SAME number for any agent-day where the agent\'s daily productive hours are not used up before the shift ends; they differ only on days when they are (for example when adherence is below 100%). ' +
-  'With shift placement off there is no shift end, so utilisation is measured against the time until business close and reads lower on a business day longer than the daily productive hours; this is expected, and occupancy is the figure to judge workload. ' +
+  'Utilisation = busy / scheduled. Scheduled = the minutes the agent was on the plan to work. When agents work fixed shifts: the agent\'s own shift, i.e. the daily productive hours from their start time (e.g. 9 h = 540 min per full day). When agents have no fixed shift end: from the agent\'s start until business close. Shifts are fixed when Shift Placement is on, or when minimum coverage needs agents to start at different times. ' +
+  'When agents work fixed shifts, occupancy and utilisation are the SAME number for any agent-day where the agent\'s daily productive hours are not used up before the shift ends; they differ only on days when they are (for example when adherence is below 100%). ' +
+  'When agents have no fixed shift end, utilisation is measured against the time until business close and reads lower on a business day longer than the daily productive hours; this is expected, and occupancy is the figure to judge workload. ' +
   'The date range can include a part-day after the data ends, while leftover backlog is cleared; that day counts as a day on shift with only the minutes actually on shift. ' +
   'Work share = for each finished case, the agent\'s busy minutes on it / all agents\' busy minutes on it (a case split 30/10 min is 0.75/0.25); it sums to the number of finished cases. ' +
   'Finished = whole cases the agent closed (finisher credit; overstates agents who only resume cases others parked). Touched = cases the agent worked on, including split cases. ' +
@@ -249,6 +251,10 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
     [des, calendar, labor, fromDate, toDate, category, agentIds]
   );
   const insights = useMemo(() => buildAgentInsights(a), [a]);
+  const notes = useMemo(() => buildAgentAnalyticsNotes(a, labor), [a, labor]);
+  const modeNote = notes.find((n) => n.Item === 'Utilisation % vs Occupancy %')?.Note ?? '';
+  const categoryNote = notes.find((n) => n.Item === 'Category filter')?.Note ?? '';
+  const amberMode = utilisationReadsLowByDesign(a, labor, calendar);
 
   const minDate = base.allDates[0] ?? '';
   const maxDate = base.allDates[base.allDates.length - 1] ?? '';
@@ -260,7 +266,7 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
   }
 
   function handleExport() {
-    exportToExcelCSV([], 'wfm_agent_analytics.csv', buildAgentAnalyticsExport(a).sections);
+    exportToExcelCSV([], 'wfm_agent_analytics.csv', buildAgentAnalyticsExport(a, labor).sections);
   }
 
   const th = 'py-2 px-2.5 text-right whitespace-nowrap';
@@ -276,22 +282,25 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
           <div className="flex items-center gap-2 flex-wrap">
             <h3 className="text-sm font-bold text-slate-900">Agent Analytics</h3>
             <span className="text-xs bg-amber-50 border border-amber-200 text-amber-800 font-semibold px-2 py-0.5 rounded-full">audit run (single seed)</span>
+            <span className="text-xs bg-slate-100 border border-slate-200 text-slate-700 font-semibold px-2 py-0.5 rounded-full">{a.staggered ? 'Shifts: fixed length' : 'Shifts: open until close'}</span>
           </div>
           <p className="text-xs text-slate-500 mt-1 flex items-start gap-1.5">
             <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-slate-400" />
             <span title={DEFINITIONS}>
-              Per-agent workload, occupancy and utilisation for the filtered range. With shift placement on, Occupancy and Utilisation are normally
-              the same number; they differ only on days when an agent has used up their daily productive hours before their shift ends (which happens
-              when adherence is below 100%). With shift placement off, utilisation is measured against the time until business close, so on a business
-              day longer than the daily productive hours it reads low; this is expected, not an error, and occupancy is the figure to use to judge workload.
-              Hover for full definitions.
+              Per-agent workload, occupancy and utilisation for the filtered range. Hover for full definitions.
             </span>
           </p>
+          <p className={amberMode ? 'text-xs mt-1.5 px-2 py-1 rounded bg-amber-50 border border-amber-200 text-amber-800' : 'text-xs mt-1.5 text-slate-500'} data-testid="agent-analytics-mode-note">
+            {modeNote}
+          </p>
+          {categoryNote !== '' && (
+            <p className="text-xs mt-1.5 text-slate-500" data-testid="agent-analytics-category-note">{categoryNote}</p>
+          )}
         </div>
         <button
           onClick={handleExport}
           className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 text-white rounded-lg text-xs font-semibold hover:bg-slate-800 transition shadow-xs self-start shrink-0"
-          title="Excel-friendly CSV (UTF-8 BOM): agent summary table (work share + finished) + work share per agent per date matrix, for the current filters"
+          title="Excel-friendly CSV (UTF-8 BOM) for the current filters: agent summary table, work share per agent per date matrix, and a Notes section explaining how to read the figures"
         >
           <Download className="w-3.5 h-3.5" />
           <span>Export agent summary</span>
@@ -341,7 +350,8 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
       <div className="flex items-center justify-between text-[11px] text-slate-500 -mt-2">
         <span>
           {a.rows.length} agents, {a.dates.length} active date{a.dates.length === 1 ? '' : 's'}
-          {a.dates.length > 0 ? ` (${a.dates[0]} to ${a.dates[a.dates.length - 1]})` : ''}. Range includes post-horizon drain days.
+          {a.dates.length > 0 ? ` (${a.dates[0]} to ${a.dates[a.dates.length - 1]})` : ''}.
+          {a.drainDates.length > 0 ? ` Includes ${a.drainDates.length} part-day${a.drainDates.length === 1 ? '' : 's'} after the data ends (${a.drainDates.join(', ')}) while leftover work is cleared.` : ''}
         </span>
         {filtersActive && (
           <button type="button" onClick={() => { setFromDate(''); setToDate(''); setCategory('ALL'); setAgentIds([]); }}
@@ -371,10 +381,10 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
               <th className={th} title="Whole cases the agent closed (finisher credit). Overstates agents who only resume cases other agents parked.">Finished</th>
               <th className={th} title="Distinct cases the agent worked on, incl. split cases">Touched</th>
               <th className={th}>Busy (min)</th>
-              <th className={th} title="Busy + idle minutes while on shift, in queue">Available (min)</th>
+              <th className={th} title="Busy + idle minutes while on shift and ready for work">Available (min)</th>
               <th className={th}>Idle (min)</th>
               <th className={th} title="Busy / available">Occupancy %</th>
-              <th className={th} title="Busy / scheduled time. Scheduled = the minutes the agent was on the plan to work: with shift placement on, the agent's own shift (daily productive hours from their start); with shift placement off, from their start until business close (so it reads low on a long business day; expected). With shift placement on it differs from occupancy only on days when the daily productive hours are used up before the shift ends.">Utilisation %</th>
+              <th className={th} title="Busy / scheduled time. Scheduled = the minutes the agent was on the plan to work: when agents work fixed shifts, the agent's own shift (daily productive hours from their start); when agents have no fixed shift end, from their start until business close (so it reads low on a long business day; expected). With fixed shifts it differs from occupancy only on days when the daily productive hours are used up before the shift ends. Shifts are fixed when Shift Placement is on, or when minimum coverage needs agents to start at different times.">Utilisation %</th>
               <th className={th} title="Busy minutes on finished-case work / work share">Avg handle (min)</th>
               <th className={th} title="Work share / days on shift">Cases/day</th>
               <th className={th} title="Busy slices that resumed a parked case">Resumes</th>
