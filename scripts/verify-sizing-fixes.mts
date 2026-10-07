@@ -5302,6 +5302,259 @@ console.log('\n--- Suite D67: input safety part 2 (timezone markers + category v
   }
 }
 
+// ----------------------------------------------------
+// Suite D68: input safety part 3, Build A (file reader rules E1-E7 / W1-W3, pipe delimiter, refusal at pick time).
+// A file with an error-severity problem is REFUSED before anything else happens (App.handleFileUpload /
+// DemandFlow.readWipFile check problems first); only warnings travel with an accepted file into data quality.
+// File row = 1-based physical line (header = row 1), counting blank lines and lines inside quoted cells.
+// The legacy copy below is the reader exactly as it was before this build; every file that loaded then must
+// load identically now.
+// ----------------------------------------------------
+console.log('\n--- Suite D68: input safety part 3 (file reader rules + refusal) ---');
+{
+  function legacyParseCSVRaw(text: string): { headers: string[]; rows: Record<string, string>[]; delimiter: string } {
+    if (!text || !text.trim()) return { headers: [], rows: [], delimiter: ',' };
+
+    // 1. Delimiter detection (, or ; or \t) by analyzing unquoted delimiters
+    let delimiter = ',';
+    let commaCount = 0;
+    let semiCount = 0;
+    let tabCount = 0;
+    let inQ = false;
+
+    for (let i = 0; i < Math.min(text.length, 4096); i++) {
+      const ch = text[i];
+      if (ch === '"') {
+        if (inQ && text[i + 1] === '"') {
+          i++; // skip escaped quote
+        } else {
+          inQ = !inQ;
+        }
+      } else if (!inQ) {
+        if (ch === ',') commaCount++;
+        else if (ch === ';') semiCount++;
+        else if (ch === '\t') tabCount++;
+        else if (ch === '\n' || ch === '\r') {
+          if (commaCount > 0 || semiCount > 0 || tabCount > 0) {
+            break;
+          }
+        }
+      }
+    }
+
+    if (tabCount > commaCount && tabCount > semiCount) {
+      delimiter = '\t';
+    } else if (semiCount > commaCount && semiCount > tabCount) {
+      delimiter = ';';
+    } else {
+      delimiter = ',';
+    }
+
+    // 2. Tokenize into 2D records using character-by-character RFC 4180 state machine
+    const records: string[][] = [];
+    let currentRecord: string[] = [];
+    let currentField = '';
+    let inQuotes = false;
+    let i = 0;
+    const len = text.length;
+
+    while (i < len) {
+      const char = text[i];
+
+      if (inQuotes) {
+        if (char === '"') {
+          if (i + 1 < len && text[i + 1] === '"') {
+            // Escaped quote: "" -> "
+            currentField += '"';
+            i += 2;
+            continue;
+          } else {
+            // Closing quote
+            inQuotes = false;
+            i++;
+            continue;
+          }
+        } else {
+          // All characters inside quotes (including \r, \n, delimiter, apostrophes) are preserved
+          currentField += char;
+          i++;
+          continue;
+        }
+      } else {
+        if (char === '"') {
+          inQuotes = true;
+          i++;
+          continue;
+        } else if (char === delimiter) {
+          currentRecord.push(currentField);
+          currentField = '';
+          i++;
+          continue;
+        } else if (char === '\r') {
+          if (i + 1 < len && text[i + 1] === '\n') {
+            i++;
+          }
+          currentRecord.push(currentField);
+          currentField = '';
+          records.push(currentRecord);
+          currentRecord = [];
+          i++;
+          continue;
+        } else if (char === '\n') {
+          currentRecord.push(currentField);
+          currentField = '';
+          records.push(currentRecord);
+          currentRecord = [];
+          i++;
+          continue;
+        } else {
+          currentField += char;
+          i++;
+          continue;
+        }
+      }
+    }
+
+    // Push trailing field/record
+    if (currentField.length > 0 || currentRecord.length > 0) {
+      currentRecord.push(currentField);
+      records.push(currentRecord);
+    }
+
+    // 3. Filter out empty rows safely (rows where all cells are empty/whitespace)
+    const cleanRecords = records.filter((rec) => rec.some((cell) => cell.trim().length > 0));
+
+    if (cleanRecords.length === 0) {
+      return { headers: [], rows: [], delimiter };
+    }
+
+    const rawHeaders = cleanRecords[0];
+    const headers = rawHeaders.map((h, colIdx) => h.trim() || `Column_${colIdx + 1}`);
+    const rows: Record<string, string>[] = [];
+
+    for (let r = 1; r < cleanRecords.length; r++) {
+      const rowCells = cleanRecords[r];
+      if (!rowCells.some((c) => c.trim().length > 0)) continue;
+
+      const rowObj: Record<string, string> = {};
+      headers.forEach((h, colIdx) => {
+        rowObj[h] = rowCells[colIdx] !== undefined ? rowCells[colIdx] : '';
+      });
+      rows.push(rowObj);
+    }
+
+    return { headers, rows, delimiter };
+  }
+
+  const H = 'Start,Volume,Category';
+  const R1 = '2026-01-05 08:00,10,A';
+  const R2 = '2026-01-05 08:30,5,A';
+  const R3 = '2026-01-05 09:00,4,B';
+  const sig = (t: string) => parseCSVRaw(t).problems.map((p) => `${p.severity}:${p.code}`).join('|');
+  const msg = (t: string, code: string) => parseCSVRaw(t).problems.find((p) => p.code === code)?.message ?? '';
+
+  // E1 not readable text
+  const e1a = parseCSVRaw(`${H}\n2026-01-05 08:00,1\u00000,A\n${R2}`);
+  const e1b = parseCSVRaw('PK\u0003\u0004\u0014\u0000\u0006\u0000binary');
+  assert(sig(`${H}\n2026-01-05 08:00,1\u00000,A\n${R2}`) === 'error:E1' && e1a.rows.length === 0 && /not a readable text file/.test(e1a.problems[0].message), 'D68.1a NUL character -> one error E1, nothing returned');
+  assert(sig('PK\u0003\u0004zip') === 'error:E1' && e1b.headers.length === 0, 'D68.1b text starting with PK (Excel workbook) -> E1 (also wins over NUL)');
+
+  // E2 empty
+  assert(sig('') === 'error:E2' && sig('  \n\r\n  ') === 'error:E2' && parseCSVRaw('').problems[0].message === 'The file is empty.', 'D68.2 empty / only blank lines -> E2');
+
+  // E3 header only
+  assert(sig(`${H}\n\n\n`) === 'error:E3' && sig(H) === 'error:E3', 'D68.3 header only (blank lines ignored) -> E3');
+
+  // E7 title row
+  const e7 = `Daily report\n${H}\n${R1}\n${R2}`;
+  assert(sig(e7) === 'error:E7' && /file row 1/.test(msg(e7, 'E7')), 'D68.7a title row above the header -> E7 naming file row 1', msg(e7, 'E7'));
+  assert(sig(`\n\nDaily report\n${H}\n${R1}\n${R2}`) === 'error:E7' && /file row 3/.test(msg(`\n\nDaily report\n${H}\n${R1}\n${R2}`, 'E7')), 'D68.7b title row after blank lines -> row 3 named');
+
+  // E6 one column only
+  const e6 = 'Value\n7\n1;2,3';
+  assert(sig(e6) === 'error:E6' && /^Only one column was found\. Columns must be separated by comma, semicolon, tab or \|\./.test(msg(e6, 'E6')), 'D68.6 one column while another separator appears in the data -> E6', msg(e6, 'E6'));
+  assert(sig('Value\n7\n8\n9') === '' && parseCSVRaw('Value\n7\n8\n9').rows.length === 3, 'D68.6b a genuine one-column file without any other separator is still read as before (no problem)');
+
+  // E4 unterminated quote (row number counts blank lines and lines inside quoted cells)
+  const e4 = `${H}\n2026-01-05 08:00,10,"A\nB"\n\n2026-01-05 09:00,4,"Open\n${R2}`;
+  assert(sig(e4) === 'error:E4' && /opened on file row 5 is never closed/.test(msg(e4, 'E4')), 'D68.4a unterminated quote -> E4 naming file row 5 (blank line and quoted line break counted)', msg(e4, 'E4'));
+  assert(/opened on file row 3 /.test(msg(`${H}\n${R1}\n2026-01-05 09:00,4,"5 screen\n${R2}`, 'E4')), 'D68.4b simple case: quote opened on row 3');
+
+  // E5 more non-empty cells than the header
+  const e5 = `${H}\n${R1}\n2026-01-05 08:30,5,A,extra\n${R3}`;
+  assert(sig(e5) === 'error:E5' && /1 row\(s\) have more columns than the header \(file rows 3; expected 3, found 4/.test(msg(e5, 'E5')) && /delimiter is extra on those rows, or there is a title row above the header/.test(msg(e5, 'E5')), 'D68.5a extra non-empty cell -> E5 with file row, expected 3 / found 4', msg(e5, 'E5'));
+  const many = [H, ...Array.from({ length: 7 }, (_, k) => `2026-01-05 0${k + 1}:00,5,A,x`)].join('\n');
+  assert(/7 row\(s\)/.test(msg(many, 'E5')) && /file rows 2, 3, 4, 5, 6, …;/.test(msg(many, 'E5')), 'D68.5b seven bad rows: count 7, five rows named then an ellipsis', msg(many, 'E5'));
+
+  // precedence E1 > E2 > E3 > E7 > E6 > E4 > E5
+  assert(sig('PK\u0003\u0004') === 'error:E1' && sig(`Title\n${H}\n${R1}\n${R2},x\n"open`) === 'error:E7', 'D68.P precedence: E1 beats the rest; E7 beats E4/E5');
+  assert(sig('Value\n7\n1;2,3\n"open') === 'error:E6', 'D68.P2 E6 beats E4');
+  assert(sig(`${H}\n${R1},x\n"open`) === 'error:E4', 'D68.P3 E4 beats E5');
+
+  // trailing delimiter on every row; extra empty cells ignored
+  const trail = `${H},\n${R1},\n${R2},\n${R3},`;
+  assert(sig(trail) === '' && parseCSVRaw(trail).rows.length === 3, 'D68.8a trailing delimiter on every row (header too) -> no problem');
+  assert(sig(`${H}\n${R1},\n${R2},,\n${R3}`) === '', 'D68.8b extra EMPTY cells on data rows are ignored');
+
+  // quoted delimiter and quoted line break are not problems; later row numbers still right
+  const q = `${H}\n2026-01-05 08:00,10,"A, B"\n2026-01-05 08:30,5,"Line1\nLine2"\n${R3}\n2026-01-05 10:00,2`;
+  const qp = parseCSVRaw(q);
+  assert(qp.rows.length === 4 && qp.rows[0].Category === 'A, B' && qp.rows[1].Category === 'Line1\nLine2' && qp.problems.length === 1 && qp.problems[0].code === 'W1' && /file rows 6\)/.test(qp.problems[0].message), 'D68.9 quoted comma and quoted line break read as before; the short row after them is file row 6', qp.problems[0]?.message);
+  assert(sig(`${H}\n2026-01-05 08:00,10,"A, B"\n2026-01-05 08:30,5,"Line1\nLine2"\n${R3}`) === '', 'D68.9b same file without the short row -> zero problems');
+
+  // W1 short rows: padded as before
+  const w1 = `${H}\n${R1}\n\n2026-01-05 08:30,5\n${R3}\nTotal`;
+  const w1p = parseCSVRaw(w1);
+  assert(sig(w1) === 'warning:W1' && /^2 row\(s\) have fewer columns than the header \(file rows 4, 6\); the missing cells were read as empty\./.test(w1p.problems[0].message) && w1p.rows.length === 4 && w1p.rows[1].Category === '' && w1p.rows[3].Start === 'Total', 'D68.W1 short rows -> warning W1 naming file rows 4 and 6 (blank line counted); cells padded empty', w1p.problems[0]?.message);
+
+  // W2 duplicate header: both columns keep their own values
+  const w2p = parseCSVRaw('Start,Volume,Volume\n2026-01-05 08:00,10,20');
+  assert(sig('Start,Volume,Volume\n2026-01-05 08:00,10,20') === 'warning:W2' && w2p.headers.join('|') === 'Start|Volume|Volume (2)' && w2p.rows[0].Volume === '10' && w2p.rows[0]['Volume (2)'] === '20', 'D68.W2 duplicate header: second renamed "Volume (2)", values 10 and 20 both kept, warning W2');
+
+  // W3 replacement characters
+  const w3 = `${H}\n2026-01-05 08:00,10,Caf�\n${R2}`;
+  assert(sig(w3) === 'warning:W3' && parseCSVRaw(w3).rows.length === 2, 'D68.W3 U+FFFD present -> warning W3, file still loads');
+
+  // UTF-16 "Unicode Text" decodes to tab-delimited text: keeps loading
+  const u16 = 'Start\tVolume\tCategory\r\n2026-01-05 08:00\t10\tA\r\n2026-01-05 08:30\t5\tA\r\n';
+  const u16p = parseCSVRaw(u16);
+  assert(u16p.delimiter === '\t' && u16p.rows.length === 2 && u16p.problems.length === 0, 'D68.U16 decoded UTF-16 tab file loads: tab delimiter, 2 rows, no problem');
+
+  // pipe delimiter
+  const pipe = 'Start|Volume|Category\n2026-01-05 08:00|1,5|A\n2026-01-05 08:30|2,5|A\n2026-01-05 09:00|3|B';
+  const pp = parseCSVRaw(pipe);
+  assert(pp.delimiter === '|' && pp.headers.join(',') === 'Start,Volume,Category' && pp.rows.length === 3 && pp.problems.length === 0, 'D68.10a pipe file: delimiter |, three columns, 3 rows, no problem');
+  const pm = { intervalStartCol: 'Start', volumeCol: 'Volume', categoryCol: 'Category' } as any;
+  const pv = mapRawRecordsToIntervals(pp.rows, pm, 'General', pp.delimiter).reduce((s, x) => s + x.volume, 0);
+  assert(Math.abs(pv - 7) < 1e-9, 'D68.10b pipe file total volume equals the hand sum (1.5 + 2.5 + 3 = 7, comma decimals read per the part-1 rules)', String(pv));
+  assert(parseCSVRaw('a,b|c\n1,2|3').delimiter === ',' && parseCSVRaw('Title\nA|B\n1|2').delimiter === '|', 'D68.10c pipe has the lowest priority; used when the first delimiter line has only pipes (title line above is skipped over)');
+
+  // warnings travel into data quality as non-blocking issues
+  const okIv = mapRawRecordsToIntervals(parseCSVRaw(`${H}\n${R1}\n${R2}`).rows, pm, 'General', ',');
+  const dqW = validateDataQuality({ intervals: okIv, mapping: pm, categories: DEFAULT_CATEGORIES, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, openingWIP: [], fileWarnings: w1p.problems });
+  const dqN = validateDataQuality({ intervals: okIv, mapping: pm, categories: DEFAULT_CATEGORIES, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, openingWIP: [] });
+  const fw = dqW.issues.filter((i) => i.field === 'File reading');
+  assert(fw.length === 1 && fw[0].severity === 'warning' && dqW.passed === dqN.passed && dqN.issues.filter((i) => i.field === 'File reading').length === 0, 'D68.11 file warnings appear as one non-blocking "File reading" issue; without them none and the pass/fail verdict is unchanged');
+
+  // regression: clean files and built-in samples identical to the legacy reader, zero problems
+  const toText = (headers: string[], rows: Record<string, string>[], d: string) => [headers.join(d), ...rows.map((r) => headers.map((h) => r[h]).join(d))].join('\n');
+  for (const st of ['claims', 'support', 'healthcare'] as const) {
+    const ds = buildSampleDataset(st, new Date(2026, 9, 5, 8, 0));
+    for (const d of [',', ';', '\t']) {
+      const text = toText(ds.headers, ds.rows, d);
+      const noClash = ![...ds.headers, ...ds.rows.flatMap((r) => Object.values(r))].some((c) => String(c).includes(d) || String(c).includes('"'));
+      const a = parseCSVRaw(text);
+      const b = legacyParseCSVRaw(text);
+      assert(noClash && a.problems.length === 0 && JSON.stringify(a.headers) === JSON.stringify(b.headers) && JSON.stringify(a.rows) === JSON.stringify(b.rows) && a.delimiter === b.delimiter && a.delimiter === d && a.rows.length === ds.rows.length, `D68.12 sample ${st} as ${d === '\t' ? 'tab' : d} file: zero problems; headers, rows and delimiter identical to the legacy reader`);
+    }
+  }
+  for (const t of [`${H}\n${R1}\n${R2}\n${R3}\n`, `${H}\r\n${R1}\r\n${R2}\r\n`.replace(/,/g, ';'), `${H}\n${R1}\n${R2}`.replace(/,/g, '\t'), `${H}\n\n${R1}\n\n${R2}\n\n`, q.replace(/\n2026-01-05 10:00,2$/, '')]) {
+    const a = parseCSVRaw(t);
+    const b = legacyParseCSVRaw(t);
+    assert(a.problems.length === 0 && JSON.stringify(a.headers) === JSON.stringify(b.headers) && JSON.stringify(a.rows) === JSON.stringify(b.rows) && a.delimiter === b.delimiter, 'D68.13 clean hand file (comma / semicolon / tab / CRLF / blank lines / quoted cells): zero problems and identical to the legacy reader');
+  }
+}
+
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');

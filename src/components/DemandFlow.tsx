@@ -42,7 +42,8 @@ interface DemandFlowProps {
   rawRowsPreview: Record<string, string>[];
   columnMapping: ColumnMapping;
   onUpdateColumnMapping: (mapping: ColumnMapping) => void;
-  onFileUpload: (text: string, filename: string) => void;
+  /** Returns a refusal message when the file is rejected at pick time (nothing changed), else null. */
+  onFileUpload: (text: string, filename: string) => string | null;
   onLoadSample: (sampleType: 'claims' | 'support' | 'healthcare') => void;
   dqResult: DQResult | null;
   openingWIP: OpeningWIPCase[];
@@ -77,6 +78,9 @@ export function DemandFlow({
   onToggle24x7,
 }: DemandFlowProps) {
   const [dragActive, setDragActive] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [wipError, setWipError] = useState<string | null>(null);
+  const [wipWarnings, setWipWarnings] = useState<string[]>([]);
   const [newWipCategory, setNewWipCategory] = useState('');
   const [newWipRemAht, setNewWipRemAht] = useState(30);
   const [newWipArrival, setNewWipArrival] = useState('');
@@ -122,11 +126,10 @@ export function DemandFlow({
   function readFile(file: File) {
     const reader = new FileReader();
     reader.onload = (evt) => {
-      const text = evt.target?.result as string;
-      if (text) {
-        onFileUpload(text, file.name);
-      }
+      const text = (evt.target?.result as string) ?? '';
+      setUploadError(onFileUpload(text, file.name));
     };
+    reader.onerror = () => setUploadError('The file could not be read.');
     reader.readAsText(file);
   }
 
@@ -174,17 +177,24 @@ export function DemandFlow({
   function readWipFile(file: File) {
     const reader = new FileReader();
     reader.onload = (evt) => {
-      const text = evt.target?.result as string;
-      if (text) {
-        const parsed = parseCSVRaw(text);
-        setWipFileName(file.name);
-        setWipRawHeaders(parsed.headers);
-        setWipRawRows(parsed.rows);
-        setWipDelimiter(parsed.delimiter);
-        setWipConfirmedFallback(false);
-        setWipMapping(autoDetectWipMapping(parsed.headers));
+      const text = (evt.target?.result as string) ?? '';
+      const parsed = parseCSVRaw(text);
+      const refusal = parsed.problems.find((p) => p.severity === 'error');
+      if (refusal) {
+        // Refused: nothing is imported and no preview is shown.
+        setWipError(refusal.message);
+        return;
       }
+      setWipError(null);
+      setWipWarnings(parsed.problems.map((p) => p.message));
+      setWipFileName(file.name);
+      setWipRawHeaders(parsed.headers);
+      setWipRawRows(parsed.rows);
+      setWipDelimiter(parsed.delimiter);
+      setWipConfirmedFallback(false);
+      setWipMapping(autoDetectWipMapping(parsed.headers));
     };
+    reader.onerror = () => setWipError('The file could not be read.');
     reader.readAsText(file);
   }
 
@@ -223,6 +233,8 @@ export function DemandFlow({
     setWipRawRows([]);
     setWipRawHeaders([]);
     setWipFileName('');
+    setWipError(null);
+    setWipWarnings([]);
   }
 
   function handleAddWipCase() {
@@ -310,7 +322,7 @@ export function DemandFlow({
                   Drag and drop your 30-minute demand forecast CSV here
                 </p>
                 <p className="text-[11px] text-slate-500">
-                  Supports comma, semicolon, or tab-delimited files. Timestamps automatically mapped.
+                  Supports comma, semicolon, tab or pipe (|) delimited files. Timestamps automatically mapped.
                 </p>
               </div>
 
@@ -324,6 +336,11 @@ export function DemandFlow({
                 />
               </label>
             </div>
+            {uploadError && (
+              <p role="alert" className="text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                {uploadError}
+              </p>
+            )}
 
             {/* Sample Datasets */}
             <div className="pt-3 border-t border-slate-100 space-y-3">
@@ -337,7 +354,7 @@ export function DemandFlow({
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <button
                   type="button"
-                  onClick={() => onLoadSample('claims')}
+                  onClick={() => { setUploadError(null); onLoadSample('claims'); }}
                   className="p-3.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-left transition space-y-1"
                 >
                   <div className="text-xs font-bold text-slate-900">Financial Claims (Multi-Seg)</div>
@@ -348,7 +365,7 @@ export function DemandFlow({
 
                 <button
                   type="button"
-                  onClick={() => onLoadSample('support')}
+                  onClick={() => { setUploadError(null); onLoadSample('support'); }}
                   className="p-3.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-left transition space-y-1"
                 >
                   <div className="text-xs font-bold text-slate-900">Customer Operations Backlog</div>
@@ -359,7 +376,7 @@ export function DemandFlow({
 
                 <button
                   type="button"
-                  onClick={() => onLoadSample('healthcare')}
+                  onClick={() => { setUploadError(null); onLoadSample('healthcare'); }}
                   className="p-3.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-left transition space-y-1"
                 >
                   <div className="text-xs font-bold text-slate-900">Healthcare Authorization</div>
@@ -841,7 +858,7 @@ export function DemandFlow({
                         Drag and drop your Pending Cases / Opening WIP CSV here
                       </p>
                       <p className="text-[11px] text-slate-500">
-                        Supports comma, semicolon, or tab-delimited files (.csv, .tsv, .txt)
+                        Supports comma, semicolon, tab or pipe (|) delimited files (.csv, .tsv, .txt)
                       </p>
                     </div>
 
@@ -854,6 +871,11 @@ export function DemandFlow({
                         className="hidden"
                       />
                     </label>
+                    {wipError && (
+                      <p role="alert" className="text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                        {wipError}
+                      </p>
+                    )}
                   </div>
                 ) : (
                   /* Column Mapping Wizard for WIP */
@@ -881,6 +903,14 @@ export function DemandFlow({
                             <span>Select Different File</span>
                           </button>
                         </div>
+
+                        {wipWarnings.length > 0 && (
+                          <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 space-y-1">
+                            {wipWarnings.map((w) => (
+                              <p key={w}>{w}</p>
+                            ))}
+                          </div>
+                        )}
 
                         {/* Column Selectors Grid */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">

@@ -22,6 +22,7 @@ import {
   discoverAndSyncCategories,
   mapRawRecordsToIntervals,
   parseCSVRaw,
+  type CSVProblem,
   remapCasesToIntervalSpelling,
   validateDataQuality,
 } from './utils/csv-parser';
@@ -95,6 +96,8 @@ export function App() {
   const [rawHeaders, setRawHeaders] = useState<string[]>([]);
   const [rawRows, setRawRows] = useState<Record<string, string>[]>([]);
   const [rawDelimiter, setRawDelimiter] = useState<string>(',');
+  // Non-blocking warnings the file reader raised for the loaded file; set with rawRows, cleared on sample load and reset.
+  const [rawFileWarnings, setRawFileWarnings] = useState<CSVProblem[]>([]);
   const [columnMapping, setColumnMapping] = useState<ColumnMapping>({
     intervalStartCol: '',
     volumeCol: '',
@@ -163,19 +166,25 @@ export function App() {
       labor,
       sla,
       openingWIP,
+      fileWarnings: rawFileWarnings,
     });
-  }, [intervals, columnMapping, categories, calendar, labor, sla, openingWIP]);
+  }, [intervals, columnMapping, categories, calendar, labor, sla, openingWIP, rawFileWarnings]);
 
   // Handle File Upload. If a prior session already has data loaded, route through the reset
   // confirmation first (see pendingResetAction) rather than blending the new file into
   // whatever calendar/labor/SLA/categories/opening-WIP a previous upload left behind. A
   // brand-new tab with nothing loaded yet applies the file immediately — nothing to lose.
-  function handleFileUpload(text: string, filename: string) {
+  // The file is read and checked FIRST: a file with an error is refused (message returned to the upload box)
+  // and nothing changes - no reset prompt, no state change, the current session stays exactly as it is.
+  function handleFileUpload(text: string, filename: string): string | null {
+    const refusal = parseCSVRaw(text).problems.find((p) => p.severity === 'error');
+    if (refusal) return refusal.message;
     if (rawRows.length > 0) {
       setPendingResetAction({ type: 'upload', text, filename });
-      return;
+      return null;
     }
     applyFileUpload(text, filename);
+    return null;
   }
 
   function applyFileUpload(text: string, filename: string) {
@@ -183,10 +192,11 @@ export function App() {
     setSearchOutput(null);
     setRunInputs(null);
 
-    const { headers, rows, delimiter } = parseCSVRaw(text);
+    const { headers, rows, delimiter, problems } = parseCSVRaw(text);
     setRawHeaders(headers);
     setRawRows(rows);
     setRawDelimiter(delimiter);
+    setRawFileWarnings(problems.filter((p) => p.severity === 'warning'));
 
     const autoMapping = autoSuggestColumnMapping(headers, rows);
     setColumnMapping(autoMapping);
@@ -222,6 +232,7 @@ export function App() {
     setRawHeaders(headers);
     setRawRows(rows);
     setRawDelimiter(',');
+    setRawFileWarnings([]);
     const mapping: ColumnMapping = {
       intervalStartCol: 'IntervalStart',
       volumeCol: 'Volume',
@@ -347,6 +358,7 @@ export function App() {
     setRawHeaders([]);
     setRawRows([]);
     setRawDelimiter(',');
+    setRawFileWarnings([]);
     setColumnMapping({ intervalStartCol: '', volumeCol: '' });
     setOpeningWIP([]);
     setSearchOutput(null);

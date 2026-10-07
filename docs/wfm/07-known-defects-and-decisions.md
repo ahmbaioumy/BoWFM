@@ -971,6 +971,11 @@ binding label. The binding label did not change on the pinned fixtures (still "P
 the adopted roster, `rosterPolish`, every history row except N, and every result with placement OFF or polish status other than adopted /
 adopted_partial (full-result digests pinned). Suite D65 pins this (independent re-evaluation of the adopted roster, sync = async on the full output).
 
+### IS3 - Messy files were read silently or half-read *(fixed 2026-10-07, Build A)*
+The file reader had no way to say a file was wrong: empty, zip/Excel, header-only, title-row-above-header, one-column, unclosed-quote and over-wide-row files loaded (or half-loaded) without a clear message, and short rows, duplicate headers and U+FFFD characters changed data silently.
+**After:** `parseCSVRaw` returns `problems`. Errors E1-E7 (precedence E1 > E2 > E3 > E7 > E6 > E4 > E5) refuse the file at pick time with a message under the upload box (backlog import area for the backlog file); the current session is untouched. Warnings W1-W3 load the file and appear as the non-blocking DQ rule 27 "File reading". Pipe added as lowest-priority delimiter. Row numbers are 1-based physical lines. Files that loaded before parse identically (suite D68 compares with a legacy copy of the reader). Not changed: quote handling.
+**Open item IS3-a:** a balanced quote in the middle of a cell (`ab"c"d`) still merges cells as before; it is not detected.
+
 ---
 
 ## C. Retracted after measurement

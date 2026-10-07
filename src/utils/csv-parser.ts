@@ -28,8 +28,80 @@ import {
 import { buildOpeningWipCases } from './des-engine';
 import { readNumberColumn } from './number-cell';
 
-export function parseCSVRaw(text: string): { headers: string[]; rows: Record<string, string>[]; delimiter: string } {
-  if (!text || !text.trim()) return { headers: [], rows: [], delimiter: ',' };
+/** One finding about a file picked for upload. Errors refuse the file; warnings travel with it. */
+export interface CSVProblem {
+  severity: 'error' | 'warning';
+  code: string;
+  message: string;
+}
+
+const MAX_ROWS_NAMED = 5;
+
+function nameRows(lines: number[]): string {
+  const shown = lines.slice(0, MAX_ROWS_NAMED).join(', ');
+  return lines.length > MAX_ROWS_NAMED ? `${shown}, …` : shown;
+}
+
+/**
+ * Pipe is chosen only when the first line that carries any delimiter (looking at up to the first 6
+ * non-blank lines) has pipes and none of comma / semicolon / tab, so a file that has a comma,
+ * semicolon or tab on that line keeps the delimiter it always had.
+ */
+function firstDelimiterLineIsPipe(text: string): boolean {
+  let inQ = false;
+  let c = 0;
+  let s = 0;
+  let t = 0;
+  let p = 0;
+  let linesSeen = 0;
+  const endOfLine = (): boolean | null => {
+    if (c + s + t + p > 0) return p > 0 && c + s + t === 0;
+    c = s = t = p = 0;
+    linesSeen++;
+    return linesSeen >= 6 ? false : null;
+  };
+  const limit = Math.min(text.length, 4096);
+  for (let i = 0; i < limit; i++) {
+    const ch = text[i];
+    if (ch === '"') {
+      if (inQ && text[i + 1] === '"') i++;
+      else inQ = !inQ;
+    } else if (!inQ) {
+      if (ch === ',') c++;
+      else if (ch === ';') s++;
+      else if (ch === '\t') t++;
+      else if (ch === '|') p++;
+      else if (ch === '\n' || ch === '\r') {
+        const r = endOfLine();
+        if (r !== null) return r;
+      }
+    }
+  }
+  return c + s + t + p > 0 ? p > 0 && c + s + t === 0 : false;
+}
+
+export function parseCSVRaw(text: string): {
+  headers: string[];
+  rows: Record<string, string>[];
+  delimiter: string;
+  problems: CSVProblem[];
+} {
+  const fail = (code: string, message: string, delimiter = ','): ReturnType<typeof parseCSVRaw> => ({
+    headers: [],
+    rows: [],
+    delimiter,
+    problems: [{ severity: 'error', code, message }],
+  });
+
+  // E1 not readable text (NUL characters, or the "PK" signature of an Excel workbook / zip file)
+  if (text && (text.includes('\u0000') || text.startsWith('PK'))) {
+    return fail(
+      'E1',
+      'This is not a readable text file. It looks like an Excel workbook or a file saved in an unusual encoding. In Excel use Save As → CSV UTF-8, then upload that file.'
+    );
+  }
+  // E2 empty
+  if (!text || !text.trim()) return fail('E2', 'The file is empty.');
 
   // 1. Delimiter detection (, or ; or \t) by analyzing unquoted delimiters
   let delimiter = ',';
@@ -65,12 +137,21 @@ export function parseCSVRaw(text: string): { headers: string[]; rows: Record<str
   } else {
     delimiter = ',';
   }
+  // Fourth candidate, lowest priority: only when the first line carrying any separator has pipes and no comma/semicolon/tab
+  // (decimal commas in later data rows must not turn a pipe file into a one-column comma file).
+  if (firstDelimiterLineIsPipe(text)) {
+    delimiter = '|';
+  }
 
-  // 2. Tokenize into 2D records using character-by-character RFC 4180 state machine
-  const records: string[][] = [];
+  // 2. Tokenize into 2D records using character-by-character RFC 4180 state machine.
+  // `line` is the 1-based physical line of the file (blank lines and lines inside quoted cells count).
+  const records: { cells: string[]; line: number }[] = [];
   let currentRecord: string[] = [];
   let currentField = '';
   let inQuotes = false;
+  let line = 1;
+  let recordLine = 1;
+  let quoteOpenLine = 1;
   let i = 0;
   const len = text.length;
 
@@ -92,6 +173,11 @@ export function parseCSVRaw(text: string): { headers: string[]; rows: Record<str
         }
       } else {
         // All characters inside quotes (including \r, \n, delimiter, apostrophes) are preserved
+        if (char === '\r') {
+          if (!(i + 1 < len && text[i + 1] === '\n')) line++;
+        } else if (char === '\n') {
+          line++;
+        }
         currentField += char;
         i++;
         continue;
@@ -99,6 +185,7 @@ export function parseCSVRaw(text: string): { headers: string[]; rows: Record<str
     } else {
       if (char === '"') {
         inQuotes = true;
+        quoteOpenLine = line;
         i++;
         continue;
       } else if (char === delimiter) {
@@ -112,15 +199,19 @@ export function parseCSVRaw(text: string): { headers: string[]; rows: Record<str
         }
         currentRecord.push(currentField);
         currentField = '';
-        records.push(currentRecord);
+        records.push({ cells: currentRecord, line: recordLine });
         currentRecord = [];
+        line++;
+        recordLine = line;
         i++;
         continue;
       } else if (char === '\n') {
         currentRecord.push(currentField);
         currentField = '';
-        records.push(currentRecord);
+        records.push({ cells: currentRecord, line: recordLine });
         currentRecord = [];
+        line++;
+        recordLine = line;
         i++;
         continue;
       } else {
@@ -134,24 +225,106 @@ export function parseCSVRaw(text: string): { headers: string[]; rows: Record<str
   // Push trailing field/record
   if (currentField.length > 0 || currentRecord.length > 0) {
     currentRecord.push(currentField);
-    records.push(currentRecord);
+    records.push({ cells: currentRecord, line: recordLine });
   }
 
   // 3. Filter out empty rows safely (rows where all cells are empty/whitespace)
-  const cleanRecords = records.filter((rec) => rec.some((cell) => cell.trim().length > 0));
+  const clean = records.filter((rec) => rec.cells.some((cell) => cell.trim().length > 0));
 
-  if (cleanRecords.length === 0) {
-    return { headers: [], rows: [], delimiter };
+  if (clean.length === 0) return fail('E2', 'The file is empty.', delimiter);
+
+  const nonEmptyCount = (cells: string[]) => cells.filter((c) => c.trim().length > 0).length;
+  const rawHeaders = clean[0].cells;
+  const dataRecords = clean.slice(1);
+
+  // --- Errors, in precedence order E3 > E7 > E6 > E4 > E5 (E1, E2 handled above) ---
+  const err = (code: string, message: string) => fail(code, message, delimiter);
+
+  if (dataRecords.length === 0) {
+    return err('E3', 'The file has column headers but no data rows.');
+  }
+  if (
+    nonEmptyCount(rawHeaders) === 1 &&
+    nonEmptyCount(dataRecords[0].cells) >= 2 &&
+    (dataRecords.length < 2 || nonEmptyCount(dataRecords[1].cells) >= 2)
+  ) {
+    return err(
+      'E7',
+      `The first row (file row ${clean[0].line}) looks like a title, not column headers. Remove the row(s) above the header and upload again.`
+    );
+  }
+  if (rawHeaders.length === 1 && dataRecords.length >= 2) {
+    let other = false;
+    let q = false;
+    for (let k = 0; k < len && !other; k++) {
+      const ch = text[k];
+      if (ch === '"') {
+        if (q && text[k + 1] === '"') k++;
+        else q = !q;
+      } else if (!q && (ch === ',' || ch === ';' || ch === '\t' || ch === '|') && ch !== delimiter) {
+        other = true;
+      }
+    }
+    if (other) {
+      return err(
+        'E6',
+        'Only one column was found. Columns must be separated by comma, semicolon, tab or |. If there is a title row above the header, remove it.'
+      );
+    }
+  }
+  if (inQuotes) {
+    return err(
+      'E4',
+      `A quotation mark opened on file row ${quoteOpenLine} is never closed, so the rest of the file cannot be read reliably. Close or remove the quote on that row.`
+    );
+  }
+  const moreRows: { line: number; found: number }[] = [];
+  for (const rec of dataRecords) {
+    if (rec.cells.length > rawHeaders.length) {
+      let lastNonEmpty = -1;
+      rec.cells.forEach((c, idx) => {
+        if (c.trim().length > 0) lastNonEmpty = idx;
+      });
+      if (lastNonEmpty + 1 > rawHeaders.length) moreRows.push({ line: rec.line, found: lastNonEmpty + 1 });
+    }
+  }
+  if (moreRows.length > 0) {
+    return err(
+      'E5',
+      `${moreRows.length} row(s) have more columns than the header (file rows ${nameRows(moreRows.map((r) => r.line))}; expected ${rawHeaders.length}, found ${moreRows[0].found} on row ${moreRows[0].line}). A delimiter is extra on those rows, or there is a title row above the header.`
+    );
   }
 
-  const rawHeaders = cleanRecords[0];
-  const headers = rawHeaders.map((h, colIdx) => h.trim() || `Column_${colIdx + 1}`);
+  // --- Headers (duplicates renamed, nothing overwritten) and rows ---
+  const problems: CSVProblem[] = [];
+  const baseNames = rawHeaders.map((h, colIdx) => h.trim() || `Column_${colIdx + 1}`);
+  const used = new Set(baseNames);
+  const seen = new Map<string, number>();
+  const dupNames: string[] = [];
+  const headers = baseNames.map((name) => {
+    const n = (seen.get(name) ?? 0) + 1;
+    seen.set(name, n);
+    if (n === 1) return name;
+    if (!dupNames.includes(name)) dupNames.push(name);
+    let k = n;
+    let candidate = `${name} (${k})`;
+    while (used.has(candidate)) {
+      k++;
+      candidate = `${name} (${k})`;
+    }
+    used.add(candidate);
+    return candidate;
+  });
+
   const rows: Record<string, string>[] = [];
-
-  for (let r = 1; r < cleanRecords.length; r++) {
-    const rowCells = cleanRecords[r];
-    if (!rowCells.some((c) => c.trim().length > 0)) continue;
-
+  const shortLines: number[] = [];
+  let lastNamedHeader = -1;
+  rawHeaders.forEach((h, idx) => {
+    if (h.trim().length > 0) lastNamedHeader = idx;
+  });
+  for (const rec of dataRecords) {
+    const rowCells = rec.cells;
+    if (rowCells.length < lastNamedHeader + 1) shortLines.push(rec.line);
     const rowObj: Record<string, string> = {};
     headers.forEach((h, colIdx) => {
       rowObj[h] = rowCells[colIdx] !== undefined ? rowCells[colIdx] : '';
@@ -159,7 +332,30 @@ export function parseCSVRaw(text: string): { headers: string[]; rows: Record<str
     rows.push(rowObj);
   }
 
-  return { headers, rows, delimiter };
+  if (shortLines.length > 0) {
+    problems.push({
+      severity: 'warning',
+      code: 'W1',
+      message: `${shortLines.length} row(s) have fewer columns than the header (file rows ${nameRows(shortLines)}); the missing cells were read as empty. Check those rows (missing delimiter, footer or total line).`,
+    });
+  }
+  if (dupNames.length > 0) {
+    problems.push({
+      severity: 'warning',
+      code: 'W2',
+      message: `Some columns have the same name (${dupNames.map((n) => `"${n}"`).join(', ')}); the later ones were renamed "${dupNames[0]} (2)" and so on. Check the column mapping.`,
+    });
+  }
+  if (text.includes('�')) {
+    problems.push({
+      severity: 'warning',
+      code: 'W3',
+      message:
+        'Some characters could not be read (the file is not saved as UTF-8). Names may look wrong; numbers and dates are not affected.',
+    });
+  }
+
+  return { headers, rows, delimiter, problems };
 }
 
 export function autoSuggestColumnMapping(
@@ -878,9 +1074,15 @@ export function validateDataQuality(params: {
   labor: LaborConfig;
   sla: SLAPolicyConfig;
   openingWIP: OpeningWIPCase[];
+  /** Non-blocking warnings the file reader raised for the accepted file (short rows, duplicate headers, characters). */
+  fileWarnings?: CSVProblem[];
 }): DQResult {
   const { intervals, mapping, categories, calendar, labor, sla, openingWIP } = params;
   const issues: DQIssue[] = [];
+
+  for (const w of params.fileWarnings ?? []) {
+    if (w.severity === 'warning') issues.push({ severity: 'warning', field: 'File reading', message: w.message });
+  }
 
   if (!mapping?.intervalStartCol || !mapping?.volumeCol) {
     issues.push({
