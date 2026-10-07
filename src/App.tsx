@@ -38,7 +38,14 @@ import { SensitivityFlow } from './components/SensitivityFlow';
 import { SimulationProgressModal } from './components/SimulationProgressModal';
 import { ResetConfirmModal } from './components/ResetConfirmModal';
 import { buildSampleDataset, nextMondayAt8 } from './utils/sample-data';
-import { diffRunInputs, RunInputs } from './utils/run-inputs';
+import {
+  diffRunData,
+  diffRunInputs,
+  fingerprintBacklog,
+  fingerprintIntervals,
+  RunDataFingerprints,
+  RunInputs,
+} from './utils/run-inputs';
 
 import {
   DEFAULT_CALENDAR,
@@ -108,7 +115,7 @@ export function App() {
   const [searchOutput, setSearchOutput] = useState<HCSearchOutput | null>(null);
   // Exact settings the current searchOutput was computed with. Results render from this (not the live
   // settings), so audits/formulas/exports describe the run even if the planner edits config afterwards.
-  const [runInputs, setRunInputs] = useState<RunInputs | null>(null);
+  const [runInputs, setRunInputs] = useState<(RunInputs & { data: RunDataFingerprints }) | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [showProgressModal, setShowProgressModal] = useState(false);
   // Reset confirmation gate. 'reset' = plain Sidebar Reset click. { type: 'upload' | 'sample' }
@@ -138,6 +145,14 @@ export function App() {
     }
     return mapRawRecordsToIntervals(rawRows, columnMapping, 'General', rawDelimiter);
   }, [rawRows, columnMapping, rawDelimiter]);
+
+  // Content fingerprints of the live data, recomputed only when the data changes (not per render).
+  const liveDemandFp = useMemo(() => fingerprintIntervals(intervals), [intervals]);
+  const liveBacklogFp = useMemo(() => fingerprintBacklog(openingWIP), [openingWIP]);
+  const dataChangedSinceRun = useMemo(
+    () => diffRunData(runInputs?.data ?? null, { demand: liveDemandFp, backlog: liveBacklogFp }),
+    [runInputs, liveDemandFp, liveBacklogFp]
+  );
 
   // Synchronize Categories Discovery when Intervals change
   useEffect(() => {
@@ -282,7 +297,14 @@ export function App() {
     });
 
     // Captured at run start: exactly what is passed to the search (not re-read after the await).
-    const runSnapshot: RunInputs = { calendar, labor, sla, categories, simParams };
+    const runSnapshot: RunInputs & { data: RunDataFingerprints } = {
+      calendar,
+      labor,
+      sla,
+      categories,
+      simParams,
+      data: { demand: fingerprintIntervals(intervals), backlog: fingerprintBacklog(openingWIP) },
+    };
 
     try {
       const result = await searchOptimalHCAsync({
@@ -507,6 +529,7 @@ export function App() {
         onExportParams={handleExportParams}
         onImportParams={handleImportParams}
         hasResults={searchOutput !== null}
+        resultsOutdated={searchOutput !== null && (settingsChangedSinceRun.length > 0 || dataChangedSinceRun.length > 0)}
         dqPassed={dqResult?.passed === true}
         paramsPanelOpen={paramsPanelOpen}
         onToggleParamsPanel={() => setParamsPanelOpen((prev) => !prev)}
@@ -685,6 +708,7 @@ export function App() {
                 openingWIP={openingWIP}
                 simParams={(runInputs ?? liveInputs).simParams}
                 settingsChangedSinceRun={settingsChangedSinceRun}
+                dataChangedSinceRun={dataChangedSinceRun}
                 onExportAssumptionsJSON={handleExportRunSnapshotParams}
               />
             )}

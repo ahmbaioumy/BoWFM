@@ -55,6 +55,7 @@ import { DEFAULT_CALENDAR, DEFAULT_CATEGORIES, DEFAULT_LABOR, DEFAULT_SIM_PARAMS
 import {
   CalendarConfig,
   CaseEntity,
+  OpeningWIPCase,
   CategoryConfig,
   LaborConfig,
   ShiftDistributionByCategory,
@@ -5570,6 +5571,59 @@ console.log('\n--- Suite D68: input safety part 3 (file reader rules + refusal) 
   assert(missingRequiredMappings({ intervalStartCol: '', volumeCol: 'Vol' }).join('|') === 'Date / Day', 'D69.3 only date unmapped: names Date / Day (the label on the mapping screen)');
   assert(missingRequiredMappings({ intervalStartCol: '', volumeCol: '' }).join(', ') === 'Date / Day, Volume', 'D69.4 both unmapped: both listed, in screen order');
   assert(missingRequiredMappings({ intervalStartCol: 'Date', volumeCol: 'Vol', timeCol: '', categoryCol: '' }).length === 0, 'D69.5 optional columns (time, category) left empty are never reported');
+}
+
+// D70 - stale results after data edits (G6 + H9): content fingerprints of demand intervals and opening backlog
+import { diffRunData, diffRunInputs as diffRunInputs70, fingerprintBacklog, fingerprintIntervals } from '../src/utils/run-inputs';
+{
+  console.log('\n--- D70: stale results after data edits ---');
+  const day = (h: number, m = 0) => new Date(2026, 0, 5, h, m);
+  const mkIv = (): StandardInterval[] =>
+    [8, 9, 10].flatMap((h, i) => ['Claims', 'Billing'].map((c, j) => ({ intervalIndex: i * 2 + j, start: day(h), end: day(h, 30), volume: 10 + i + j, category: c } as StandardInterval)));
+  const mkWip = (): OpeningWIPCase[] =>
+    [1, 2, 3].map((n) => ({ id: `W${n}`, category: n === 2 ? 'Billing' : 'Claims', priority: 1, arrival: day(7, n), clockStart: day(7, n), remainingWorkMinutes: 20 + n }));
+  const snap = (iv: StandardInterval[], wip: OpeningWIPCase[]) => ({ demand: fingerprintIntervals(iv), backlog: fingerprintBacklog(wip) });
+  const run = snap(mkIv(), mkWip());
+  const kinds = (iv: StandardInterval[], wip: OpeningWIPCase[]) => diffRunData(run, snap(iv, wip)).join('|');
+
+  assert(kinds(mkIv(), mkWip()) === '', 'D70.1 identical data (rebuilt objects) -> not stale');
+  assert(diffRunData(null, snap(mkIv(), mkWip())).length === 0, 'D70.1b no run -> nothing reported');
+  const v = mkIv(); v[3].volume += 1;
+  assert(kinds(v, mkWip()) === 'demand data', 'D70.2 one interval volume changed -> demand data');
+  const c = mkIv(); c[1].category = 'Other';
+  assert(kinds(c, mkWip()) === 'demand data', 'D70.3 one interval category changed -> demand data');
+  const t = mkIv(); t[0].start = day(8, 5);
+  assert(kinds(t, mkWip()) === 'demand data', 'D70.3b one interval start changed -> demand data');
+  assert(kinds(mkIv().slice(1), mkWip()) === 'demand data', 'D70.3c one interval removed -> demand data');
+  const wAdd = mkWip(); wAdd.push({ id: 'W4', category: 'Claims', priority: 1, arrival: day(7), clockStart: day(7), remainingWorkMinutes: 5 });
+  assert(kinds(mkIv(), wAdd) === 'opening backlog', 'D70.4a backlog case added -> opening backlog');
+  assert(kinds(mkIv(), mkWip().slice(1)) === 'opening backlog', 'D70.4b backlog case removed -> opening backlog');
+  const wMin = mkWip(); wMin[0].remainingWorkMinutes += 1;
+  const wCat = mkWip(); wCat[0].category = 'Billing';
+  const wArr = mkWip(); wArr[0].arrival = day(6, 59);
+  const wPri = mkWip(); wPri[0].priority = 2;
+  assert([wMin, wCat, wArr, wPri].every((w) => kinds(mkIv(), w) === 'opening backlog'), 'D70.4c backlog minutes / category / arrival / priority edited -> opening backlog each');
+  assert(kinds(v, wAdd) === 'demand data|opening backlog', 'D70.5 demand and backlog changed together -> both named');
+  const s0: any = { calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, categories: DEFAULT_CATEGORIES, simParams: DEFAULT_SIM_PARAMS };
+  const s1 = { ...s0, labor: { ...DEFAULT_LABOR, shrinkage: 0.5 } };
+  assert(diffRunInputs70(s0, s1).join('|') === 'Labor' && kinds(mkIv(), mkWip()) === '', 'D70.6 settings-only change: settings named, no data kinds');
+  assert(snap(mkIv(), mkWip()).demand === snap(mkIv(), mkWip()).demand && snap(mkIv(), mkWip()).backlog === snap(mkIv(), mkWip()).backlog, 'D70.7 same inputs -> same fingerprints');
+  const idA = mkIv().map((x) => ({ ...x, categoryId: 'cat-1' } as any));
+  const idB = mkIv().map((x) => ({ ...x, categoryId: 'cat-999' } as any));
+  assert(fingerprintIntervals(idA) === fingerprintIntervals(idB), 'D70.8 different category ids, same names -> not stale');
+
+  // real mapping function on a small raw file
+  const raw = parseCSVRaw('Start,Alt,Volume,Cat\n2026-01-05 08:00,2026-01-05 09:00,5,A\n2026-01-05 08:30,2026-01-05 09:30,7,B\n2026-01-05 09:00,2026-01-05 10:00,9,A\n');
+  const mapAt = (startCol: string, catCol: string) => mapRawRecordsToIntervals(raw.rows, { intervalStartCol: startCol, volumeCol: 'Volume', categoryCol: catCol } as any, 'General', raw.delimiter);
+  const base70 = snap(mapAt('Start', 'Cat'), []);
+  const mapped = (st: string, ct: string) => diffRunData(base70, snap(mapAt(st, ct), [])).join('|');
+  assert(mapped('Alt', 'Cat') === 'demand data', 'D70.9a date mapping changed so intervals change -> demand data');
+  assert(mapped('Start', '') === 'demand data', 'D70.9b category mapping cleared so intervals change -> demand data');
+  assert(mapped('Alt', 'Cat') === 'demand data' && mapped('Start', 'Cat') === '', 'D70.9c mapping changed and changed back -> not stale');
+  const ivR = mapAt('Start', 'Cat');
+  const wipR = mkWip().map((w) => ({ ...w, category: 'A' }));
+  const remapped = remapCasesToIntervalSpelling(wipR, ivR);
+  assert(fingerprintBacklog(remapped) === fingerprintBacklog(wipR), 'D70.10 remapCasesToIntervalSpelling returning equal content -> backlog not stale');
 }
 
 console.log('\n==================================================');

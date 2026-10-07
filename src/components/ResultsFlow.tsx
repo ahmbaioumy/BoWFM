@@ -144,6 +144,8 @@ interface ResultsFlowProps {
   simParams: SimulationParams;
   /** Sections whose live settings differ from the run snapshot the props above carry (empty = in sync). */
   settingsChangedSinceRun?: string[];
+  /** Plain-words data kinds that changed since the run: 'demand data', 'opening backlog'. */
+  dataChangedSinceRun?: string[];
   onExportAssumptionsJSON: () => void;
 }
 
@@ -184,6 +186,7 @@ function ResultsFlowBody({
   openingWIP,
   simParams,
   settingsChangedSinceRun = [],
+  dataChangedSinceRun = [],
   onExportAssumptionsJSON,
 }: ResultsFlowProps) {
   const [caseSearch, setCaseSearch] = useState('');
@@ -498,10 +501,16 @@ function ResultsFlowBody({
 
   return (
     <div className="space-y-6">
-      {settingsChangedSinceRun.length > 0 && (
+      {(settingsChangedSinceRun.length > 0 || dataChangedSinceRun.length > 0) && (
         <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 leading-relaxed">
-          <strong>Settings changed since this run ({settingsChangedSinceRun.join(', ')}).</strong>{' '}
-          Results show the settings used for this run — re-run to refresh.
+          {settingsChangedSinceRun.length > 0 && (
+            <strong>Settings changed since this run ({settingsChangedSinceRun.join(', ')}).</strong>
+          )}
+          {settingsChangedSinceRun.length > 0 && dataChangedSinceRun.length > 0 && ' '}
+          {dataChangedSinceRun.length > 0 && (
+            <strong>Data changed since this run ({dataChangedSinceRun.join(', ')}).</strong>
+          )}{' '}
+          These results describe the inputs used for the run — run again to refresh.
         </div>
       )}
       {/* 1. SUMMARY TAB */}

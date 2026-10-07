@@ -75,7 +75,7 @@ npm run dev               # dev server on :3000
 | Command | What it does |
 |---|---|
 | `npm run dev` | Vite dev server with HMR |
-| `npm test` | Four suites (1,120 checks: 174 + 722 + 60 + 164 trusted-source) + artifact freshness |
+| `npm test` | Four suites (1,256 checks: 174 + 858 + 60 + 164 trusted-source) + artifact freshness |
 | `npm run lint` | `tsc --noEmit` typecheck |
 | `npm run build:standalone` | Produces `BoWFM.html` — **the actual deliverable** |
 | `npm run check:artifact` | Fails if `BoWFM.html` is missing or older than `src/` / build inputs |
@@ -171,7 +171,7 @@ Bo_4Final-main/
 ├── scripts/
 │   ├── build-standalone.mts      ← inlines everything into BoWFM.html
 │   ├── verify-fixes.mts          ← legacy regression suite (174 tests)
-│   ├── verify-sizing-fixes.mts   ← sizing-chain suite (722 tests)
+│   ├── verify-sizing-fixes.mts   ← sizing-chain suite (858 tests)
 │   ├── verify-agent-analytics.mts ← export-timestamp + agent-analytics suite (60 tests)
 │   ├── verify-trusted-source.mts ← ground-truth benchmark runner (164 checks; authored under TZ Asia/Dubai, warns but runs on any TZ)
 │   └── check-artifact-freshness.mts ← BoWFM.html mtime gate
@@ -867,7 +867,7 @@ Keep full precision through the chain. Compare floats with a tolerance, never `=
 ### 9.1 Four suites plus the freshness gate, all must be green
 
 ```bash
-npm test              # four suites — 1,120 checks (174 + 722 + 60 + 164) + artifact freshness
+npm test              # four suites — 1,256 checks (174 + 858 + 60 + 164) + artifact freshness
 npm run test:sizing   # sizing-chain suite only (faster)
 ```
 
@@ -977,6 +977,7 @@ Work down the chain in order — the fault is almost always upstream of where it
 
 | Defect | Impact when broken |
 |---|---|
+| **Stale results after data edits: demand data / opening backlog now flagged** (G6 + H9; `run-inputs.ts` fingerprints, `App.tsx` capture at run start + memos, `ResultsFlow.tsx` banner, `Sidebar.tsx` "Outdated" marker; D70; 2026-10-07) | After a run, editing/deleting/importing backlog or changing a column mapping left old headcounts beside new data with no warning (browser-confirmed: Support 27 / 34 unchanged after a mapping change). Now the run keeps two content fingerprint strings (demand, backlog; names not ids) and the Results banner names "Data changed since this run (demand data, opening backlog)"; the sidebar shows "Outdated". Content comparison: change-and-revert clears it. Results are not cleared. No engine change, no numbers change. Open: SR-a exports carry no stale note. |
 | **Upload traps: same file twice, drop outside the box, overlapping picks, unnamed unmapped column** (input safety part 3, Build B; `DemandFlow.tsx` file inputs/read sequence/page drop guard, `App.tsx` `handleFileUpload`, `csv-parser.ts` `missingRequiredMappings`; D69; 2026-10-07) | Picking the same file again did nothing; a file dropped outside the box made the browser open it and leave the page (data lost); a slow older read could overwrite a newer pick or leave the reset prompt on the wrong file; a loaded file with an unmapped required column said only "Upload and map...". Now: the file input is cleared after each pick; a page-level guard cancels drops outside drop boxes/file inputs; the latest pick wins (older reads ignored, a refused newest pick closes an open upload prompt); the Data Quality tab says "Choose the column for: Volume." No numbers change. IS3-f closed. |
 | **Messy files loaded silently or failed late** (input safety part 3, Build A; `csv-parser.ts` `parseCSVRaw` problems, `number-cell.ts` pipe, `DemandFlow.tsx`, `App.tsx` `handleFileUpload`/`rawFileWarnings`; D68; 2026-10-07) | Empty, zip/Excel, header-only, title-row, one-column, unclosed-quote and over-wide-row files were read or half-read with no clear word; short rows, duplicate headers and bad characters changed data silently. Now: `parseCSVRaw` also returns `problems` (errors E1-E7, warnings W1-W3); an error refuses the file at pick time (message under the upload box / backlog import area, session untouched); warnings travel with the raw rows into DQ rule 27 (non-blocking). `\|` added as lowest-priority delimiter. Files that loaded before parse identically (legacy-reader comparison in D68). Open: IS3-a balanced mid-cell quotes still merge cells. |
 | **Timezone-marked timestamps converted silently; category spelling variants split one category** (input safety part 2, G3 Option B + G5; `csv-parser.ts` `detectTimezoneMarker`/`categoryKey`/`syncCategoriesWithRenames`/`remapCasesToIntervalSpelling`, `wip-import.ts`, `DemandFlow.tsx`, `App.tsx`; D67; 2026-10-07) | `Z`/`+04:00`/epoch stamps shift to the PC clock (08:00Z reads 12:00 on a UTC+4 PC, the previous day in New York) with no word to the planner; and `Billing`, `billing `, `BILLING` became three categories, each seeded 30 min / 20% shrinkage, splitting the demand and its headcount. Now: parser behaviour unchanged, DQ warning "Timezone markers converted" (count, markers, PC offset) and "Category names merged"; variants become one category (first file spelling), existing settings/ids survive a re-upload, stored backlog cases follow the rename |

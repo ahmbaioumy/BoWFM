@@ -979,6 +979,12 @@ The file reader had no way to say a file was wrong: empty, zip/Excel, header-onl
 ### IS3-f - Upload traps *(fixed 2026-10-07, Build B)*
 Same file picked twice did nothing; a drop outside the box opened the file in the browser; overlapping picks could apply an older file; an unmapped required column was not named. **After:** file inputs (demand, backlog) are cleared after each pick; one page-level guard cancels `dragover`/`drop` outside drop boxes and file inputs; each read carries a sequence number (latest pick wins; a newer pick replaces an open reset prompt, a refused newest pick closes it); Data Quality names the unmapped column ("Choose the column for: Volume."). No parsing, rule or number change. Suite D69 pins the pure helper `missingRequiredMappings`; the rest is browser-verified. **IS3-f closed.**
 
+### SR - Stale results after data edits *(fixed 2026-10-07, G6 + H9)*
+Settings edits after a run raised a banner; data edits did not. Editing, deleting or importing opening backlog, or changing a column mapping, left the old headcount beside new data with no warning (browser-confirmed: Support 27 / 34 unchanged after a mapping change).
+**After:** the run snapshot keeps two content fingerprint strings (demand intervals: start, end, volume, category name; opening backlog: id, category name, arrival, remaining minutes, priority, in order), captured at run start from the values the search receives. Live fingerprints are memoised on `intervals` and `openingWIP`. The Results banner names settings, demand data and/or opening backlog; the sidebar shows an "Outdated" marker beside Results. Comparison is by content, so change-and-revert clears it; category ids are never used (they contain `Date.now()`). Results are not cleared. No engine change. Suite D70.
+**Open item SR-a:** exports from stale results carry no stale note (none exists for settings either).
+**SR-b (checked, no change):** Sensitivity builds its own scenarios from live settings and data and shows no run results, so it cannot mix old results with new data. The Results tabs (incl. Agent Browser) render the run output only; the banner sits above every Results tab.
+
 ---
 
 ## C. Retracted after measurement
