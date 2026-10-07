@@ -946,3 +946,14 @@ Open (not F3):
 - Tester: PASS, no blocker or major. Same file re-picked after editing on disk → new total shown (40 → 200). Drop and dragover on the page body are cancelled, data intact; drop on the drop box still loads. Pick A then B with the prompt open → B loads. Refused pick closes the prompt, session intact. Data Quality tab reads "Choose the column for: Volume." when unmapped. Samples gross 40 / 34 / 39, zero console errors. Scope: 8 allowed files; test diff = additions plus one edited import line.
 - Auditor and final challenger not run (Tier 2 UI change, budget).
 - Open minors: IS3B-a backlog path only partly browser-tested (input clears, preview shows; re-read, sequence guard and drop guard on the backlog box read in code only). IS3B-b PRD has no prose on the upload behaviour (version, inventory and D69 only). IS3B-c drop-box comparison with the old build not run.
+
+---
+
+# Stale results after data edits (G6 + H9: UI-1, UI-49, UI-58) — verification, 2026-10-07
+
+- Plan challenge: PASS with majors, accepted (no header chip exists → new "Outdated" marker in the navigation; mapping not stored, interval fingerprint covers it; fingerprints by category name, captured at run start).
+- Build: commit on `fix/stale-results`; `npm test` 1,256 green (174 + 858 + 60 + 164), lint clean, artifact fresh. Suite D70 (17 checks). PRD v1.20.2.
+- Tester: PASS, no blocker or major, zero console errors. Samples 31/40, 27/34, 31/39 with no banner after a run. Backlog case added → banner "Data changed since this run (opening backlog)…" and navigation OUTDATED; same case deleted → cleared. Backlog import → banner; re-run → cleared. Volume mapping switched → banner (demand data); switched back → cleared. Settings change → existing banner; settings + backlog → both named. Tab visits → no false flag. Fingerprints: equal for separately built equal data, independent of ids, 100,000 intervals in 146 ms. Mutations: volume ignored → 2 D70 failures; diff always empty → 11.
+- Sensitivity builds its own scenarios from live data; Agent Analytics reads run output only — neither mixes old results with new data (SR-b closed).
+- Auditor and final challenger not run (budget; owner asked to stop after this fix).
+- Open minors: SR-a exports carry no stale note. SR-c banner says "run again" without naming the Run tab. SR-d category-column mapping swap and SLA change-and-revert not browser-tested (volume swap and adherence revert were). SR-e re-run with a backlog big enough to move the headcount not shown. SR-f missing space in an import line in `run-inputs.ts` (cosmetic).
