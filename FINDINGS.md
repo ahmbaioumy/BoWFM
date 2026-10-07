@@ -957,3 +957,46 @@ Open (not F3):
 - Sensitivity builds its own scenarios from live data; Agent Analytics reads run output only — neither mixes old results with new data (SR-b closed).
 - Auditor and final challenger not run (budget; owner asked to stop after this fix).
 - Open minors: SR-a exports carry no stale note. SR-c banner says "run again" without naming the Run tab. SR-d category-column mapping swap and SLA change-and-revert not browser-tested (volume swap and adherence revert were). SR-e re-run with a backlog big enough to move the headcount not shown. SR-f missing space in an import line in `run-inputs.ts` (cosmetic).
+
+---
+
+# FINDINGS — Agent Analytics: Scheduled (min) capped at the agent's own shift (2026-10-07)
+
+Plan: last section of `PLAN.md`. Checkpoint `d56809d`; build `a8e1d28`; rework 1 `617f516`. Tier 3.
+
+## Plan challenge (before build)
+
+| ID | Severity | Finding | Verdict |
+|---|---|---|---|
+| PC-1 | major | Cap used the category-filtered `avail`, so the 300 min/day phantom tail survived under a category filter (ran: Gold, Agent-1 = avail + 9,300) | Accepted — `busyAll` + AA.38 + A3b added to plan |
+| PC-2 | major | A3 understated what moves on screen (team row, utilisation CV / Jain, insight line, bars) | Accepted — A3 widened |
+| PC-3 | minor | Non-staggered long-day runs still read ~50% | Stated limit, PRD L20 |
+
+## Review round 1 (after build)
+
+| ID | Reviewer | Severity | Finding | Evidence | Verdict |
+|---|---|---|---|---|---|
+| R1-1 | challenger | major | `DEFINITIONS` said occupancy = utilisation whenever budget not exhausted; false with shift placement off (ran: occ 53.8 / util 49.4, no budget exhausted) | AgentAnalyticsPanel.tsx:33 (at a8e1d28) | Rework 1 — fixed, text scoped to shift placement on |
+| R1-2 | user-side | major | Off-mode warning buried in hover; did not say "expected, not an error" | AgentAnalyticsPanel.tsx:283-286 (at a8e1d28) | Rework 1 — now in visible paragraph |
+| R1-3 | user-side | major | Did not say equal columns are normal with shift placement on; "budget" jargon; hard-to-parse Scheduled definition; "whole business day" vs "to close" | same | Rework 1 — fixed |
+| R1-4 | user-side | major | Export has no legend for `Scheduled (min)` / `On-Shift Days`; the 300-min part-day (32nd on-shift day) is unexplained in the CSV | agent-analytics.ts export builder | NOT reworked — outside approved scope (export structure, AA.27). User decision |
+| R1-5 | user-side | major | Panel does not show which mode (shift placement on/off) the run used | AgentAnalyticsPanel.tsx help paragraph | NOT reworked — needs panel logic, outside approved text-only scope. User decision |
+| R1-6 | challenger | minor | Drain day (1 Nov): early cohort scheduled 300 = available, not 540. Never above 540 (0 of 1,489 agent-days at adherence 1.0 / 0.9 / 0.8) | SP/atk.mts | Backlog; documented PRD L20 |
+| R1-7 | challenger | minor | Utilisation under a category filter on pooled agents is "share of shift spent on that category", not additive (24.9 + 70.1 + 40.9). Pre-existing (FINDINGS UI-2), not worsened | SP/atk.mts | Backlog |
+| R1-8 | challenger | minor | Unpinned: exact scheduledMin at adherence 0.8, team row, export column, drain-day shape | verify-agent-analytics.mts | Backlog |
+| R1-9 | tester / auditor | minor | AA.36b and AA.39 are controls (pass on old code); AA.33–38 + AA.32b fail on old code (63/7 reproduced independently by both) | old-code suite run | No action |
+| R1-10 | auditor | minor | `project_context.md` ~line 877 lists sizing suite as 834; suite prints 858. Pre-existing, untouched | project_context.md:877 | Backlog |
+| R1-11 | tester | minor | Browser walk did not open Data Quality / Opening WIP sub-tabs | — | Noted |
+
+Passed with evidence: tester A2, A3 (all 47 rows + team + fairness + insights + export diffed old vs new; only allowed fields moved), A3b, A4 (non-staggered byte-identical, 8 combinations + real file), A5–A9; real browser run recommended N = 47, Agent-1 Scheduled 17,040 / Utilisation 77.3%, Agent-33 16,740 / 77.1%, zero console errors. Auditor: scope lock held, A1 / A9 / A10 / A11 pass. Challenger: analytics utilisation = engine `agentFairness.utilPct` for all 47 agents (max diff 0.00); scheduled additive across date ranges.
+
+## Rework 1 recheck (user-side)
+
+Verdict pass. All six wording points resolved. Minors left: `Available (min)` header hover still says "in queue" (AgentAnalyticsPanel.tsx:374, outside the three allowed text spots); visible paragraph ~90 words; text does not say "do not size from this column".
+
+## Backlog (minor)
+
+- Export legend / notes for `Scheduled (min)` and `On-Shift Days`, incl. the part-day after the data ends (R1-4).
+- On-screen "Shift placement: on/off" note for the run shown (R1-5).
+- `Available (min)` tooltip "in queue" wording.
+- R1-6, R1-7, R1-8, R1-10.
