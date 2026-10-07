@@ -903,3 +903,15 @@ Before / after on the polish fixture (seed 42, N = 9): block 94.3 [94.1, 94.5] t
 Open (not F3):
 - F3-a (minor, to investigate): with placement OFF the search reports 94.3 at N = 9 on this fixture while a direct evaluation with no roster gives 100 — same before F3. Probable cause: the default pre-polish roster is the min-coverage repair roster, not a uniform one (related to P2-A2 / F1). Not confirmed.
 - Final challenger not run (meter 34-35%). Browser evidence is weak for this fix (claims sample shows 100 to 100); the engine-level checks carry the proof.
+
+---
+
+# Input safety part 1 (G2 + H2) — verification, 2026-10-07
+
+- Build: commit on `fix/input-safety-1`; `npm test` 1,161 green (174 + 763 + 60 + 164), lint clean, artifact fresh. New suite D66 (41 checks).
+- Tester: PASS. Semicolon file `12,5 / 7,25 / 11,5` totals 31.25 (old reader 1,055). Quoted `1,234` in comma file still 1234. `2h`, `abc`, `12..5`, `1e9` block the run with the row named. Ambiguous-only column blocked with both readings; mixed formats blocked. Backlog fallback uses the category AHT and priority (20 / 3, not 30 / 1). Samples identical to the old reader (300/1380, 280/1572, 600/2190); browser gross 40 / 34 / 39, zero console errors. Tick-box gate works for Append and Replace. Mutation (`parseFloat`) fails 10 D66 checks.
+- Auditor: PASS, no blocker or major. Scope clean, engine files untouched.
+- Deviations accepted: tick-box also gates Replace; whitespace-only volume cell treated as blank; message prefixes used to classify issues; date-default count only when a date column is mapped.
+- Deviation needing owner yes (IS1-a): backlog remaining minutes of exactly 0 now fall back to the category AHT (plan said keep zero). Supervisor brief error, not builder error.
+- Open minors: IS1-b leading plus sign (`+5`) and trailing or doubled currency symbol now blocked (were read before; fails loudly). IS1-c `project_context.md:201` still says 14 data-quality rules (PRD says 24). IS1-d `PRD.md:1151` suite list stops at D64. IS1-e docs/wfm/07 entry lost a backslash in a quoted pattern. IS1-f preview label for blank remaining minutes does not match what is counted; unmatched-category fact shown twice. IS1-g fractional warning does not show an example of the rounding. IS1-h no test for `+5`, `.5`, `5.`, zero-numeric column. IS1-i tester saw 0 as typed / 10 adjusted on a file with 5 unknown categories; auditor says the count is per row and other fallbacks explain it; per-reason lines not re-read.
+- Final challenger not run (budget).
