@@ -991,3 +991,40 @@ Owner 2026-10-07: Build A approved and merged into local `main`. Cap 45% (no new
 **Scope lock:** `src/components/DemandFlow.tsx`, `src/App.tsx`, `src/utils/csv-parser.ts` (only for a tiny pure helper, if used), `scripts/verify-sizing-fixes.mts` (append D69), `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`, rebuilt `BoWFM.html`.
 
 **Acceptance (browser, rebuilt file):** (1) after a pick, `input.value` is empty for both inputs; picking the same path twice re-reads (edit the file between picks → new content shown). (2) A `drop` and a `dragover` dispatched on `document.body` → `defaultPrevented` true and the loaded data still there; a real file drop on the drop box still loads the file. (3) Sequence: with a sample loaded, pick file A (prompt opens), pick file B → confirming loads B, never A. (4) Clear the Volume mapping → Data Quality tab names Volume. (5) Samples 40 / 34 / 39 gross, zero console errors, `npm test` green, `check:artifact` passes. (6) Only scope-lock files changed.
+
+---
+
+# BUILD PLAN — Stale results after data edits (G6 + H9: UI-1, UI-49, UI-58)
+
+Owner 2026-10-07: Build B approved and merged into local `main`; "fix stale results then stop". Cap 45% (no new agent at 44%); meter 40%. **Tier 2** (what Results shows; no engine maths). Reviewers: `tester` (browser) + `auditor` if budget allows.
+
+**Task:** after a run, any change to the DATA the run used (demand intervals, opening backlog, column mapping) must be flagged exactly like a settings change is today — the planner must never read an old headcount beside new data without a warning.
+**End user:** the WFM planner.
+
+**Facts (audit):** the run snapshot (`src/utils/run-inputs.ts:14-41`) holds settings only (calendar, labor, SLA, categories, sim params). Results are cleared only at upload, sample load, run start, reset, cancel, error. Editing / deleting / importing backlog (`DemandFlow.tsx`), changing a mapping dropdown, or importing a settings file with a mapping (`App.tsx:~452`) neither clears results nor raises the existing "changed since run" banner. Browser-confirmed: Support run 27 / 34, mapping changed, Results still 27 / 34 with no banner.
+
+**Design (keep results, flag them — same policy as settings changes today):**
+1. The run snapshot also records the data the run used: the demand intervals and the opening backlog, captured at run start (the same objects the search receives), plus the column mapping.
+2. The existing "changed since run" comparison also compares current demand intervals, current opening backlog and current mapping with the snapshot. Comparison is by CONTENT (deterministic fingerprint or field-by-field: interval start/end/volume/category; backlog id/category/arrival/remaining minutes/priority), not by object identity, so re-deriving identical data (e.g. changing a mapping and changing it back, or a no-op re-sync) does NOT raise the banner. Cost must stay small for 100,000 rows (compute once per data change, memoised; no per-render full scan).
+3. The existing banner on Results is reused; its text names what changed in plain words: settings, demand data, opening backlog (one or more). Same marker on the header chip (UI-58) and on every other place that already shows the settings-stale state (Sensitivity / exports if they do — builder lists them).
+4. Results are NOT cleared (consistent with settings edits; the planner may want to compare). If the current data fails data quality the banner still shows.
+5. Exports made from stale results carry the same stale note the settings case carries today, if any; no new export format.
+6. No engine change, no change to when results are cleared today.
+
+**Tests (suite D70, before the RESULTS block of `scripts/verify-sizing-fixes.mts`; existing D53 covers settings):** pure comparison function: identical data → not stale; one interval volume changed → stale (demand); one interval category changed → stale; backlog case added / removed / edited (minutes, category, arrival, priority) → stale (backlog); mapping changed but resulting intervals identical → not stale; settings-only change still reported as settings; several kinds at once → all named; determinism (same inputs, same fingerprint).
+
+**Scope lock:** `src/utils/run-inputs.ts`, `src/App.tsx` (snapshot capture + stale computation + passing the flag), `src/components/ResultsFlow.tsx` (banner text only), the header/sidebar component that renders the chip (one file, named in the hand-back), `src/types/wfm.ts` (optional fields only if unavoidable), `scripts/verify-sizing-fixes.mts` (append D70), `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`, rebuilt `BoWFM.html`.
+
+**Acceptance:**
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | Backlog edit flagged | Browser: run a sample, add one backlog case → Results shows the banner naming opening backlog; header chip marked |
+| 2 | Backlog import / delete flagged | Same after importing a backlog file, and after deleting a case |
+| 3 | Mapping change flagged | Run, change the Category (and separately the Date) mapping → banner naming demand data |
+| 4 | Undo clears the flag | Change a mapping and change it back, or add then delete the same backlog case → banner gone |
+| 5 | Fresh run clears the flag | Run again → no banner; numbers describe the new data |
+| 6 | Settings behaviour unchanged | Change a setting after a run → banner as before, naming settings |
+| 7 | No false flag | Run a sample and just move between tabs → no banner |
+| 8 | No regression | Samples 31/40, 27/34, 31/39; zero console errors; `npm test` green (1,239 + new); lint clean |
+| 9 | Docs and artifact | PRD FR-9.0 as built, project_context, docs 07; `npm run check:artifact` passes |
+| 10 | Scope respected | Only scope-lock files changed |
