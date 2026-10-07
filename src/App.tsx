@@ -178,7 +178,11 @@ export function App() {
   // and nothing changes - no reset prompt, no state change, the current session stays exactly as it is.
   function handleFileUpload(text: string, filename: string): string | null {
     const refusal = parseCSVRaw(text).problems.find((p) => p.severity === 'error');
-    if (refusal) return refusal.message;
+    if (refusal) {
+      // Newest pick refused: a reset prompt still open for an older upload must not stay.
+      setPendingResetAction((prev) => (prev && prev !== 'reset' && prev.type === 'upload' ? null : prev));
+      return refusal.message;
+    }
     if (rawRows.length > 0) {
       setPendingResetAction({ type: 'upload', text, filename });
       return null;

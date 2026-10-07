@@ -358,6 +358,14 @@ export function parseCSVRaw(text: string): {
   return { headers, rows, delimiter, problems };
 }
 
+/** Required columns that are not mapped yet, named as the mapping screen shows them (empty = all set). */
+export function missingRequiredMappings(mapping: ColumnMapping): string[] {
+  const missing: string[] = [];
+  if (!mapping.intervalStartCol) missing.push('Date / Day');
+  if (!mapping.volumeCol) missing.push('Volume');
+  return missing;
+}
+
 export function autoSuggestColumnMapping(
   headers: string[],
   sampleRows: Record<string, string>[] = []

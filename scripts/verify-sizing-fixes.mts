@@ -48,7 +48,7 @@ import {
 } from '../src/utils/des-engine';
 import * as hcNs from '../src/utils/hc-search';
 import * as desNs from '../src/utils/des-engine';
-import { discoverAndSyncCategories, mapRawRecordsToIntervals, validateDataQuality } from '../src/utils/csv-parser';
+import { discoverAndSyncCategories, mapRawRecordsToIntervals, missingRequiredMappings, validateDataQuality } from '../src/utils/csv-parser';
 import { buildSampleDataset } from '../src/utils/sample-data';
 import { loadSampleFile } from './sample-files';
 import { DEFAULT_CALENDAR, DEFAULT_CATEGORIES, DEFAULT_LABOR, DEFAULT_SIM_PARAMS, DEFAULT_SLA } from '../src/utils/default-config';
@@ -5560,6 +5560,16 @@ console.log('\n--- Suite D68: input safety part 3 (file reader rules + refusal) 
     assert(pkc.problems.length === 0 && pkc.headers.join('|') === 'PK|Start|Volume' && pkc.rows.length === 2, 'D68.14a header starting PK (comma) loads with zero problems');
     assert(pks.problems.length === 0 && pks.delimiter === ';' && pks.headers.join('|') === 'PKey|Start|Volume' && pks.rows.length === 2, 'D68.14b header starting PKey (semicolon) loads with delimiter ;');
   }
+}
+
+// D69 - unmapped required columns are named (Input safety part 3, Build B / UI-39)
+{
+  console.log('\n--- D69: missingRequiredMappings ---');
+  assert(missingRequiredMappings({ intervalStartCol: 'Date', volumeCol: 'Vol' }).length === 0, 'D69.1 both required columns mapped: nothing missing');
+  assert(missingRequiredMappings({ intervalStartCol: 'Date', volumeCol: '' }).join('|') === 'Volume', 'D69.2 only volume unmapped: names Volume');
+  assert(missingRequiredMappings({ intervalStartCol: '', volumeCol: 'Vol' }).join('|') === 'Date / Day', 'D69.3 only date unmapped: names Date / Day (the label on the mapping screen)');
+  assert(missingRequiredMappings({ intervalStartCol: '', volumeCol: '' }).join(', ') === 'Date / Day, Volume', 'D69.4 both unmapped: both listed, in screen order');
+  assert(missingRequiredMappings({ intervalStartCol: 'Date', volumeCol: 'Vol', timeCol: '', categoryCol: '' }).length === 0, 'D69.5 optional columns (time, category) left empty are never reported');
 }
 
 console.log('\n==================================================');

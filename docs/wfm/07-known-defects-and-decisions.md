@@ -976,6 +976,9 @@ The file reader had no way to say a file was wrong: empty, zip/Excel, header-onl
 **After:** `parseCSVRaw` returns `problems`. Errors E1-E7 (precedence E1 > E2 > E3 > E7 > E6 > E4 > E5) refuse the file at pick time with a message under the upload box (backlog import area for the backlog file); the current session is untouched. Warnings W1-W3 load the file and appear as the non-blocking DQ rule 27 "File reading". Pipe added as lowest-priority delimiter. Row numbers are 1-based physical lines. Files that loaded before parse identically (suite D68 compares with a legacy copy of the reader). Not changed: quote handling.
 **Open item IS3-a:** a balanced quote in the middle of a cell (`ab"c"d`) still merges cells as before; it is not detected.
 
+### IS3-f - Upload traps *(fixed 2026-10-07, Build B)*
+Same file picked twice did nothing; a drop outside the box opened the file in the browser; overlapping picks could apply an older file; an unmapped required column was not named. **After:** file inputs (demand, backlog) are cleared after each pick; one page-level guard cancels `dragover`/`drop` outside drop boxes and file inputs; each read carries a sequence number (latest pick wins; a newer pick replaces an open reset prompt, a refused newest pick closes it); Data Quality names the unmapped column ("Choose the column for: Volume."). No parsing, rule or number change. Suite D69 pins the pure helper `missingRequiredMappings`; the rest is browser-verified. **IS3-f closed.**
+
 ---
 
 ## C. Retracted after measurement

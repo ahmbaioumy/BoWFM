@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   CalendarConfig,
   CategoryConfig,
@@ -13,7 +13,7 @@ import {
   OpeningWIPCase,
   StandardInterval,
 } from '../types/wfm';
-import { categoryKey, generateNextWIPId, parseCSVRaw, parseFlexibleDate } from '../utils/csv-parser';
+import { categoryKey, generateNextWIPId, missingRequiredMappings, parseCSVRaw, parseFlexibleDate } from '../utils/csv-parser';
 import { parseWipRows } from '../utils/wip-import';
 import { formatDateTime24 } from '../utils/calendar';
 import { CalendarConfigPanel } from './CalendarConfigPanel';
@@ -78,6 +78,27 @@ export function DemandFlow({
   onToggle24x7,
 }: DemandFlowProps) {
   const [dragActive, setDragActive] = useState(false);
+  // Latest pick wins: each read takes a number; a read that finishes after a newer pick is ignored.
+  const demandReadSeq = useRef(0);
+  const wipReadSeq = useRef(0);
+
+  // A file dropped anywhere outside a drop box (or a file input) must not make the browser open it
+  // and leave the page: cancel those drops page-wide. Drop boxes and file inputs are left alone.
+  useEffect(() => {
+    const guard = (e: DragEvent) => {
+      const t = e.target;
+      if (t instanceof Element && (t.closest('[data-drop-box]') || (t instanceof HTMLInputElement && t.type === 'file'))) {
+        return;
+      }
+      e.preventDefault();
+    };
+    window.addEventListener('dragover', guard);
+    window.addEventListener('drop', guard);
+    return () => {
+      window.removeEventListener('dragover', guard);
+      window.removeEventListener('drop', guard);
+    };
+  }, []);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [wipError, setWipError] = useState<string | null>(null);
   const [wipWarnings, setWipWarnings] = useState<string[]>([]);
@@ -118,18 +139,24 @@ export function DemandFlow({
   }
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    if (e.target.files && e.target.files[0]) {
-      readFile(e.target.files[0]);
-    }
+    const input = e.target;
+    const file = input.files && input.files[0];
+    if (file) readFile(file);
+    // Clear after the File is captured so picking the same file again fires a new change.
+    input.value = '';
   }
 
   function readFile(file: File) {
+    const seq = ++demandReadSeq.current;
     const reader = new FileReader();
     reader.onload = (evt) => {
+      if (seq !== demandReadSeq.current) return;
       const text = (evt.target?.result as string) ?? '';
       setUploadError(onFileUpload(text, file.name));
     };
-    reader.onerror = () => setUploadError('The file could not be read.');
+    reader.onerror = () => {
+      if (seq === demandReadSeq.current) setUploadError('The file could not be read.');
+    };
     reader.readAsText(file);
   }
 
@@ -169,14 +196,17 @@ export function DemandFlow({
   }
 
   function handleWipFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    if (e.target.files && e.target.files[0]) {
-      readWipFile(e.target.files[0]);
-    }
+    const input = e.target;
+    const file = input.files && input.files[0];
+    if (file) readWipFile(file);
+    input.value = '';
   }
 
   function readWipFile(file: File) {
+    const seq = ++wipReadSeq.current;
     const reader = new FileReader();
     reader.onload = (evt) => {
+      if (seq !== wipReadSeq.current) return;
       const text = (evt.target?.result as string) ?? '';
       const parsed = parseCSVRaw(text);
       const refusal = parsed.problems.find((p) => p.severity === 'error');
@@ -194,7 +224,9 @@ export function DemandFlow({
       setWipConfirmedFallback(false);
       setWipMapping(autoDetectWipMapping(parsed.headers));
     };
-    reader.onerror = () => setWipError('The file could not be read.');
+    reader.onerror = () => {
+      if (seq === wipReadSeq.current) setWipError('The file could not be read.');
+    };
     reader.readAsText(file);
   }
 
@@ -301,6 +333,7 @@ export function DemandFlow({
 
             {/* Drag & Drop Box */}
             <div
+              data-drop-box
               onDragOver={(e) => {
                 e.preventDefault();
                 setDragActive(true);
@@ -675,7 +708,9 @@ export function DemandFlow({
               </div>
             ) : (
               <div className="p-8 text-center text-slate-400 text-xs italic bg-slate-50 rounded-xl">
-                Upload and map an inflow file to run data quality checks.
+                {rawHeaders.length > 0 && missingRequiredMappings(columnMapping).length > 0
+                  ? `Choose the column for: ${missingRequiredMappings(columnMapping).join(', ')}.`
+                  : 'Upload and map an inflow file to run data quality checks.'}
               </div>
             )}
           </div>
@@ -837,6 +872,7 @@ export function DemandFlow({
                 {/* CSV File Upload Box (if no file loaded yet) */}
                 {wipRawRows.length === 0 ? (
                   <div
+                    data-drop-box
                     onDragOver={(e) => {
                       e.preventDefault();
                       setWipDragActive(true);
