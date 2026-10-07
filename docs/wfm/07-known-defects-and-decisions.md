@@ -880,9 +880,17 @@ Known caveat: on real files the forced staggered layout costs some SLA, so their
 
 ---
 
+### 2026-10-07 (G3 + G5) — Timezone markers converted silently; category spelling variants split one category *(fixed, warning only for G3)*
+
+**Defect.** (G3) `2026-01-05T08:00:00Z`, `...+04:00` and numeric epoch timestamps are converted to the clock of the PC opening the file (08:00Z = 12:00 in Dubai, 03:00 in New York) with no message. (G5) Category names were matched exactly, so `Billing`, `billing ` and `BILLING` became three categories, each seeded with 30 minutes and 20% shrinkage.
+
+**Decision (owner-approved 2026-10-07: G3 Option B).** Reading the digits as written would be wrong by the offset for a UTC export opened on a PC in the operation's timezone, so the conversion is KEPT (parser unchanged, same Dates for every input) and the planner is told: WARNING "Timezone markers converted" with the count, the distinct markers and the PC offset; backlog import shows the count in its preview. Marker detection shares the parser's single ISO regex (`detectTimezoneMarker`). G5: `categoryKey` = trim, collapse spaces, lower-case; every row takes the first spelling in file order; `discoverAndSyncCategories` matches existing categories by key (id and settings kept, spelling follows the file; two existing categories with one key: first wins, other reported); stored backlog cases follow the rename; backlog import and manual entry match by key; WARNING "Category names merged". Different words (`Bill  ing` vs `Billing`) stay separate. Engine untouched; the three built-in samples are unchanged. Suite D67.
+
+**Open (backlog).** IS2-a: warn when a category is still on the seeded 30 min / 20% values (needs an edited / not-edited marker in Settings). A same-key duplicate among stored categories is reported by the pure function but not yet shown in the UI.
+
 ### 2026-10-07 (G2 + H2) — Numbers read from files were silently misread *(fixed)*
 
-**Defect.** Demand volume cells were cleaned with `replace(/[s$,]/g,'')` then `parseFloat`, and the file delimiter was discarded by `parseCSVRaw`: `12,5` in a semicolon file read as 125, `30 min` as 30, `1e9` accepted. Backlog import used `parseFloat`/`parseInt` (`7,5` -> 7, `2h` -> 2) and gave an unknown category an invented 30 minutes and priority 1.
+**Defect.** Demand volume cells were cleaned with `replace(/[\s$,]/g,'')` then `parseFloat`, and the file delimiter was discarded by `parseCSVRaw`: `12,5` in a semicolon file read as 125, `30 min` as 30, `1e9` accepted. Backlog import used `parseFloat`/`parseInt` (`7,5` -> 7, `2h` -> 2) and gave an unknown category an invented 30 minutes and priority 1.
 
 **Decision (owner-approved 2026-10-07: read it when it is clear, block it when it is not).** `utils/number-cell.ts`: comma-delimited file = dot decimal, comma only as strict thousands (`1,234`); semicolon/tab file = convention decided per column (`12,5` proves comma-decimal, `12.5` proves dot-decimal, mixed = blocking error, `1.234`/`1,234` follow the proven convention, otherwise blocking error showing both readings). New ERROR "Unreadable volume" (up to 5 rows, cell stored 0); warnings for fractional volumes (engine rounds each interval, limitation L1) and volumes above 100,000. `utils/wip-import.ts`: unknown category -> fallback category with its own AHT and priority; unreadable/zero/negative/over-100,000 minutes -> category AHT; bad priority -> category priority; blank date -> default arrival; all counted and shown in the import preview; Replace/Append need a tick when more than 20% or more than 50 rows fell back on category. Engine untouched; clean files parse identically (built-in samples checked against the legacy reader). Suite D66.
 

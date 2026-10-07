@@ -5195,6 +5195,113 @@ console.log('\n--- Suite D66: input safety part 1 (numbers read from files) ---'
   assert(parseWipRows(mk(1000, 60), mapW, cats66, def66, [], ',').summary.requiresConfirmation === true, 'D66.7m 60 fallback rows (6%): confirmation required (more than 50 rows)');
 }
 
+// ----------------------------------------------------
+// Suite D67 - Input safety part 2 (G3 + G5). G3 (Option B): timestamps carrying a timezone marker
+// (Z, +hh:mm, epoch) are still converted to the PC clock (parser unchanged) and the planner is told.
+// Assertions compare absolute instants, so they hold on any PC timezone. G5: category names that
+// differ only by letter case / inner spacing are ONE category; settings and ids survive.
+// ----------------------------------------------------
+import { applyCategoryRenames, categoryKey, detectTimezoneMarker, remapCasesToIntervalSpelling, syncCategoriesWithRenames } from '../src/utils/csv-parser';
+
+console.log('\n--- Suite D67: input safety part 2 (timezone markers + category variants) ---');
+{
+  const mapA = { intervalStartCol: 'Start', volumeCol: 'Volume', categoryCol: 'Category', timeCol: 'Time', intervalEndCol: 'End' } as any;
+  const mkRow = (start: string, vol: string, cat = 'General', time = '', end = '') => ({ Start: start, Volume: vol, Category: cat, Time: time, End: end });
+  const dq67 = (ivs: StandardInterval[], cats = DEFAULT_CATEGORIES) =>
+    validateDataQuality({ intervals: ivs, mapping: mapA, categories: cats, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, openingWIP: [] });
+
+  // 1. G3: absolute instants unchanged by the new code (timezone-independent assertions)
+  const abs = (s: string) => parseFlexibleDate(s).getTime();
+  assert(abs('2026-01-05T08:00:00Z') === Date.UTC(2026, 0, 5, 8, 0, 0), 'D67.1a ...T08:00:00Z is the absolute instant 08:00 UTC (conversion kept)');
+  assert(abs('2026-01-05T08:00:00+04:00') === Date.UTC(2026, 0, 5, 4, 0, 0), 'D67.1b ...T08:00:00+04:00 is the absolute instant 04:00 UTC');
+  assert(abs('2026-01-05T08:00:00-05:00') === Date.UTC(2026, 0, 5, 13, 0, 0), 'D67.1c ...T08:00:00-05:00 is the absolute instant 13:00 UTC');
+  assert(abs('2026-01-05T08:00:00.500Z') === Date.UTC(2026, 0, 5, 8, 0, 0), 'D67.1d ...T08:00:00.500Z is the absolute instant 08:00:00 UTC');
+  assert(abs('1767600000') === 1767600000000, 'D67.1e epoch 1767600000 is the absolute instant 1767600000000 ms');
+  const local = parseFlexibleDate('2026-01-05 08:00');
+  assert(local.getFullYear() === 2026 && local.getDate() === 5 && local.getHours() === 8 && local.getMinutes() === 0, 'D67.1f marker-free text is still read as written (local 08:00)');
+
+  // 2. marker detection (same single ISO regex)
+  const det = (s: string, t?: string) => detectTimezoneMarker(s, t);
+  assert(det('2026-01-05T08:00:00Z') === 'Z' && det('2026-01-05T08:00:00+04:00') === '+04:00' && det('2026-01-05T08:00:00-05:00') === '-05:00' && det('2026-01-05T08:00:00.500Z') === 'Z' && det('1767600000') === 'epoch', 'D67.2a detected: Z, +04:00, -05:00, .500Z, epoch');
+  assert(det('2026-01-05 08:00') === null && det('05/01/2026 08:00') === null && det('2026-01-05') === null && det('') === null, 'D67.2b not detected: plain, dd/mm/yyyy, date-only, empty');
+  assert(det('2026-01-05', '08:00:00-05:00') === '-05:00', 'D67.2c marker in a separate time column is detected');
+
+  // 3. count + distinct markers + warning
+  const marked = [
+    mkRow('2026-01-05T08:00:00Z', '10'),
+    mkRow('2026-01-05T08:30:00+04:00', '10'),
+    mkRow('2026-01-05', '10', 'General', '09:00:00-05:00'),
+    mkRow('2026-01-05 10:00', '10'),
+    mkRow('2026-01-05 10:30', '10', 'General', '', '2026-01-05T11:00:00Z'),
+  ];
+  const ivM = mapRawRecordsToIntervals(marked, mapA, 'General', ',');
+  const rowsMarked = ivM.filter((x) => (x.timezoneMarkers?.length ?? 0) > 0).length;
+  const distinct = Array.from(new Set(ivM.flatMap((x) => x.timezoneMarkers ?? []))).sort().join('|');
+  assert(rowsMarked === 4 && distinct === '+04:00|-05:00|Z', 'D67.3a hand count: 4 rows carry markers (incl. split date/time columns and an end column), markers +04:00, -05:00, Z', `${rowsMarked} / ${distinct}`);
+  const tz = dq67(ivM).issues.find((i) => i.field === 'Timezone markers converted');
+  assert(!!tz && tz.severity === 'warning' && /^4 timestamps carried a timezone marker \(\+04:00, -05:00, Z\)/.test(tz.message) && /converted to this PC's timezone \(UTC[+-]\d/.test(tz.message), 'D67.3b one non-blocking warning with count, markers and PC offset', tz?.message);
+  const epochOnly = mapRawRecordsToIntervals([mkRow('1767600000', '5'), mkRow('1767601800', '5')], mapA, 'General', ',');
+  const tzE = dq67(epochOnly).issues.find((i) => i.field === 'Timezone markers converted');
+  assert(!!tzE && tzE.severity === 'warning' && /^2 timestamps were numeric \(Unix epoch\)/.test(tzE.message), 'D67.3c epoch-only file: numeric wording, 2 timestamps', tzE?.message);
+  const clean = mapRawRecordsToIntervals([mkRow('2026-01-05 08:00', '5'), mkRow('2026-01-05 08:30', '5'), mkRow('05/01/2026 09:00', '5')], mapA, 'General', ',');
+  assert(!dq67(clean).issues.some((i) => i.field === 'Timezone markers converted' || i.field === 'Category names merged'), 'D67.3d marker-free file: no timezone and no merge warning');
+
+  // 4. G5: case / spacing variants
+  const catRows = [
+    mkRow('2026-01-05 08:00', '10', 'Billing'),
+    mkRow('2026-01-05 08:30', '4', 'billing '),
+    mkRow('2026-01-05 09:00', '6', 'BILLING'),
+    mkRow('2026-01-05 09:30', '5', 'billing'),
+    mkRow('2026-01-05 10:00', '3', 'Bill  ing'),
+  ];
+  const ivC = mapRawRecordsToIntervals(catRows, mapA, 'General', ',');
+  const catsC = syncCategoriesWithRenames(ivC, [], DEFAULT_SLA).categories;
+  assert(ivC.filter((x) => x.category === 'Billing').length === 4 && ivC.filter((x) => x.category === 'Bill ing').length === 1, 'D67.4a Billing / "billing " / BILLING / billing all read as Billing; "Bill  ing" is its own Bill ing', ivC.map((x) => x.category).join('|'));
+  assert(catsC.map((c) => c.name).join('|') === 'Bill ing|Billing', 'D67.4b two categories: Bill ing and Billing', catsC.map((c) => c.name).join('|'));
+  assert(ivC.reduce((s, x) => s + x.volume, 0) === 28, 'D67.4c total volume equals the hand sum (28)');
+  const mg = dq67(ivC, catsC).issues.find((i) => i.field === 'Category names merged');
+  assert(!!mg && mg.severity === 'warning' && mg.message.includes('"BILLING"') && mg.message.includes('"billing"') && mg.message.includes('→ "Billing" (3 rows)') && !mg.message.includes('Bill ing'), 'D67.4d one warning lists the variants with the row count (3 rows); Bill ing not listed', mg?.message);
+  const many = Array.from({ length: 12 }, (_, g) => [mkRow(`2026-01-0${(g % 9) + 1} 0${Math.floor(g / 9)}:00`, '1', `Cat${g}`), mkRow(`2026-01-0${(g % 9) + 1} 0${Math.floor(g / 9)}:30`, '1', `CAT${g}`)]).flat();
+  const mgMany = dq67(mapRawRecordsToIntervals(many, mapA, 'General', ',')).issues.find((i) => i.field === 'Category names merged');
+  assert(!!mgMany && /; \+2 more\.$/.test(mgMany.message), 'D67.4e 12 merged groups: 10 listed then "+2 more"', mgMany?.message);
+  assert(categoryKey('  Bill   ING ') === 'bill ing' && categoryKey('Billing') === 'billing', 'D67.4f categoryKey: trim, collapse spaces, lower-case');
+
+  // 5. G5: re-sync with existing categories
+  const exist = (name: string, aht: number, id: string) => ({ ...DEFAULT_CATEGORIES[0], id, name, ahtMinutes: aht, shrinkagePct: 0.1 });
+  const onlyLower = mapRawRecordsToIntervals([mkRow('2026-01-05 08:00', '5', 'billing')], mapA, 'General', ',');
+  const r1 = syncCategoriesWithRenames(onlyLower, [exist('BILLING', 12, 'cat_keep')], DEFAULT_SLA);
+  assert(r1.categories.length === 1 && r1.categories[0].id === 'cat_keep' && r1.categories[0].ahtMinutes === 12 && r1.categories[0].shrinkagePct === 0.1 && r1.categories[0].name === 'billing', 'D67.5a existing BILLING + file "billing": one category, id/AHT/shrinkage kept, file spelling used');
+  assert(r1.renames.length === 1 && r1.renames[0].from === 'BILLING' && r1.renames[0].to === 'billing', 'D67.5b rename list BILLING -> billing', JSON.stringify(r1.renames));
+  const ivSame = mapRawRecordsToIntervals([mkRow('2026-01-05 08:00', '5', 'Billing')], mapA, 'General', ',');
+  const r2 = syncCategoriesWithRenames(ivSame, [exist('Billing', 12, 'a'), exist('BILLING', 14, 'b')], DEFAULT_SLA);
+  assert(r2.categories.length === 1 && r2.categories[0].id === 'a' && r2.categories[0].ahtMinutes === 12 && r2.duplicatesDropped.length === 1 && r2.duplicatesDropped[0].dropped === 'BILLING' && r2.duplicatesDropped[0].kept === 'Billing', 'D67.5c two existing categories with one key: first supplies settings, other reported', JSON.stringify(r2.duplicatesDropped));
+  const ivOrder = mapRawRecordsToIntervals([mkRow('2026-01-05 08:00', '5', 'billing'), mkRow('2026-01-05 08:30', '5', 'BILLING')], mapA, 'General', ',');
+  const r3 = syncCategoriesWithRenames(ivOrder, [exist('Billing', 12, 'z')], DEFAULT_SLA);
+  assert(r3.categories.length === 1 && r3.categories[0].id === 'z' && r3.categories[0].ahtMinutes === 12 && r3.categories[0].name === 'billing', 'D67.5d upload order billing then BILLING keeps the existing settings');
+  const wipStored = [{ id: 'W1', category: 'BILLING', priority: 1, arrival: new Date(2026, 0, 5, 8), clockStart: new Date(2026, 0, 5, 8), remainingWorkMinutes: 5 }];
+  const renamed = applyCategoryRenames(wipStored, r1.renames);
+  assert(renamed[0].category === 'billing' && applyCategoryRenames(renamed, r1.renames) === renamed && remapCasesToIntervalSpelling(wipStored, onlyLower)[0].category === 'billing' && remapCasesToIntervalSpelling(renamed, onlyLower) === renamed, 'D67.5e stored backlog cases follow the rename; no change returns the same array');
+  assert(discoverAndSyncCategories(ivOrder, [exist('Billing', 12, 'z')], DEFAULT_SLA)[0].id === 'z', 'D67.5f discoverAndSyncCategories (wrapper) agrees');
+
+  // 6. backlog import matches by key
+  const mapW67 = { caseIdCol: 'ID', categoryCol: 'Cat', dateCol: 'Date', timeCol: '', remainingWorkCol: 'Rem', priorityCol: 'Prio' };
+  const wb = parseWipRows([{ ID: 'X', Cat: 'billing', Rem: '9', Prio: '2', Date: '05/01/2026' }, { ID: 'Y', Cat: ' BILL ING ', Rem: '9', Prio: '2', Date: '05/01/2026' }], mapW67, [{ name: 'Billing', ahtMinutes: 12, priority: 2 }, { name: 'Bill ing', ahtMinutes: 8, priority: 3 }], new Date(2026, 0, 5, 8), [], ',');
+  assert(wb.cases[0].category === 'Billing' && wb.cases[1].category === 'Bill ing' && wb.summary.category.count === 0 && wb.unmatchedCategories.length === 0, 'D67.6a backlog rows "billing" / " BILL ING " match Billing / Bill ing, not counted as fallback');
+  const wz = parseWipRows([{ ID: 'X', Cat: 'Billing', Rem: '9', Prio: '2', Date: '2026-01-05T08:00:00Z' }, { ID: 'Y', Cat: 'Billing', Rem: '9', Prio: '2', Date: '05/01/2026' }], mapW67, [{ name: 'Billing', ahtMinutes: 12, priority: 2 }], new Date(2026, 0, 5, 8), [], ',');
+  assert(wz.summary.timezone.count === 1 && wz.summary.timezone.markers.join() === 'Z' && wz.cases[0].arrival.getTime() === Date.UTC(2026, 0, 5, 8), 'D67.6b backlog: 1 arrival with a marker counted, instant unchanged');
+
+  // 7. built-in samples unchanged
+  for (const st of ['claims', 'support', 'healthcare'] as const) {
+    const ds = buildSampleDataset(st, new Date(2026, 9, 5, 8, 0));
+    const m = { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any;
+    const ivs = mapRawRecordsToIntervals(ds.rows, m);
+    const rawNames = Array.from(new Set(ds.rows.map((r) => String(r['Category']).trim()))).sort();
+    const syncedNames = syncCategoriesWithRenames(ivs, [], DEFAULT_SLA).categories.map((c) => c.name);
+    const rep = validateDataQuality({ intervals: ivs, mapping: m, categories: syncCategoriesWithRenames(ivs, [], DEFAULT_SLA).categories, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, openingWIP: [] });
+    assert(ivs.length === ds.rows.length && ivs.reduce((s, x) => s + x.volume, 0) === ds.rows.reduce((s, r) => s + Number(r['Volume']), 0) && syncedNames.join('|') === rawNames.join('|') && !rep.issues.some((i) => i.field === 'Timezone markers converted' || i.field === 'Category names merged'), `D67.7 built-in sample ${st}: interval count, total volume and category names identical, no new warnings`);
+  }
+}
+
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');

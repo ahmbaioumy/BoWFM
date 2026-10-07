@@ -22,6 +22,7 @@ import {
   discoverAndSyncCategories,
   mapRawRecordsToIntervals,
   parseCSVRaw,
+  remapCasesToIntervalSpelling,
   validateDataQuality,
 } from './utils/csv-parser';
 import { searchOptimalHCAsync } from './utils/hc-search';
@@ -139,6 +140,8 @@ export function App() {
   useEffect(() => {
     if (intervals.length > 0) {
       setCategories((prev) => discoverAndSyncCategories(intervals, prev, sla));
+      // Stored backlog cases follow a category respelling (same step as the category rename).
+      setOpeningWIP((prev) => remapCasesToIntervalSpelling(prev, intervals));
     }
   }, [intervals, sla]);
 
@@ -192,6 +195,7 @@ export function App() {
       const initialIntervals = mapRawRecordsToIntervals(rows, autoMapping, 'General', delimiter);
       if (initialIntervals.length > 0) {
         setCategories((prev) => discoverAndSyncCategories(initialIntervals, prev, sla));
+        setOpeningWIP((prev) => remapCasesToIntervalSpelling(prev, initialIntervals));
       }
     }
 
@@ -227,6 +231,7 @@ export function App() {
 
     const sampleIntervals = mapRawRecordsToIntervals(rows, mapping, 'General', ',');
     setCategories((prev) => discoverAndSyncCategories(sampleIntervals, prev, sla));
+    setOpeningWIP((prev) => remapCasesToIntervalSpelling(prev, sampleIntervals));
     setCurrentTab('dq');
   }
 

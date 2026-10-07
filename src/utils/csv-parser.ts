@@ -385,6 +385,34 @@ function validateAndCreateDate(
   return d;
 }
 
+/** The single ISO-8601 pattern shared by the parser and the timezone-marker detector. */
+const ISO_DATE_RE =
+  /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:(Z)|([+-]\d{2}(?::?\d{2})?))?)?$/i;
+
+/**
+ * Reports whether a timestamp text carries a timezone marker, using the same rules as
+ * parseFlexibleDate: 'Z', a numeric offset as written ('+04:00'), or 'epoch' for a numeric
+ * Unix timestamp. Returns null when the text is read as written. Pure; parsing is unchanged.
+ */
+export function detectTimezoneMarker(dateStr: string | undefined, timeStr?: string): string | null {
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  const trimmedDate = dateStr.trim();
+  if (!trimmedDate) return null;
+  const hasTime = !!(timeStr && typeof timeStr === 'string' && timeStr.trim());
+  if (/^\d{9,14}$/.test(trimmedDate) && !hasTime) return 'epoch';
+  const fullStr = hasTime ? `${trimmedDate} ${(timeStr as string).trim()}` : trimmedDate;
+  const m = fullStr.match(ISO_DATE_RE);
+  if (!m) return null;
+  if (m[7]) return 'Z';
+  if (m[8]) return m[8];
+  return null;
+}
+
+/** Name comparison key: trimmed, inner whitespace collapsed, lower-case. */
+export function categoryKey(name: string): string {
+  return String(name ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
 /**
  * Robust and strict date/time parser that handles:
  * - Separate date & time strings (e.g. date: "01/10/2026", time: "00:30")
@@ -413,9 +441,7 @@ export function parseFlexibleDate(dateStr: string, timeStr?: string): Date {
   }
 
   // 2. Strict ISO 8601 regex pattern (e.g. 2026-10-01T00:30:00.000Z or 2026-10-01 00:30:00)
-  const isoMatch = fullStr.match(
-    /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:(Z)|([+-]\d{2}(?::?\d{2})?))?)?$/i
-  );
+  const isoMatch = fullStr.match(ISO_DATE_RE);
   if (isoMatch) {
     const y = parseInt(isoMatch[1], 10);
     const mo = parseInt(isoMatch[2], 10);
@@ -608,10 +634,13 @@ export function mapRawRecordsToIntervals(
     const volStr = row[mapping.volumeCol];
     const catStr =
       mapping.categoryCol && row[mapping.categoryCol]
-        ? row[mapping.categoryCol].trim()
+        ? row[mapping.categoryCol].trim().replace(/\s+/g, ' ')
         : defaultCategoryName;
 
     const startDate = parseFlexibleDate(dateStr, timeStr);
+    const markers: string[] = [];
+    const startMarker = detectTimezoneMarker(dateStr, timeStr);
+    if (startMarker) markers.push(startMarker);
 
     // Parse volume strictly: clear values are read, unclear ones are blocked (stored as 0).
     let volume = 0;
@@ -635,6 +664,8 @@ export function mapRawRecordsToIntervals(
     let endDate: Date;
     if (mapping.intervalEndCol && row[mapping.intervalEndCol]) {
       endDate = parseFlexibleDate(row[mapping.intervalEndCol]);
+      const endMarker = detectTimezoneMarker(row[mapping.intervalEndCol]);
+      if (endMarker && !markers.includes(endMarker)) markers.push(endMarker);
     } else {
       endDate = isNaN(startDate.getTime())
         ? new Date(NaN)
@@ -648,7 +679,33 @@ export function mapRawRecordsToIntervals(
       volume,
       category: catStr || defaultCategoryName,
       ...(volumeParsingIssue ? { volumeParsingIssue } : {}),
+      ...(markers.length > 0 ? { timezoneMarkers: markers } : {}),
     });
+  }
+
+  // Category spellings that differ only by letter case or spacing become ONE category: every
+  // row takes the first spelling of its key in file order. The file alone decides (no dependency
+  // on stored categories). Rows whose spelling changed remember the original for the DQ note.
+  // Pre-sort order equals file order here.
+  const firstSpelling = new Map<string, string>();
+  const spellingsByKey = new Map<string, Set<string>>();
+  for (const it of intervals) {
+    const key = categoryKey(it.category);
+    if (!firstSpelling.has(key)) firstSpelling.set(key, it.category);
+    let set = spellingsByKey.get(key);
+    if (!set) {
+      set = new Set<string>();
+      spellingsByKey.set(key, set);
+    }
+    set.add(it.category);
+  }
+  for (const it of intervals) {
+    const key = categoryKey(it.category);
+    const canonical = firstSpelling.get(key) as string;
+    if ((spellingsByKey.get(key) as Set<string>).size > 1 && it.category !== canonical) {
+      it.categoryVariant = it.category;
+    }
+    it.category = canonical;
   }
 
   // Sort chronologically (placing any invalid dates at end)
@@ -677,15 +734,36 @@ export function discoverAndSyncCategories(
   existingCategories: CategoryConfig[],
   globalSLA: SLAPolicyConfig
 ): CategoryConfig[] {
-  const uniqueSegNames = new Set<string>();
+  return syncCategoriesWithRenames(intervals, existingCategories, globalSLA).categories;
+}
+
+export interface CategorySyncResult {
+  categories: CategoryConfig[];
+  /** existing category whose spelling changed to the spelling now used by the intervals */
+  renames: Array<{ from: string; to: string }>;
+  /** existing categories with the same key as an earlier one: dropped (the first supplies the settings) */
+  duplicatesDropped: Array<{ kept: string; dropped: string }>;
+}
+
+export function syncCategoriesWithRenames(
+  intervals: StandardInterval[],
+  existingCategories: CategoryConfig[],
+  globalSLA: SLAPolicyConfig
+): CategorySyncResult {
+  // key -> spelling used by the intervals (first in order)
+  const uniqueByKey = new Map<string, string>();
   for (const it of intervals) {
     if (it.category && it.category.trim()) {
-      uniqueSegNames.add(it.category.trim());
+      const key = categoryKey(it.category);
+      if (!uniqueByKey.has(key)) uniqueByKey.set(key, it.category.trim().replace(/\s+/g, ' '));
     }
   }
+  const uniqueSegNames = new Set<string>(uniqueByKey.values());
+  const renames: Array<{ from: string; to: string }> = [];
+  const duplicatesDropped: Array<{ kept: string; dropped: string }> = [];
 
   if (uniqueSegNames.size === 0) {
-    return existingCategories.length > 0 ? existingCategories : [
+    const kept = existingCategories.length > 0 ? existingCategories : [
       {
         id: 'cat_default',
         name: 'General',
@@ -696,17 +774,29 @@ export function discoverAndSyncCategories(
         primaryWindowMinutes: convertDurationToMinutes(globalSLA.primaryWindow, globalSLA.primaryUnit),
       }
     ];
+    return { categories: kept, renames, duplicatesDropped };
   }
 
+  // Existing categories are matched by key; when two share a key the first in array order
+  // supplies the settings and the other is reported (and not carried over).
   const existingMap = new Map<string, CategoryConfig>();
-  existingCategories.forEach((c) => existingMap.set(c.name, c));
+  existingCategories.forEach((c) => {
+    const key = categoryKey(c.name);
+    const first = existingMap.get(key);
+    if (!first) {
+      existingMap.set(key, c);
+    } else if (uniqueByKey.has(key)) {
+      duplicatesDropped.push({ kept: first.name, dropped: c.name });
+    }
+  });
 
   const sortedNames = Array.from(uniqueSegNames).sort();
   const defaultPrimaryWinMin = convertDurationToMinutes(globalSLA.primaryWindow, globalSLA.primaryUnit);
 
   const synced: CategoryConfig[] = sortedNames.map((name, index) => {
-    const existing = existingMap.get(name);
+    const existing = existingMap.get(categoryKey(name));
     if (existing) {
+      if (existing.name !== name) renames.push({ from: existing.name, to: name });
       return {
         ...existing,
         name,
@@ -729,7 +819,55 @@ export function discoverAndSyncCategories(
     };
   });
 
-  return synced;
+  // A dropped duplicate's old spelling also maps to the surviving category's new spelling.
+  for (const d of duplicatesDropped) {
+    const target = synced.find((c) => categoryKey(c.name) === categoryKey(d.dropped));
+    if (target && target.name !== d.dropped && !renames.some((r) => r.from === d.dropped)) {
+      renames.push({ from: d.dropped, to: target.name });
+    }
+  }
+
+  return { categories: synced, renames, duplicatesDropped };
+}
+
+/**
+ * Stored backlog cases take the category spelling now used by the demand intervals (matched by
+ * key), i.e. the same renames discoverAndSyncCategories applies to the categories themselves.
+ * Returns the same array when nothing changes (safe to feed to a state setter).
+ */
+export function remapCasesToIntervalSpelling<T extends { category: string }>(
+  cases: T[],
+  intervals: StandardInterval[]
+): T[] {
+  if (cases.length === 0 || intervals.length === 0) return cases;
+  const spelling = new Map<string, string>();
+  for (const it of intervals) {
+    const key = categoryKey(it.category);
+    if (key && !spelling.has(key)) spelling.set(key, it.category.trim().replace(/\s+/g, ' '));
+  }
+  return applyCategoryRenames(
+    cases,
+    Array.from(spelling.values()).map((to) => ({ from: to, to }))
+  );
+}
+
+/** Applies a rename list to stored backlog cases (matched by key). Returns the same array when nothing changes. */
+export function applyCategoryRenames<T extends { category: string }>(
+  cases: T[],
+  renames: Array<{ from: string; to: string }>
+): T[] {
+  if (renames.length === 0) return cases;
+  const map = new Map(renames.map((r) => [categoryKey(r.from), r.to]));
+  let changed = false;
+  const out = cases.map((c) => {
+    const to = map.get(categoryKey(c.category));
+    if (to !== undefined && to !== c.category) {
+      changed = true;
+      return { ...c, category: to };
+    }
+    return c;
+  });
+  return changed ? out : cases;
 }
 
 export function validateDataQuality(params: {
@@ -858,6 +996,68 @@ export function validateDataQuality(params: {
           : "If SLA clock starts on arrival, this creates queue spikes at opening that can inflate required headcount. Recommended fixes: (1) Enable 24x7 operations or 6-day work weeks if work is handled continuously, or (2) Set Clock Start Policy to 'Next Open Business Window'."
       }`,
     });
+  }
+
+  // Timezone markers (Z / +hh:mm / epoch): converted to this PC's timezone, as always. Warn only.
+  {
+    let markedRows = 0;
+    const markerSet = new Set<string>();
+    let pcOffsetMin: number | null = null;
+    for (const it of intervals) {
+      if (it.timezoneMarkers && it.timezoneMarkers.length > 0) {
+        markedRows++;
+        it.timezoneMarkers.forEach((m) => markerSet.add(m));
+        if (pcOffsetMin === null && !isNaN(it.start.getTime())) pcOffsetMin = -it.start.getTimezoneOffset();
+      }
+    }
+    if (markedRows > 0) {
+      const off = pcOffsetMin ?? 0;
+      const sign = off < 0 ? '-' : '+';
+      const absOff = Math.abs(off);
+      const pcZone = `UTC${sign}${Math.floor(absOff / 60)}${absOff % 60 ? ':' + String(absOff % 60).padStart(2, '0') : ''}`;
+      const hasEpoch = markerSet.has('epoch');
+      const zoneMarkers = Array.from(markerSet).filter((m) => m !== 'epoch').sort();
+      const rowsText = `${markedRows.toLocaleString()} timestamp${markedRows === 1 ? '' : 's'}`;
+      let message: string;
+      if (zoneMarkers.length === 0) {
+        message = `${rowsText} ${markedRows === 1 ? 'was a' : 'were'} numeric (Unix epoch) value${markedRows === 1 ? '' : 's'}. ${markedRows === 1 ? 'It was' : 'They were'} converted to this PC's timezone (${pcZone}). Open the file on a PC set to the operation's timezone, or write the times as plain dates and times to have them read as written.`;
+      } else {
+        message = `${rowsText} carried a timezone marker (${zoneMarkers.join(', ')}${hasEpoch ? ', plus numeric epoch values' : ''}). ${markedRows === 1 ? 'It was' : 'They were'} converted to this PC's timezone (${pcZone}). Open the file on a PC set to the operation's timezone, or remove the markers to have times read as written.`;
+      }
+      issues.push({ severity: 'warning', field: 'Timezone markers converted', message });
+    }
+  }
+
+  // Category spellings merged (letter case / spacing only).
+  {
+    const groups = new Map<string, { canonical: string; variants: Map<string, number> }>();
+    for (const it of intervals) {
+      if (!it.categoryVariant) continue;
+      const key = categoryKey(it.category);
+      let g = groups.get(key);
+      if (!g) {
+        g = { canonical: it.category, variants: new Map<string, number>() };
+        groups.set(key, g);
+      }
+      g.variants.set(it.categoryVariant, (g.variants.get(it.categoryVariant) ?? 0) + 1);
+    }
+    if (groups.size > 0) {
+      const lines = Array.from(groups.keys())
+        .sort()
+        .map((k) => {
+          const g = groups.get(k) as { canonical: string; variants: Map<string, number> };
+          const names = Array.from(g.variants.keys()).sort().map((v) => `"${v}"`).join(', ');
+          const rowsMerged = Array.from(g.variants.values()).reduce((a, b) => a + b, 0);
+          return `${names} → "${g.canonical}" (${rowsMerged.toLocaleString()} row${rowsMerged === 1 ? '' : 's'})`;
+        });
+      const shown = lines.slice(0, 10).join('; ');
+      issues.push({
+        severity: 'warning',
+        field: 'Category names merged',
+        message: `Category names that differ only by letter case or spacing were merged into one category: ${shown}${lines.length > 10 ? `; +${lines.length - 10} more` : ''}.`,
+        details: 'The first spelling in the file is used. Names that differ in the words themselves stay separate categories.',
+      });
+    }
   }
 
   const unreadableVolumes = volumeParsingIssues.filter((v) => /^(unreadable|ambiguous|mixed):/.test(v.message));

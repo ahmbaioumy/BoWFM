@@ -13,7 +13,7 @@ import {
   OpeningWIPCase,
   StandardInterval,
 } from '../types/wfm';
-import { generateNextWIPId, parseCSVRaw, parseFlexibleDate } from '../utils/csv-parser';
+import { categoryKey, generateNextWIPId, parseCSVRaw, parseFlexibleDate } from '../utils/csv-parser';
 import { parseWipRows } from '../utils/wip-import';
 import { formatDateTime24 } from '../utils/calendar';
 import { CalendarConfigPanel } from './CalendarConfigPanel';
@@ -226,8 +226,9 @@ export function DemandFlow({
   }
 
   function handleAddWipCase() {
-    const catName = newWipCategory || (categories.length > 0 ? categories[0].name : 'General');
-    const selectedCat = categories.find((c) => c.name === catName);
+    const typedCatName = newWipCategory || (categories.length > 0 ? categories[0].name : 'General');
+    const selectedCat = categories.find((c) => categoryKey(c.name) === categoryKey(typedCatName));
+    const catName = selectedCat ? selectedCat.name : typedCatName;
     const aht = newWipRemAht > 0 ? newWipRemAht : selectedCat?.ahtMinutes || 30;
 
     let arrivalDate: Date;
@@ -1056,6 +1057,14 @@ export function DemandFlow({
                                 {kind.examples.map((ex) => `${ex.row} "${ex.text}"`).join(', ')}
                               </div>
                             ) : null
+                          )}
+                          {parsedResult.summary.timezone.count > 0 && (
+                            <div className="text-amber-900">
+                              {parsedResult.summary.timezone.count.toLocaleString()} arrival date
+                              {parsedResult.summary.timezone.count === 1 ? '' : 's'} carried a timezone marker (
+                              {parsedResult.summary.timezone.markers.slice().sort().join(', ')}) and{' '}
+                              {parsedResult.summary.timezone.count === 1 ? 'was' : 'were'} converted to this PC&apos;s timezone.
+                            </div>
                           )}
                           {parsedResult.summary.requiresConfirmation && (
                             <label className="flex items-center gap-2 pt-1 font-semibold text-rose-800">

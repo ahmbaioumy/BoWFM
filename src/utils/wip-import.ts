@@ -8,7 +8,7 @@
  * Pure: no clock read. The default arrival is passed in by the caller.
  */
 import type { OpeningWIPCase } from '../types/wfm';
-import { generateNextWIPId, parseFlexibleDate } from './csv-parser';
+import { categoryKey, detectTimezoneMarker, generateNextWIPId, parseFlexibleDate } from './csv-parser';
 import { readNumberColumn } from './number-cell';
 
 export const WIP_MAX_REMAINING_MINUTES = 100000;
@@ -57,6 +57,8 @@ export interface WipImportSummary {
   date: WipFallbackKind;
   /** category has no handling time: 30 minutes assumed */
   noHandlingTime: WipFallbackKind;
+  /** arrival dates that carried a timezone marker (or were epoch numbers): converted to this PC's timezone */
+  timezone: { count: number; markers: string[] };
   /** true when the planner must tick a confirmation before appending */
   requiresConfirmation: boolean;
 }
@@ -97,6 +99,7 @@ export function parseWipRows(
     priority: newKind(),
     date: newKind(),
     noHandlingTime: newKind(),
+    timezone: { count: 0, markers: [] },
     requiresConfirmation: false,
   };
   const cases: OpeningWIPCase[] = [];
@@ -116,7 +119,8 @@ export function parseWipRows(
 
     // Category
     const rawCat = mapping.categoryCol ? (row[mapping.categoryCol] || '').trim() : '';
-    const matchedCat = categories.find((c) => c.name.toLowerCase() === rawCat.toLowerCase());
+    const rawKey = categoryKey(rawCat);
+    const matchedCat = categories.find((c) => categoryKey(c.name) === rawKey);
     let categoryName: string;
     let cat: WipCategoryRef;
     if (!matchedCat) {
@@ -172,6 +176,11 @@ export function parseWipRows(
     let arrivalDate: Date;
     if (dateStr) {
       const parsed = parseFlexibleDate(dateStr, timeStr);
+      const marker = detectTimezoneMarker(dateStr, timeStr);
+      if (marker && !isNaN(parsed.getTime())) {
+        summary.timezone.count++;
+        if (!summary.timezone.markers.includes(marker)) summary.timezone.markers.push(marker);
+      }
       if (isNaN(parsed.getTime())) {
         invalidDates++;
         return;
