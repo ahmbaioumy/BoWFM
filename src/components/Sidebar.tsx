@@ -27,6 +27,8 @@ interface SidebarProps {
   onExportParams: () => void;
   onImportParams: (e: React.ChangeEvent<HTMLInputElement>) => void;
   hasResults: boolean;
+  /** Settings or data changed since the results were produced. */
+  resultsOutdated?: boolean;
   dqPassed: boolean;
   paramsPanelOpen: boolean;
   onToggleParamsPanel: () => void;
@@ -73,6 +75,7 @@ export function Sidebar({
   onExportParams,
   onImportParams,
   hasResults,
+  resultsOutdated = false,
   dqPassed,
   paramsPanelOpen,
   onToggleParamsPanel,
@@ -83,7 +86,7 @@ export function Sidebar({
     { id: 'demand', label: '1. Demand & Inflow', icon: Database, badge: dqPassed ? 'DQ OK' : null },
     { id: 'config', label: '2. Labor & Config', icon: Sliders, badge: null },
     { id: 'run', label: '3. Run Sizing', icon: PlayCircle, badge: null },
-    { id: 'results', label: '4. Results & Audit', icon: BarChart3, badge: hasResults ? 'Ready' : null },
+    { id: 'results', label: '4. Results & Audit', icon: BarChart3, badge: hasResults ? (resultsOutdated ? 'Outdated' : 'Ready') : null },
     { id: 'sensitivity', label: '5. Sensitivity', icon: TrendingUp, badge: null },
   ] as const;
 
@@ -139,8 +142,11 @@ export function Sidebar({
                         className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase tracking-tight ${
                           f.badge === 'DQ OK' || f.badge === 'Ready'
                             ? 'bg-emerald-500/20 text-emerald-300'
-                            : 'bg-slate-700 text-slate-300'
+                            : f.badge === 'Outdated'
+                              ? 'bg-amber-500/20 text-amber-300'
+                              : 'bg-slate-700 text-slate-300'
                         }`}
+                        title={f.badge === 'Outdated' ? 'Settings or data changed since this run — run again' : undefined}
                       >
                         {f.badge}
                       </span>

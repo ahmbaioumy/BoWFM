@@ -849,3 +849,154 @@ Open after G1:
 - G1-e (minor): wait time for attainable old backlog is measured from the plan start; label it. Case CSV still shows FAIL for a late flagged case next to the new column; per-case wait is still listed for flagged cases.
 - G1-f (minor): data-quality check swallows an engine error silently when counting overdue backlog on a broken calendar; hand-rolled day arithmetic in `csv-parser.ts` (message and block decision only, DST-safe).
 - Correction to my brief: a Friday 15:00 backlog case with a 6-business-hour SLA is NOT overdue on Monday under the default 08:00-18:00 calendar (due Monday 11:00); the engine handled it correctly.
+
+---
+
+# FIX G1-a — tighter stray-date rule — BUILT, awaiting owner approval (2026-10-06)
+
+Branch `fix/g1a-stray-date` (stacked on `fix/g1-horizon`), commit `64c3acd` (checkpoint `555a10c`). Weekly cap raised by the owner to 35%.
+
+Rule: an isolated date (no more than 1% of rows, 1 to 20 rows) separated from the rest of the data by more than 7 empty calendar days blocks the run (was more than 30). Closes G1-a.
+
+| Check | Result |
+|---|---|
+| Builder gates | red-first (5 new checks failed on the old rule); lint clean; `npm test` 174 + 652 + 60 + 164 = 1,050; sample audit 24/24 identical; artifact fresh. Two existing expectations changed, both stating the old 30-day rule (D62.42, D62.44) — necessary consequence, accepted. |
+| Supervisor diff read | one condition (`+32` days to `+9`), message text, and a guard keeping the separate long-gap warning at more than 30 days. Nothing else. |
+| Tester (own script + browser) | **pass** 10/10: stray row 10 days after, 9 days before, and a month typo all block with the date, row count, range and empty-day count; exactly 7 empty days does not block, 8 does; consecutive weeks, a 9-day closure with data both sides, and small two-day files do not block; three samples unaffected; blocking message and disabled Run seen on screen; claims still 31 / 40. |
+
+Residual (minor, by design): a stray block of more than 20 rows, or a stray row within 7 empty days, still only warns (probe: 30 stray rows 10 days out stretch 5 working days to 11).
+
+Usage: weekly meter 30% after the build.
+
+---
+
+# FIX F2 — 24x7 parked work resumes when capacity exists — BUILT, awaiting owner approval (2026-10-06)
+
+Branch `fix/f2-24x7-resume` (from `main`), commit `de1a7c3` (checkpoint `819d592`). Closes DES-8. Engine change: two `is24x7` midnight-resume branches in `des-engine.ts` (`CasePark`, dead copy in `DayClose`) replaced by the same `nextOpen` call every other calendar uses. Hand-rolled date maths removed with them.
+
+| Check | Result |
+|---|---|
+| Plan challenger | pass: no livelock (a budget park uses the whole remaining budget; agents with no budget are skipped) |
+| Builder gates | red-first: 5 new checks failed on the old engine; lint clean; `npm test` 174 + 671 + 60 + 164 = 1,069; sample audit 24/24 identical; artifact fresh. One existing expectation re-pinned: D43.14 digest (24x7, budget parks; SLA 100% before and after, parks 12 to 9). No business-hours or trusted-source value changed. |
+| Supervisor diff read | engine diff is exactly the two branch removals |
+| Tester (own tally + browser) | **pass**: avoidable waits 4 to 0 (one shift) and 5 to 0 (staggered, 4,132 avoidable minutes to 0); CASE-000002 now resumes Mon 08:00 on the next cohort, was Tue 00:00; legitimate waits kept (single agent exhausted resumes at the midnight reset); 0 over-budget, 0 out-of-shift, 0 overlap, work conserved 3,840 = 3,840; SLA now non-decreasing in headcount (16 agents 100%, was 98%); deterministic; re-adding the branch fails D64.1, .2, .5, .6, .11 and D43.14; page loads clean, claims 31 / 40. |
+
+Not run: final challenger (meter 32-33%, cap 35%). Builder skipped test (i) (zero budget everywhere cannot be built: adherence is clamped at 0.1); covered by the single-agent exhausted case.
+
+Unchanged and still open (known HC-14, fix F1/G8): the claims sample switched to 24x7 with Min-coverage ON (the default) returns "search infeasible" at the 500 cap (coverage: 0 agents on shift in an open interval). This is the documented single-shift-cannot-cover-24-hours limit, present before F2; F2 does not address it.
+
+---
+
+# FIX F3 — statistics describe the adopted roster — BUILT, awaiting owner approval (2026-10-07)
+
+Branch `fix/f3-post-polish-stats` (from `main`), commit `c062491` (checkpoint `630b697`). Closes HC-15. Weekly cap raised by the owner to 40% (assumed +5 step). Only runs with shift placement ON (default OFF) and an adopted polished roster are affected.
+
+| Check | Result |
+|---|---|
+| Plan challenger | fail on test design, plan revised (headline-vs-block agreement redefined; full list of fields that may change) |
+| Builder gates | red-first on 3 pooled seeds and 1 siloed fixture; lint clean; `npm test` 174 + 722 + 60 + 164 = 1,120; sample audit 24/24 identical; artifact fresh; no existing expectation changed |
+| Supervisor diff read | one key helper, one lookup helper, parallel edits in sync and async; no extra simulations |
+| Tester | **pass**: seeds 42 / 7 / 99: confidence block and history row for N now 100, CI [100, 100], equal to an independent evaluation of the adopted roster (were 94.3, [94.1, 94.5]); recommended N, adopted roster and polish status unchanged; headline equals the representative run; sync = async; three samples 31/40, 27/34, 31/39; removing the assignment fails 12 checks, removing it in async only fails the 4 sync = async checks; page runs clean with placement ON |
+
+Before / after on the polish fixture (seed 42, N = 9): block 94.3 [94.1, 94.5] to 100 [100, 100]; history row wait time 29.9 to 5.9 min; headline wait time 7.7 to 5.9 min; N-1 evidence wait time 14.8 to 14.2 min. Siloed fixture (N = 19): block 99.9 [99.9, 100] to 99.5 [99.5, 99.6], headline 99.6 to 99.5 — the old block was optimistic there.
+
+Open (not F3):
+- F3-a (minor, to investigate): with placement OFF the search reports 94.3 at N = 9 on this fixture while a direct evaluation with no roster gives 100 — same before F3. Probable cause: the default pre-polish roster is the min-coverage repair roster, not a uniform one (related to P2-A2 / F1). Not confirmed.
+- Final challenger not run (meter 34-35%). Browser evidence is weak for this fix (claims sample shows 100 to 100); the engine-level checks carry the proof.
+
+---
+
+# Input safety part 1 (G2 + H2) — verification, 2026-10-07
+
+- Build: commit on `fix/input-safety-1`; `npm test` 1,161 green (174 + 763 + 60 + 164), lint clean, artifact fresh. New suite D66 (41 checks).
+- Tester: PASS. Semicolon file `12,5 / 7,25 / 11,5` totals 31.25 (old reader 1,055). Quoted `1,234` in comma file still 1234. `2h`, `abc`, `12..5`, `1e9` block the run with the row named. Ambiguous-only column blocked with both readings; mixed formats blocked. Backlog fallback uses the category AHT and priority (20 / 3, not 30 / 1). Samples identical to the old reader (300/1380, 280/1572, 600/2190); browser gross 40 / 34 / 39, zero console errors. Tick-box gate works for Append and Replace. Mutation (`parseFloat`) fails 10 D66 checks.
+- Auditor: PASS, no blocker or major. Scope clean, engine files untouched.
+- Deviations accepted: tick-box also gates Replace; whitespace-only volume cell treated as blank; message prefixes used to classify issues; date-default count only when a date column is mapped.
+- Deviation needing owner yes (IS1-a): backlog remaining minutes of exactly 0 now fall back to the category AHT (plan said keep zero). Supervisor brief error, not builder error.
+- Open minors: IS1-b leading plus sign (`+5`) and trailing or doubled currency symbol now blocked (were read before; fails loudly). IS1-c `project_context.md:201` still says 14 data-quality rules (PRD says 24). IS1-d `PRD.md:1151` suite list stops at D64. IS1-e docs/wfm/07 entry lost a backslash in a quoted pattern. IS1-f preview label for blank remaining minutes does not match what is counted; unmatched-category fact shown twice. IS1-g fractional warning does not show an example of the rounding. IS1-h no test for `+5`, `.5`, `5.`, zero-numeric column. IS1-i tester saw 0 as typed / 10 adjusted on a file with 5 unknown categories; auditor says the count is per row and other fallbacks explain it; per-reason lines not re-read.
+- Final challenger not run (budget).
+
+---
+
+# Input safety part 2 (G3 option B + G5) — verification, 2026-10-07
+
+- Owner chose G3 option B: keep conversion to the PC timezone, add a warning.
+- Build: commit on `fix/input-safety-2`; `npm test` 1,191 green (174 + 793 + 60 + 164), lint clean, artifact fresh. New suite D67 (30 checks). PRD v1.19.0, data-quality rules 26.
+- Tester: PASS, 13 of 13 checks run. Date reader returns identical instants before and after for 9 inputs under Dubai, UTC and New York. Marker warning shows count, markers and PC offset; not blocking. `Billing` / `billing ` / `BILLING` → one category, volume equals hand sum (21); variant file and clean file give identical intervals and categories (old build: 4 categories). Re-sync keeps id, AHT 12, shrinkage 10% and renames the stored backlog case. Samples unchanged (300/1380, 280/1572, 600/2190; gross 40 / 34 / 39), zero console errors. Mutations: no lower-casing → 12+ D67 failures; marker detection off → 6 D67 failures. Scope: exactly the 10 allowed files, test file additions only.
+- Auditor and final challenger NOT run (meter 39% of 40% cap).
+- Builder deviations (accepted): backlog rename derived from interval spelling by key, not from the returned rename list (same result, avoids stale state on reset + upload); tests written after code (no red run) — covered by tester mutations; two optional fields added to `StandardInterval` in `types/wfm.ts`.
+- Open minors: IS2-a starting-values note (needs an edited marker in Settings). IS2-b two existing categories with the same key: the dropped one is reported by the function but not shown on screen. IS2-c spacing-only rename (`Bill  ing` → `Bill ing`) gets no note. IS2-d row count in the merge note counts only rows whose spelling changed. IS2-e re-upload with backlog loaded cannot be reached in the UI (second upload forces a full reset, same as before) so the rename path is proven at engine level only. IS2-f settings-file import is not remapped until the next sync.
+- Auditor (run after the note above): PASS, no blocker or major. Date reader refactor is text-identical apart from the shared pattern; backlog rename returns the same list when nothing changes (no loop); every interval category has a matching category; new optional interval fields are not read outside `csv-parser.ts`. Minors: IS2-g marker count includes rows whose date is invalid on the demand path; IS2-h epoch detection differs from the reader for a whitespace-only time cell (warning text only).
+
+---
+
+# Input safety part 3, Build A (G4 + H6 reader rules) — verification, 2026-10-07
+
+- Plan failed its first challenge (bad file on a loaded session would wipe it; short rows blocked; empty file unreachable; encoding; state location) → redesigned: files with an error are refused at pick time, session untouched. Split into Build A (this) and Build B (upload traps + naming the unmapped column; NOT built yet).
+- Build: first builder cut off by a login error after finishing the code; second builder verified and wrote the docs. New suite D68 (43 checks after rework). PRD v1.20.0, data-quality rules 27.
+- Tester: PASS. Each rule checked with own fixtures in the engine and the browser: binary / NUL, empty, header-only, unclosed quote (row named), extra cell (row named), title row → refused with a plain message, loaded sample untouched, no reset prompt. Short row and duplicate header accepted with a warning. Pipe file with comma decimals totals 17 (hand sum). Samples and clean comma / semicolon / tab files identical to the old reader; gross 40 / 34 / 39; zero console errors. Backlog binary file refused, good file imports afterwards. Mutations: unclosed-quote check off → 3 D68 failures; extra-cell check off → 2.
+- Auditor: FAIL on one major, fixed in rework round 1: the binary check refused any CSV whose first two characters are `PK` (e.g. header `PK,Start,Volume`). Now matches the real zip signature only; two new checks (D68.14a/b). Doc rule counts aligned at 27 in three places. After rework: sizing suite 836 / 0, lint clean, artifact fresh. Full `npm test` last run before the rework: 1,232 green. Auditor not re-run on the two-line fix (budget).
+- Open minors: IS3-a balanced mid-cell quotes still merge cells (owner decision). IS3-b a footer line such as `Total,5000` is accepted with a warning but its 5,000 is counted until the invalid-date check blocks the run; the date message numbers data rows, not file rows. IS3-c a title row containing a comma is refused as "more columns than the header" (hint mentions the title row). IS3-d a title row containing only a pipe now selects pipe as delimiter (still refused). IS3-e Latin-1 files only warn. IS3-f Build B outstanding: same file picked twice, drop outside the box, out-of-order reads, unmapped column not named.
+
+---
+
+# Input safety part 3, Build B (UI-38, UI-39) — verification, 2026-10-07
+
+- Build: commit on `fix/input-safety-3b`; `npm test` 1,239 green (174 + 841 + 60 + 164), lint clean, artifact fresh. Suite D69 (5 checks). PRD patch version bump.
+- Tester: PASS, no blocker or major. Same file re-picked after editing on disk → new total shown (40 → 200). Drop and dragover on the page body are cancelled, data intact; drop on the drop box still loads. Pick A then B with the prompt open → B loads. Refused pick closes the prompt, session intact. Data Quality tab reads "Choose the column for: Volume." when unmapped. Samples gross 40 / 34 / 39, zero console errors. Scope: 8 allowed files; test diff = additions plus one edited import line.
+- Auditor and final challenger not run (Tier 2 UI change, budget).
+- Open minors: IS3B-a backlog path only partly browser-tested (input clears, preview shows; re-read, sequence guard and drop guard on the backlog box read in code only). IS3B-b PRD has no prose on the upload behaviour (version, inventory and D69 only). IS3B-c drop-box comparison with the old build not run.
+
+---
+
+# Stale results after data edits (G6 + H9: UI-1, UI-49, UI-58) — verification, 2026-10-07
+
+- Plan challenge: PASS with majors, accepted (no header chip exists → new "Outdated" marker in the navigation; mapping not stored, interval fingerprint covers it; fingerprints by category name, captured at run start).
+- Build: commit on `fix/stale-results`; `npm test` 1,256 green (174 + 858 + 60 + 164), lint clean, artifact fresh. Suite D70 (17 checks). PRD v1.20.2.
+- Tester: PASS, no blocker or major, zero console errors. Samples 31/40, 27/34, 31/39 with no banner after a run. Backlog case added → banner "Data changed since this run (opening backlog)…" and navigation OUTDATED; same case deleted → cleared. Backlog import → banner; re-run → cleared. Volume mapping switched → banner (demand data); switched back → cleared. Settings change → existing banner; settings + backlog → both named. Tab visits → no false flag. Fingerprints: equal for separately built equal data, independent of ids, 100,000 intervals in 146 ms. Mutations: volume ignored → 2 D70 failures; diff always empty → 11.
+- Sensitivity builds its own scenarios from live data; Agent Analytics reads run output only — neither mixes old results with new data (SR-b closed).
+- Auditor and final challenger not run (budget; owner asked to stop after this fix).
+- Open minors: SR-a exports carry no stale note. SR-c banner says "run again" without naming the Run tab. SR-d category-column mapping swap and SLA change-and-revert not browser-tested (volume swap and adherence revert were). SR-e re-run with a backlog big enough to move the headcount not shown. SR-f missing space in an import line in `run-inputs.ts` (cosmetic).
+
+---
+
+# FINDINGS — Agent Analytics: Scheduled (min) capped at the agent's own shift (2026-10-07)
+
+Plan: last section of `PLAN.md`. Checkpoint `d56809d`; build `a8e1d28`; rework 1 `617f516`. Tier 3.
+
+## Plan challenge (before build)
+
+| ID | Severity | Finding | Verdict |
+|---|---|---|---|
+| PC-1 | major | Cap used the category-filtered `avail`, so the 300 min/day phantom tail survived under a category filter (ran: Gold, Agent-1 = avail + 9,300) | Accepted — `busyAll` + AA.38 + A3b added to plan |
+| PC-2 | major | A3 understated what moves on screen (team row, utilisation CV / Jain, insight line, bars) | Accepted — A3 widened |
+| PC-3 | minor | Non-staggered long-day runs still read ~50% | Stated limit, PRD L20 |
+
+## Review round 1 (after build)
+
+| ID | Reviewer | Severity | Finding | Evidence | Verdict |
+|---|---|---|---|---|---|
+| R1-1 | challenger | major | `DEFINITIONS` said occupancy = utilisation whenever budget not exhausted; false with shift placement off (ran: occ 53.8 / util 49.4, no budget exhausted) | AgentAnalyticsPanel.tsx:33 (at a8e1d28) | Rework 1 — fixed, text scoped to shift placement on |
+| R1-2 | user-side | major | Off-mode warning buried in hover; did not say "expected, not an error" | AgentAnalyticsPanel.tsx:283-286 (at a8e1d28) | Rework 1 — now in visible paragraph |
+| R1-3 | user-side | major | Did not say equal columns are normal with shift placement on; "budget" jargon; hard-to-parse Scheduled definition; "whole business day" vs "to close" | same | Rework 1 — fixed |
+| R1-4 | user-side | major | Export has no legend for `Scheduled (min)` / `On-Shift Days`; the 300-min part-day (32nd on-shift day) is unexplained in the CSV | agent-analytics.ts export builder | NOT reworked — outside approved scope (export structure, AA.27). User decision |
+| R1-5 | user-side | major | Panel does not show which mode (shift placement on/off) the run used | AgentAnalyticsPanel.tsx help paragraph | NOT reworked — needs panel logic, outside approved text-only scope. User decision |
+| R1-6 | challenger | minor | Drain day (1 Nov): early cohort scheduled 300 = available, not 540. Never above 540 (0 of 1,489 agent-days at adherence 1.0 / 0.9 / 0.8) | SP/atk.mts | Backlog; documented PRD L20 |
+| R1-7 | challenger | minor | Utilisation under a category filter on pooled agents is "share of shift spent on that category", not additive (24.9 + 70.1 + 40.9). Pre-existing (FINDINGS UI-2), not worsened | SP/atk.mts | Backlog |
+| R1-8 | challenger | minor | Unpinned: exact scheduledMin at adherence 0.8, team row, export column, drain-day shape | verify-agent-analytics.mts | Backlog |
+| R1-9 | tester / auditor | minor | AA.36b and AA.39 are controls (pass on old code); AA.33–38 + AA.32b fail on old code (63/7 reproduced independently by both) | old-code suite run | No action |
+| R1-10 | auditor | minor | `project_context.md` ~line 877 lists sizing suite as 834; suite prints 858. Pre-existing, untouched | project_context.md:877 | Backlog |
+| R1-11 | tester | minor | Browser walk did not open Data Quality / Opening WIP sub-tabs | — | Noted |
+
+Passed with evidence: tester A2, A3 (all 47 rows + team + fairness + insights + export diffed old vs new; only allowed fields moved), A3b, A4 (non-staggered byte-identical, 8 combinations + real file), A5–A9; real browser run recommended N = 47, Agent-1 Scheduled 17,040 / Utilisation 77.3%, Agent-33 16,740 / 77.1%, zero console errors. Auditor: scope lock held, A1 / A9 / A10 / A11 pass. Challenger: analytics utilisation = engine `agentFairness.utilPct` for all 47 agents (max diff 0.00); scheduled additive across date ranges.
+
+## Rework 1 recheck (user-side)
+
+Verdict pass. All six wording points resolved. Minors left: `Available (min)` header hover still says "in queue" (AgentAnalyticsPanel.tsx:374, outside the three allowed text spots); visible paragraph ~90 words; text does not say "do not size from this column".
+
+## Backlog (minor)
+
+- Export legend / notes for `Scheduled (min)` and `On-Shift Days`, incl. the part-day after the data ends (R1-4).
+- On-screen "Shift placement: on/off" note for the run shown (R1-5).
+- `Available (min)` tooltip "in queue" wording.
+- R1-6, R1-7, R1-8, R1-10.

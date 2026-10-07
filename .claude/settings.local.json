@@ -6,7 +6,13 @@
       "Bash(rm scratch-repro-t3-1.mts)",
       "Bash(npm test *)",
       "Bash(echo \"EXIT: $?\")",
-      "Read(//tmp/**)"
+      "Read(//tmp/**)",
+      "Bash(grep -nE \"^#{1,3} \" FINDINGS.md)",
+      "Bash(timeout 300 npx tsx __TRACKED_VAR__/repro.mts)",
+      "Bash(python -)",
+      "Bash(git stash *)",
+      "Skill(browser-automation)",
+      "Bash(node \"/c/Users/lenovo/.claude/skills/browser-automation/browser.mjs\" \"file:///C:/Users/lenovo/Desktop/Bo_4Final-main/Bo_4Final-main%20\\(2\\)/Bo_4Final-main/BoWFM.html\")"
     ]
   }
 }

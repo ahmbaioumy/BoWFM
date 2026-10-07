@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | **Status** | Draft — as-built specification |
-| **Version** | 1.16.1 |
-| **Date** | 2026-10-06 |
+| **Version** | 1.20.3 |
+| **Date** | 2026-10-07 |
 | **Owner** | _(unassigned)_ |
 | **Product** | Backoffice WFM Sizing Engine |
 | **Artifact** | `BoWFM.html` — single self-contained offline HTML file (~617 KB) |
@@ -228,11 +228,12 @@ Acceptance criteria are written to be testable against current behaviour.
 
 | ID | Requirement | Acceptance criteria |
 |---|---|---|
-| **FR-1.1** | Accept a delimited demand file by drag-and-drop or file browse | Accepts `.csv`, `.txt`, `.tsv`. Comma, semicolon and tab delimiters auto-detected from the first 4096 characters. Pipe (`\|`) is **not** supported. |
+| **FR-1.1** | Accept a delimited demand file by drag-and-drop or file browse | Accepts `.csv`, `.txt`, `.tsv`. Comma, semicolon, tab and pipe (`\|`, lowest priority) delimiters auto-detected from the first 4096 characters; when the first line gives one column, up to 5 following lines are checked (a title line above the header does not hide the delimiter). **File reading rules (input safety part 3, 2026-10-07):** the reader returns problems with the file. A file with an **error** is REFUSED at pick time: a red message appears under the upload box (backlog file: in the backlog import area, nothing imported) and the current session is untouched (no reset prompt, no mapping/tab change); the message clears on the next successful upload or sample load. Errors: E1 not a text file (NUL character or Excel/zip signature), E2 empty, E3 header only, E4 unclosed quote (names the file row where it opened), E5 a row with more filled cells than the header (up to 5 rows named), E6 only one column while another separator appears in the data, E7 a title/summary line above the header (names its row). Precedence E1 > E2 > E3 > E7 > E6 > E4 > E5. Warnings (file loads): W1 short rows padded with empty cells, W2 duplicate column names renamed `Name (2)`, W3 unreadable characters (U+FFFD). Warnings are kept with the file and shown as DQ rule 27. Row numbers are 1-based physical lines (header = row 1; blank lines and lines inside quoted cells count). A failed read shows "The file could not be read." |
 | **FR-1.2** | Parse RFC 4180 CSV correctly | Handles quoted fields, `""` escaped quotes, embedded newlines and delimiters inside quotes, and `\r\n` / `\r` / `\n` line endings. Blank rows dropped; blank headers auto-named `Column_{n}`; short rows padded. |
-| **FR-1.3** | Parse dates flexibly but unambiguously | Accepts Unix timestamps (9–14 digits), ISO 8601 (with `Z` or `±HH:MM` offsets), `DD/MM/YYYY`, and `DD/MM/YY` (pivot: `≥70` → 1900s, else 2000s). **US `MM/DD/YYYY` is deliberately rejected.** Times accept `HH:mm[:ss]` with optional AM/PM. |
+| **FR-1.3** | Parse dates flexibly but unambiguously | Accepts Unix timestamps (9–14 digits), ISO 8601 (with `Z` or `±HH:MM` offsets), `DD/MM/YYYY`, and `DD/MM/YY` (pivot: `≥70` → 1900s, else 2000s). **US `MM/DD/YYYY` is deliberately rejected.** **Timezone markers (input safety part 2, 2026-10-07):** a timestamp with `Z`, a `±HH:MM` offset or a numeric epoch is converted to the clock of the PC that opens the file (08:00Z shows 12:00 on a UTC+4 PC); text without a marker is read as written. The conversion is unchanged, but it is no longer silent: DQ rule 25 warns with the count, the markers found and the PC offset used. Open the file on a PC set to the operation's timezone, or remove the markers to have times read as written. Times accept `HH:mm[:ss]` with optional AM/PM. |
 | **FR-1.4** | Reject impossible dates | Calendar-validated: rejects `31/02`, `31/04`, `29/02` in non-leap years, month outside 1–12, hours >23, minutes/seconds >59, year <1000 or >9999. Constructed dates are round-tripped to defeat JavaScript's silent normalisation. |
 | **FR-1.5** | Auto-suggest column mapping | Matches header names against known synonym sets for date, time, volume and category; falls back to inspecting the first data row for time-shaped and date-shaped values; then to positional defaults. |
+| **FR-1.5a** | Merge category spelling variants | Category names that differ only by letter case or inner spacing (`Billing`, `billing `, `BILLING`) are ONE category: every row takes the first spelling of the name in file order (names are compared after trimming, collapsing runs of spaces and lower-casing; `Bill  ing` stays a separate category `Bill ing`). On a re-upload, an existing category with the same name key keeps its id and ALL settings and takes the spelling now used by the file; if two existing categories share a key the first in list order supplies the settings and the other is dropped. Stored opening-backlog cases follow the rename; backlog import and manual backlog entry match categories by the same key. DQ rule 26 lists what was merged. |
 | **FR-1.6** | Allow manual column mapping | Four selects: **Date / Day** (mandatory), **Interval / Time** (optional), **Vol / Offered** (mandatory), **Categ / Seg** (optional). Unmapped category → single `General` category. |
 | **FR-1.7** | Provide built-in benchmark datasets | Three: *Financial Claims (Multi-Seg)* — 5 days, 3 categories; *Customer Operations Backlog* — 7 days, 2 categories; *Healthcare Authorization* — 10 days. All generated 08:00–17:30 in 30-minute slots starting the next Monday, with a sine-shaped diurnal curve. |
 | **FR-1.8** | Auto-discover categories from data | Category list derived from mapped intervals. New categories seeded with **AHT 30 min, shrinkage 20%**, priority by alphabetical index, inheriting global SLA defaults. Categories no longer present are dropped. Fixed 2026-08-31 (`UPLOAD-STALE-STATE`): a re-upload or sample-load into a session that already has data loaded now goes through the same Reset confirmation as FR-12.3 first — see that row for why. A brand-new session (no data loaded yet) is unaffected: the first upload or sample-load applies immediately. |
@@ -243,14 +244,14 @@ Acceptance criteria are written to be testable against current behaviour.
 **FR-2.1 — The DQ gate must block simulation on any error-severity issue.**
 `passed = !issues.some(i => i.severity === 'error')`. Warnings never block.
 
-**FR-2.2 — The following 21 checks must be performed.** Errors block; warnings inform.
+**FR-2.2 — The following 27 checks must be performed.** Errors block; warnings inform.
 
 | # | Field | Severity | Trigger |
 |---|---|---|---|
 | 1 | Column Mapping | **error** | Interval Start or Volume column unmapped |
 | 2 | Inflow Data | **error** | Zero intervals found *(early-returns; skips all later checks)* |
 | 3 | Operating Hours & Demand Distribution Diagnostic | warning | >15% of volume arrives outside operating hours |
-| 4 | Volume Parsing | warning | A volume cell needed correction (thousands separator/currency stripped, or a negative value rejected to 0) |
+| 4 | Volume Parsing | warning | A negative volume was rejected to 0 |
 | 5 | Timestamps | **error** | Any unparseable timestamp — message names `dd/mm/yyyy`, notes `mm/dd` is rejected |
 | 6 | Interval Length | **error** | Any interval whose duration differs from 30 minutes by >0.1 min |
 | 7 | Duplicate Slots | **error** | Repeated category + timestamp. Adds a hint when a separate time column exists but is unmapped ("…intervals do not all collapse to 00:00") |
@@ -268,6 +269,12 @@ Acceptance criteria are written to be testable against current behaviour.
 | 19 | Isolated Date(s) | **error** | A run of **more than 7 consecutive empty calendar days** (8 or more) separates the data and the smaller side holds at most 1% of the rows (minimum 1, maximum 20 rows) — a stray or mistyped date, including a near one such as a wrong month. Names the isolated date(s), their row count, the number of empty days and the main data range. Only when every timestamp parsed cleanly (G1, 2026-10-06; threshold tightened from 30 to 7 days in G1-a, same day) |
 | 20 | Old Backlog Arrival | warning | An opening-backlog case arrived more than 30 calendar days before the first demand interval; names the oldest case. Harmless to capacity (the horizon is the demand span) — flags typos such as a wrong year |
 | 21 | Opening WIP Overdue at Start | warning | N opening-backlog cases arrived before the first interval and cannot meet their deadline even if work starts at the first working instant (rule D4, §6): worked and counted as workload, excluded from the SLA % and the wait-time mean |
+| 22 | Unreadable volume | **error** | A volume cell is not a plain number (units, letters, exponent, hex), uses a comma that is not a thousands separator in a comma-separated file, mixes decimal-comma and decimal-point in one column of a semicolon/tab file, or is ambiguous (`1.234` / `1,234`) with nothing in the column to settle it. Names up to 5 file rows with the cell text (ambiguous cells show both readings); the cell is stored as 0 |
+| 23 | Fractional volume | warning | Any interval volume is not a whole number — the simulation rounds each interval to whole cases (the displayed total keeps the decimals) |
+| 24 | Very large volume | warning | An interval volume above 100,000 (likely a misread) |
+| 25 | Timezone markers converted | warning | N timestamps (start or end, also when date and time are in separate columns) carried `Z`, a `±HH:MM` offset or were numeric epoch values. They were converted to this PC's timezone; the message names the distinct markers and the PC offset (display only) and says how to have times read as written. Epoch-only files get numeric wording. Backlog import shows the same count in its preview. Never blocking (input safety part 2, 2026-10-07) |
+| 26 | Category names merged | warning | Category spellings that differ only by letter case or spacing were merged into one category; lists each group with the spellings and row count, e.g. `"BILLING", "billing" → "Billing" (42 rows)`; up to 10 groups, then "+N more". Never blocking (input safety part 2, 2026-10-07) |
+| 27 | File reading | warning | The file reader noted a non-blocking oddity (short rows padded, duplicate header renamed, replacement characters). One issue carrying the reader's message; added only when such warnings exist; never changes pass/fail (input safety part 3) |
 
 **FR-2.3 — The DQ tab must summarise the dataset**: Total Intervals, Total Case Volume,
 Working Days in Horizon, Total Workload (hours).
@@ -489,7 +496,7 @@ Seeded defaults before any upload: `Claims_Auto` (AHT 35, shrinkage 20%, priorit
 |---|---|---|
 | **FR-7.1** | Manual entry | Category (select), Remaining Work minutes (≥1, **default 30**), Arrival/Clock Start (`datetime-local`, defaults to first interval start). IDs auto-generate as `WIP-0001`. |
 | **FR-7.2** | Bulk CSV import | Six mappings: Category*, Arrival/Date*, Time, Case ID, Remaining Work, Priority. Auto-detected where possible. |
-| **FR-7.3** | Import validation feedback | Reports rows skipped for date-format violations and categories that will fall back to the first configured category. |
+| **FR-7.3** | Import validation feedback | Rows with an impossible date are skipped (day-first is assumed, so `03/04/2026` is 3 April). Every other bad value is replaced by a safe value and **counted**: unknown/blank category -> first configured category *with that category's own handling time and priority*; remaining minutes unreadable, zero or negative, or above 100,000 -> category handling time; priority not a positive whole number -> category priority; blank date -> default arrival (first demand interval); category with no handling time -> 30 minutes. The preview shows "N rows imported as typed; M rows adjusted" with a line and up to 5 example rows per reason. When more than 20% of rows, or more than 50 rows, fall back on category, Replace/Append stay disabled until the planner ticks "I understand these rows will be imported under <category>". Decimal commas are read in semicolon/tab files (same per-column rule as demand volumes). |
 | **FR-7.4** | Import preview | First four parsed cases shown before commit. |
 | **FR-7.5** | Import modes | `Replace WIP (n)` or `Append +n to existing (m)`. |
 | **FR-7.6** | WIP list management | Table of all WIP with per-row delete and Clear All; shows total pending work in minutes and hours. |
@@ -538,7 +545,7 @@ edited afterwards, an amber banner names what changed ("Settings changed since t
 calendar) … re-run to refresh"; `diffRunInputs`, `src/utils/run-inputs.ts`). Audit messages print
 local time (`YYYY-MM-DD HH:mm`). Fixes a false "busy slice starts outside business window" flood:
 measured on EGS_Only, a run at 08:00 open checked after moving the open to 10:00 gave 7,515 warnings,
-now 0. Tests: D53.
+now 0. **Data edits are flagged too (2026-10-07, G6 + H9).** The run also keeps two content fingerprints (demand intervals; opening backlog) taken at run start from the same values the search receives (`fingerprintIntervals` / `fingerprintBacklog`, `run-inputs.ts`; category NAMES, never ids). Editing, deleting or importing backlog, or changing a column mapping so the intervals change, raises "Data changed since this run (demand data, opening backlog)" next to the settings text, and an amber "Outdated" marker appears beside the Results entry in the sidebar (also for settings changes). Comparison is by content: changing a mapping and changing it back, or adding then deleting the same case, clears the flag. Results are not cleared; a new run clears the flag. Limitation: exports carry no stale note (SR-a). Tests: D53, D70.
 
 **FR-9.1 — Summary tab** must present the following sections **in this top-to-bottom order**
 (infeasibility banner first when present; otherwise the Dual Sizing banner leads):
@@ -613,11 +620,19 @@ and the Audit breach list.
   17:00-22:00 and finishes N cases started by others"). Display-only: engine and recommended HC
   are unchanged (measured on EGS_Only.csv: rec HC 51; Agent-51 finished 733 vs 338 but work
   share 334 vs 346, avg handle 35.0 min for all).
-  **Occupancy = busy / available; utilisation = busy / scheduled** (available + the shift tail
-  after the daily productive-hour budget is exhausted): the engine models no other
-  non-productive time in a shift, so the two are identical except on budget-exhausted days —
-  stated in the panel help text. The fairness panel's occupancy % is busy / on-shift available (same idea as this occupancy);
-  this panel's utilisation is a different, lower number. Four inline-SVG
+  **Occupancy = busy / available; utilisation = busy / scheduled.** Scheduled is the agent's
+  own shift: with shift placement on (a shift distribution was passed) every agent, whichever
+  cohort, is scheduled for `dailyProductiveHours` from their own start (available + the shift
+  time left after the daily productive-hour budget is exhausted, never past the shift end).
+  With shift placement off the engine has no shift end, so Scheduled runs to business close
+  (L20), so utilisation reads low on a business day longer than the productive hours
+  (expected; occupancy is the workload figure). With shift placement on, occupancy and
+  utilisation are identical except on budget-exhausted days (e.g. adherence below 100%) —
+  stated in the panel help text. The fairness panel's occupancy % is busy / on-shift
+  available; with shift placement on and adherence 100% this panel's utilisation now equals
+  it, and the two differ only where the budget runs out before the shift ends. Utilisation CV
+  and Jain's index in the insights and export change versus 1.20.2 for staggered runs (the
+  earliest cohort was previously scheduled to business close). Four inline-SVG
   charts (cases per agent by work share with team average; occupancy and utilisation; agent x date heatmap;
   daily team average with min-max band); a computed insights block (most/least loaded vs mean,
   agents outside +/-15%, late-coverage agents' share of last-2h work, fairness CV/Jain);
@@ -807,6 +822,16 @@ handed to a still-on-shift colleague the same day rather than parked overnight. 
 calendars are unaffected (still zero staggering) pending a separate multi-start increment.
 See PRD §11 P0-4.
 
+**24×7 parked work resumes when capacity exists (DES-8, 1.17.0, 2026-10-06).** On a 24×7
+calendar a case parked because its agent ran out of daily productive time used to sit in the
+parked set until the next calendar midnight, even while other agents were idle with budget left
+(probe, 3 agents: 4 of 4 and 5 of 8 parked cases waited needlessly; SLA was not monotone in
+headcount - 14 agents 100%, 16 agents 98%). Every calendar now resumes a parked case at
+`nextOpen(now)`, which is "now" on 24×7: the case rejoins the live queue at once and is taken by
+the first agent with budget (staggered mode: the next cohort start). When every agent is
+exhausted it waits for the next budget reset, as before. Budgets, shift-window presence,
+parked-first, EDF and random draws are unchanged; business-hours results are byte-identical.
+
 **Capacity now correctly applies adherence (fixed 2026-08-28, Gap B).** The deficit/capacity
 math (`shiftCapacityWithinDay`, feeding `computeShiftPlacement` and
 `findPlacementFeasibleFloor`) previously credited each agent with un-adhered
@@ -868,6 +893,8 @@ After `recommendedHC` is final (the search itself is untouched, so HC cannot cha
    tie → lower coverage gap (agent-hours). Statuses: `adopted`, `adopted_partial` (k of K),
    `kept_current_failed_gate` (with the gate that failed), `no_improvement`, `not_applicable`
    (24×7, shift ≥ window, no valid starts).
+
+After adoption the confidence block (`primaryStatistical`), the search-history row for N, the occupancy/ASA binding label and the representative replication (and so the headline run and the N-1 boundary evidence) all describe the **adopted** roster, using the evaluation the polish already ran for it (no extra simulation; F3 / HC-15, 1.17.1, 2026-10-07). Before, they described the pre-polish roster (probe: block 94.3 CI [94.1, 94.5] while the adopted roster scores 100 CI [100, 100]). The decision (HC, roster, `rosterPolish`) is unchanged.
 
 Results show a "Roster coverage by hour" card (needed vs current vs polished agents per half-hour)
 and the status line. Placement OFF: no polish, output byte-identical. Measured 2026-09-30 (default
@@ -1128,13 +1155,13 @@ comment. Nothing else.
 
 ## 9. Validation and quality
 
-### 9.1 Automated test suites — 1,050 checks (174 + 652 + 60 + 164 trusted-source)
+### 9.1 Automated test suites — 1,256 checks (174 + 858 + 60 + 164 trusted-source)
 
 | Suite | Tests | Covers |
 |---|---|---|
 | `scripts/verify-fixes.mts` | 174 | Legacy regression: CSV parsing, date handling, calendar arithmetic, CRN consistency, occupancy semantics, standalone artifact integrity, analytical infeasibility diagnosis, 24x7 midnight budget accounting |
-| `scripts/verify-sizing-fixes.mts` | 652 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement, fair agent assignment (D43: spread bounds, determinism, EDF order pinned to the pre-change engine, OFF = original HC, HC pins on pooled/siloed/staggered/24x7; D44: no double-booking in gated 24x7 runs; D45: availability accrual and pinned HC of the three built-in samples; D47: Workload Floor toggle; D48: clock-start derivation; D49: pinned HC of `test_files/AJM_Only.csv`; D50/D51/D52: roster polish at fixed HC — pooled, siloed guard, per-queue search; D53: Results use run-time settings; D54: number fields keep what is typed; D55-D61 (G12): the frozen sizing decisions are guarded by tests — dispatch order incl. the priority tie-break, business-calendar `latestSafeStart`, CI-gated acceptance (primary / per-category / occupancy cap / ASA each use the confidence bound, not the mean), Common Random Numbers, unfinished cases in the SLA denominator, Gross HC and harmonic shrinkage, volume rounding; each proven red against its own mutation; D62 (G1) + D63 (G1-a: stray date blocks from 8 empty days): horizon from demand only, backlog injection clamp, rule D4 overdue-at-start scoring, search N_min/N_occ/recommendation with old and Friday backlog (sync = async), and the three new data-quality rules) |
-| `scripts/verify-agent-analytics.mts` | 60 | Export timestamps equal the on-screen formatter; agent analytics reconcile to `completedCases` / `totalHandlingMinutes` / `agentFairness`; work-share case credit |
+| `scripts/verify-sizing-fixes.mts` | 858 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement, fair agent assignment (D43: spread bounds, determinism, EDF order pinned to the pre-change engine, OFF = original HC, HC pins on pooled/siloed/staggered/24x7; D44: no double-booking in gated 24x7 runs; D45: availability accrual and pinned HC of the three built-in samples; D47: Workload Floor toggle; D48: clock-start derivation; D49: pinned HC of `test_files/AJM_Only.csv`; D50/D51/D52: roster polish at fixed HC — pooled, siloed guard, per-queue search; D53: Results use run-time settings; D54: number fields keep what is typed; D55-D61 (G12): the frozen sizing decisions are guarded by tests — dispatch order incl. the priority tie-break, business-calendar `latestSafeStart`, CI-gated acceptance (primary / per-category / occupancy cap / ASA each use the confidence bound, not the mean), Common Random Numbers, unfinished cases in the SLA denominator, Gross HC and harmonic shrinkage, volume rounding; each proven red against its own mutation; D62 (G1) + D63 (G1-a: stray date blocks from 8 empty days): horizon from demand only, backlog injection clamp, rule D4 overdue-at-start scoring, search N_min/N_occ/recommendation with old and Friday backlog (sync = async), and the three new data-quality rules), `D64` (F2: 24x7 budget-exhausted parks hand back at once - zero avoidable waits, legitimate waits kept, SLA monotone in headcount, business-hours digest pinned, stress + determinism), `D65` (F3: statistics describe the adopted roster), `D66` (G2 + H2: numbers read from files), `D67` (input safety part 2: absolute-instant timezone checks, marker count and warning, category spelling merge, rename list, backlog match by key, samples unchanged), `D68` (input safety part 3: reader errors E1-E7 and warnings W1-W3 with exact rows, pipe delimiter, quoted delimiter/line-break row numbers, UTF-16-style tab file, duplicate headers, file warnings in data quality, identical to the legacy reader on clean files and the built-in samples; D69: unmapped required columns are named; D70: stale-results fingerprints for demand data and opening backlog, incl. the real mapping function) |
+| `scripts/verify-agent-analytics.mts` | 70 | Export timestamps equal the on-screen formatter; agent analytics reconcile to `completedCases` / `totalHandlingMinutes` / `agentFairness`; work-share case credit |
 | `scripts/verify-trusted-source.mts` (`npm run test:trusted-source`) | 164 | Hand-derived ground truth in `trusted-source-validation.json` (T0 invariants 35, T1 domain algebra 71, T2 hand-traced DES 31, T3 characterization 27). Authored under `Asia/Dubai`; on any other host timezone it prints a warning and continues (verified: all 164 pass under UTC, America/New_York, Asia/Tokyo, Pacific/Auckland, Europe/London) |
 | `scripts/audit-compare.mts` (`npm run test:audit`, opt-in, ~30 min) | 24 cells | Re-runs all four `test_files/` samples × 6 settings and fails on any difference from `docs/audit/sample-hc-after-2026-09-30.jsonl` |
 | `scripts/check-artifact-freshness.mts` | gate | Fails if `BoWFM.html` is missing or older than shippable sources (`npm run check:artifact`) |
@@ -1204,6 +1231,7 @@ Behaviours a user must understand to interpret results correctly.
 | **L17** | **Fair agent assignment no longer changes the recommended HC (resolved by C6, 1.12.0).** Until 1.12.0 fair assignment could raise the recommendation by 1 in near-capacity runs (a 20% workload-reduction fixture 13→14; `AJM_Simu.csv` pooled 103→104), because the coverage gate counted "budget remaining" as presence and fair dispatch drains every agent's daily budget together at ~98% occupancy. Presence is now the agent's own shift window (FR-5.12), so that artefact is gone. Re-measured 2026-09-29 after the change, fair ON vs OFF: **0 of 18 scenarios differ** (8 real-file runs and 6 built-in samples, each pooled/siloed as applicable, plus the 4 D43.13 pin fixtures); N_min is identical in both modes. The suite pins ON = OFF (D43.13, D45.2). | Fair assignment is HC-neutral. It still changes *who* gets each case (FR-4.7), not how many agents are needed. The toggle remains for reproducing legacy assignment. |
 | **L18** | **Workload Floor OFF can recommend an unsustainable team** (FR-5.13). Below `max(N_min, N_occ)` a team can pass the finite-horizon simulation by draining backlog after the horizon end. The always-on occupancy ceiling blocks most of this (anything whose demand exceeds planned capacity fails), so in default configs Off changes nothing; it bites with agent-hours overrides. | Leave the floor ON for committed plans. Treat any result with the red "below the workload floor" warning as optimistic. |
 | **L19** | **SLA % excludes backlog that was already overdue when the plan starts** (G1, rule D4). Opening-backlog cases that arrived before the first interval and cannot meet their deadline even if work starts at the first working instant are worked and counted as workload, but are not in the SLA % or the wait-time mean; they are reported separately (`overdueAtStartCount`, Results note, case CSV column, Data Quality warning). | A plan with a large overdue carry-over can show a high SLA % that says nothing about that backlog. Read the count beside the SLA headline; it is workload the team must still clear. |
+| **L20** | **Agent Analytics "Scheduled (min)" is the agent's own shift only when shift placement is on** (1.20.3). Without a shift distribution the engine has no shift end, so Scheduled runs to business close and Utilisation reads low on a long business day (e.g. ~50% on 08:00-22:00 with 9 productive hours). Also: a partial post-horizon drain day still counts as an on-shift day, and a partial day that ends in an off slice (horizon starting mid-shift, or a drain day ending after the budget ran out) is scheduled as a full shift. | Display only; sizing, recommended HC and Results occupancy are unaffected. Turn shift placement on to get per-shift utilisation; read occupancy (busy / available) when it is off. |
 
 ---
 

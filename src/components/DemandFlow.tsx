@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   CalendarConfig,
   CategoryConfig,
@@ -13,7 +13,8 @@ import {
   OpeningWIPCase,
   StandardInterval,
 } from '../types/wfm';
-import { generateNextWIPId, parseCSVRaw, parseFlexibleDate } from '../utils/csv-parser';
+import { categoryKey, generateNextWIPId, missingRequiredMappings, parseCSVRaw, parseFlexibleDate } from '../utils/csv-parser';
+import { parseWipRows } from '../utils/wip-import';
 import { formatDateTime24 } from '../utils/calendar';
 import { CalendarConfigPanel } from './CalendarConfigPanel';
 import { NumberField } from './NumberField';
@@ -41,7 +42,8 @@ interface DemandFlowProps {
   rawRowsPreview: Record<string, string>[];
   columnMapping: ColumnMapping;
   onUpdateColumnMapping: (mapping: ColumnMapping) => void;
-  onFileUpload: (text: string, filename: string) => void;
+  /** Returns a refusal message when the file is rejected at pick time (nothing changed), else null. */
+  onFileUpload: (text: string, filename: string) => string | null;
   onLoadSample: (sampleType: 'claims' | 'support' | 'healthcare') => void;
   dqResult: DQResult | null;
   openingWIP: OpeningWIPCase[];
@@ -76,6 +78,30 @@ export function DemandFlow({
   onToggle24x7,
 }: DemandFlowProps) {
   const [dragActive, setDragActive] = useState(false);
+  // Latest pick wins: each read takes a number; a read that finishes after a newer pick is ignored.
+  const demandReadSeq = useRef(0);
+  const wipReadSeq = useRef(0);
+
+  // A file dropped anywhere outside a drop box (or a file input) must not make the browser open it
+  // and leave the page: cancel those drops page-wide. Drop boxes and file inputs are left alone.
+  useEffect(() => {
+    const guard = (e: DragEvent) => {
+      const t = e.target;
+      if (t instanceof Element && (t.closest('[data-drop-box]') || (t instanceof HTMLInputElement && t.type === 'file'))) {
+        return;
+      }
+      e.preventDefault();
+    };
+    window.addEventListener('dragover', guard);
+    window.addEventListener('drop', guard);
+    return () => {
+      window.removeEventListener('dragover', guard);
+      window.removeEventListener('drop', guard);
+    };
+  }, []);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [wipError, setWipError] = useState<string | null>(null);
+  const [wipWarnings, setWipWarnings] = useState<string[]>([]);
   const [newWipCategory, setNewWipCategory] = useState('');
   const [newWipRemAht, setNewWipRemAht] = useState(30);
   const [newWipArrival, setNewWipArrival] = useState('');
@@ -86,6 +112,8 @@ export function DemandFlow({
   const [wipFileName, setWipFileName] = useState('');
   const [wipRawHeaders, setWipRawHeaders] = useState<string[]>([]);
   const [wipRawRows, setWipRawRows] = useState<Record<string, string>[]>([]);
+  const [wipDelimiter, setWipDelimiter] = useState<string>(',');
+  const [wipConfirmedFallback, setWipConfirmedFallback] = useState(false);
   const [wipMapping, setWipMapping] = useState<{
     caseIdCol: string;
     categoryCol: string;
@@ -111,18 +139,23 @@ export function DemandFlow({
   }
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    if (e.target.files && e.target.files[0]) {
-      readFile(e.target.files[0]);
-    }
+    const input = e.target;
+    const file = input.files && input.files[0];
+    if (file) readFile(file);
+    // Clear after the File is captured so picking the same file again fires a new change.
+    input.value = '';
   }
 
   function readFile(file: File) {
+    const seq = ++demandReadSeq.current;
     const reader = new FileReader();
     reader.onload = (evt) => {
-      const text = evt.target?.result as string;
-      if (text) {
-        onFileUpload(text, file.name);
-      }
+      if (seq !== demandReadSeq.current) return;
+      const text = (evt.target?.result as string) ?? '';
+      setUploadError(onFileUpload(text, file.name));
+    };
+    reader.onerror = () => {
+      if (seq === demandReadSeq.current) setUploadError('The file could not be read.');
     };
     reader.readAsText(file);
   }
@@ -163,127 +196,83 @@ export function DemandFlow({
   }
 
   function handleWipFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    if (e.target.files && e.target.files[0]) {
-      readWipFile(e.target.files[0]);
-    }
+    const input = e.target;
+    const file = input.files && input.files[0];
+    if (file) readWipFile(file);
+    input.value = '';
   }
 
   function readWipFile(file: File) {
+    const seq = ++wipReadSeq.current;
     const reader = new FileReader();
     reader.onload = (evt) => {
-      const text = evt.target?.result as string;
-      if (text) {
-        const parsed = parseCSVRaw(text);
-        setWipFileName(file.name);
-        setWipRawHeaders(parsed.headers);
-        setWipRawRows(parsed.rows);
-        setWipMapping(autoDetectWipMapping(parsed.headers));
+      if (seq !== wipReadSeq.current) return;
+      const text = (evt.target?.result as string) ?? '';
+      const parsed = parseCSVRaw(text);
+      const refusal = parsed.problems.find((p) => p.severity === 'error');
+      if (refusal) {
+        // Refused: nothing is imported and no preview is shown.
+        setWipError(refusal.message);
+        return;
       }
+      setWipError(null);
+      setWipWarnings(parsed.problems.map((p) => p.message));
+      setWipFileName(file.name);
+      setWipRawHeaders(parsed.headers);
+      setWipRawRows(parsed.rows);
+      setWipDelimiter(parsed.delimiter);
+      setWipConfirmedFallback(false);
+      setWipMapping(autoDetectWipMapping(parsed.headers));
+    };
+    reader.onerror = () => {
+      if (seq === wipReadSeq.current) setWipError('The file could not be read.');
     };
     reader.readAsText(file);
   }
 
   function getParsedWipCases(baseWip: OpeningWIPCase[]) {
-    if (wipRawRows.length === 0) return { cases: [], invalidDates: 0, unmatchedCategories: [] };
-
-    const cases: OpeningWIPCase[] = [];
-    let invalidDates = 0;
-    const unmatchedSet = new Set<string>();
-    const defaultCat = categories.length > 0 ? categories[0] : { name: 'General', ahtMinutes: 30, priority: 1 };
-
-    wipRawRows.forEach((row, idx) => {
-      // Category matching
-      const rawCat = wipMapping.categoryCol ? (row[wipMapping.categoryCol] || '').trim() : '';
-      const matchedCat = categories.find((c) => c.name.toLowerCase() === rawCat.toLowerCase());
-      let categoryName = rawCat;
-
-      if (!matchedCat) {
-        if (rawCat) unmatchedSet.add(rawCat);
-        categoryName = defaultCat.name;
-      } else {
-        categoryName = matchedCat.name;
-      }
-
-      // Priority
-      let prio = matchedCat?.priority || 1;
-      if (wipMapping.priorityCol && row[wipMapping.priorityCol]) {
-        const parsedPrio = parseInt(row[wipMapping.priorityCol], 10);
-        if (!isNaN(parsedPrio) && parsedPrio > 0) prio = parsedPrio;
-      }
-
-      // Remaining work (min)
-      let remMins = matchedCat?.ahtMinutes || 30;
-      if (wipMapping.remainingWorkCol && row[wipMapping.remainingWorkCol] !== undefined && row[wipMapping.remainingWorkCol].trim() !== '') {
-        const parsedWork = parseFloat(row[wipMapping.remainingWorkCol]);
-        if (!isNaN(parsedWork) && parsedWork >= 0) {
-          remMins = parsedWork;
-        }
-      }
-
-      // Arrival Date & Time parsing (Strict dd/mm/yyyy)
-      const dateStr = wipMapping.dateCol ? (row[wipMapping.dateCol] || '').trim() : '';
-      const timeStr = wipMapping.timeCol ? (row[wipMapping.timeCol] || '').trim() : undefined;
-
-      let arrivalDate: Date;
-      if (dateStr) {
-        const parsed = parseFlexibleDate(dateStr, timeStr);
-        if (isNaN(parsed.getTime())) {
-          invalidDates++;
-          return;
-        }
-        arrivalDate = parsed;
-      } else if (intervals.length > 0 && !isNaN(intervals[0].start.getTime())) {
-        arrivalDate = new Date(intervals[0].start);
-      } else {
-        arrivalDate = new Date();
-      }
-
-      // Case ID
-      let caseId = wipMapping.caseIdCol && row[wipMapping.caseIdCol] ? row[wipMapping.caseIdCol].trim() : '';
-      const usedIds = new Set([...baseWip, ...cases].map((w) => w.id));
-      if (!caseId || usedIds.has(caseId)) {
-        caseId = generateNextWIPId([...baseWip, ...cases]);
-      }
-
-      cases.push({
-        id: caseId,
-        category: categoryName,
-        priority: prio,
-        arrival: arrivalDate,
-        clockStart: arrivalDate,
-        remainingWorkMinutes: remMins,
-      });
-    });
-
-    return {
-      cases,
-      invalidDates,
-      unmatchedCategories: Array.from(unmatchedSet),
-    };
+    // Pure parser in utils/wip-import.ts. The default arrival (first demand interval, else now)
+    // is chosen here so preview and apply agree.
+    const defaultArrival =
+      intervals.length > 0 && !isNaN(intervals[0].start.getTime()) ? new Date(intervals[0].start) : new Date();
+    return parseWipRows(
+      wipRawRows,
+      wipMapping,
+      categories.map((c) => ({ name: c.name, ahtMinutes: c.ahtMinutes, priority: c.priority })),
+      defaultArrival,
+      baseWip,
+      wipDelimiter
+    );
   }
 
   function handleApplyWipImport(mode: 'replace' | 'append') {
     const base = mode === 'append' ? openingWIP : [];
-    const { cases } = getParsedWipCases(base);
+    const { cases, summary } = getParsedWipCases(base);
+    if (summary.requiresConfirmation && !wipConfirmedFallback) return;
     if (cases.length > 0) {
       onUpdateOpeningWIP(mode === 'append' ? [...openingWIP, ...cases] : cases);
       // Reset wizard
       setWipRawRows([]);
       setWipRawHeaders([]);
       setWipFileName('');
+      setWipConfirmedFallback(false);
       setWipInputMode('manual');
     }
   }
 
   function handleCancelWipImport() {
+    setWipConfirmedFallback(false);
     setWipRawRows([]);
     setWipRawHeaders([]);
     setWipFileName('');
+    setWipError(null);
+    setWipWarnings([]);
   }
 
   function handleAddWipCase() {
-    const catName = newWipCategory || (categories.length > 0 ? categories[0].name : 'General');
-    const selectedCat = categories.find((c) => c.name === catName);
+    const typedCatName = newWipCategory || (categories.length > 0 ? categories[0].name : 'General');
+    const selectedCat = categories.find((c) => categoryKey(c.name) === categoryKey(typedCatName));
+    const catName = selectedCat ? selectedCat.name : typedCatName;
     const aht = newWipRemAht > 0 ? newWipRemAht : selectedCat?.ahtMinutes || 30;
 
     let arrivalDate: Date;
@@ -344,6 +333,7 @@ export function DemandFlow({
 
             {/* Drag & Drop Box */}
             <div
+              data-drop-box
               onDragOver={(e) => {
                 e.preventDefault();
                 setDragActive(true);
@@ -365,7 +355,7 @@ export function DemandFlow({
                   Drag and drop your 30-minute demand forecast CSV here
                 </p>
                 <p className="text-[11px] text-slate-500">
-                  Supports comma, semicolon, or tab-delimited files. Timestamps automatically mapped.
+                  Supports comma, semicolon, tab or pipe (|) delimited files. Timestamps automatically mapped.
                 </p>
               </div>
 
@@ -379,6 +369,11 @@ export function DemandFlow({
                 />
               </label>
             </div>
+            {uploadError && (
+              <p role="alert" className="text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                {uploadError}
+              </p>
+            )}
 
             {/* Sample Datasets */}
             <div className="pt-3 border-t border-slate-100 space-y-3">
@@ -392,7 +387,7 @@ export function DemandFlow({
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <button
                   type="button"
-                  onClick={() => onLoadSample('claims')}
+                  onClick={() => { setUploadError(null); onLoadSample('claims'); }}
                   className="p-3.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-left transition space-y-1"
                 >
                   <div className="text-xs font-bold text-slate-900">Financial Claims (Multi-Seg)</div>
@@ -403,7 +398,7 @@ export function DemandFlow({
 
                 <button
                   type="button"
-                  onClick={() => onLoadSample('support')}
+                  onClick={() => { setUploadError(null); onLoadSample('support'); }}
                   className="p-3.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-left transition space-y-1"
                 >
                   <div className="text-xs font-bold text-slate-900">Customer Operations Backlog</div>
@@ -414,7 +409,7 @@ export function DemandFlow({
 
                 <button
                   type="button"
-                  onClick={() => onLoadSample('healthcare')}
+                  onClick={() => { setUploadError(null); onLoadSample('healthcare'); }}
                   className="p-3.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-left transition space-y-1"
                 >
                   <div className="text-xs font-bold text-slate-900">Healthcare Authorization</div>
@@ -713,7 +708,9 @@ export function DemandFlow({
               </div>
             ) : (
               <div className="p-8 text-center text-slate-400 text-xs italic bg-slate-50 rounded-xl">
-                Upload and map an inflow file to run data quality checks.
+                {rawHeaders.length > 0 && missingRequiredMappings(columnMapping).length > 0
+                  ? `Choose the column for: ${missingRequiredMappings(columnMapping).join(', ')}.`
+                  : 'Upload and map an inflow file to run data quality checks.'}
               </div>
             )}
           </div>
@@ -875,6 +872,7 @@ export function DemandFlow({
                 {/* CSV File Upload Box (if no file loaded yet) */}
                 {wipRawRows.length === 0 ? (
                   <div
+                    data-drop-box
                     onDragOver={(e) => {
                       e.preventDefault();
                       setWipDragActive(true);
@@ -896,7 +894,7 @@ export function DemandFlow({
                         Drag and drop your Pending Cases / Opening WIP CSV here
                       </p>
                       <p className="text-[11px] text-slate-500">
-                        Supports comma, semicolon, or tab-delimited files (.csv, .tsv, .txt)
+                        Supports comma, semicolon, tab or pipe (|) delimited files (.csv, .tsv, .txt)
                       </p>
                     </div>
 
@@ -909,6 +907,11 @@ export function DemandFlow({
                         className="hidden"
                       />
                     </label>
+                    {wipError && (
+                      <p role="alert" className="text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 rounded-lg px-3 py-2">
+                        {wipError}
+                      </p>
+                    )}
                   </div>
                 ) : (
                   /* Column Mapping Wizard for WIP */
@@ -936,6 +939,14 @@ export function DemandFlow({
                             <span>Select Different File</span>
                           </button>
                         </div>
+
+                        {wipWarnings.length > 0 && (
+                          <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 space-y-1">
+                            {wipWarnings.map((w) => (
+                              <p key={w}>{w}</p>
+                            ))}
+                          </div>
+                        )}
 
                         {/* Column Selectors Grid */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
@@ -1071,7 +1082,7 @@ export function DemandFlow({
                             <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
                             <span>
                               {parsedResult.invalidDates} row{parsedResult.invalidDates === 1 ? '' : 's'} skipped:
-                              dates must be dd/mm/yyyy (mm/dd is rejected). {parsedResult.cases.length} valid case
+                              only impossible dates are rejected (day-first is assumed, so 03/04/2026 is read as 3 April). {parsedResult.cases.length} valid case
                               {parsedResult.cases.length === 1 ? '' : 's'} will import.
                             </span>
                           </div>
@@ -1088,6 +1099,52 @@ export function DemandFlow({
                             </span>
                           </div>
                         )}
+
+                        {/* Import summary: rows read as typed vs rows adjusted */}
+                        <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-800 space-y-1">
+                          <div className="font-semibold">
+                            {parsedResult.summary.importedAsTyped.toLocaleString()} row
+                            {parsedResult.summary.importedAsTyped === 1 ? '' : 's'} imported as typed;{' '}
+                            {parsedResult.summary.adjustedRows.toLocaleString()} row
+                            {parsedResult.summary.adjustedRows === 1 ? '' : 's'} adjusted.
+                          </div>
+                          {(
+                            [
+                              [parsedResult.summary.category, 'unknown or blank category: imported under "' + parsedResult.summary.fallbackCategoryName + '" with the handling time and priority'],
+                              [parsedResult.summary.remainingMinutes, 'remaining minutes missing, unreadable, zero or negative, or above 100,000: the category handling time was used'],
+                              [parsedResult.summary.priority, 'priority is not a positive whole number: the category priority was used'],
+                              [parsedResult.summary.date, 'blank arrival date: the default arrival (first demand interval) was used'],
+                              [parsedResult.summary.noHandlingTime, 'category has no handling time: 30 minutes was assumed'],
+                            ] as const
+                          ).map(([kind, label]) =>
+                            kind.count > 0 ? (
+                              <div key={label} className="text-amber-900">
+                                {kind.count.toLocaleString()} row{kind.count === 1 ? '' : 's'}: {label}. Examples (file row):{' '}
+                                {kind.examples.map((ex) => `${ex.row} "${ex.text}"`).join(', ')}
+                              </div>
+                            ) : null
+                          )}
+                          {parsedResult.summary.timezone.count > 0 && (
+                            <div className="text-amber-900">
+                              {parsedResult.summary.timezone.count.toLocaleString()} arrival date
+                              {parsedResult.summary.timezone.count === 1 ? '' : 's'} carried a timezone marker (
+                              {parsedResult.summary.timezone.markers.slice().sort().join(', ')}) and{' '}
+                              {parsedResult.summary.timezone.count === 1 ? 'was' : 'were'} converted to this PC&apos;s timezone.
+                            </div>
+                          )}
+                          {parsedResult.summary.requiresConfirmation && (
+                            <label className="flex items-center gap-2 pt-1 font-semibold text-rose-800">
+                              <input
+                                type="checkbox"
+                                checked={wipConfirmedFallback}
+                                onChange={(e) => setWipConfirmedFallback(e.target.checked)}
+                              />
+                              <span>
+                                I understand these rows will be imported under "{parsedResult.summary.fallbackCategoryName}"
+                              </span>
+                            </label>
+                          )}
+                        </div>
 
                         {/* Preview Table of Parsed WIP cases */}
                         <div className="space-y-1.5">
@@ -1125,7 +1182,10 @@ export function DemandFlow({
                           <button
                             type="button"
                             onClick={() => handleApplyWipImport('replace')}
-                            disabled={parsedResult.cases.length === 0}
+                            disabled={
+                              parsedResult.cases.length === 0 ||
+                              (parsedResult.summary.requiresConfirmation && !wipConfirmedFallback)
+                            }
                             className="px-4 py-2 bg-slate-900 text-white rounded-lg text-xs font-semibold hover:bg-slate-800 transition flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
@@ -1136,7 +1196,8 @@ export function DemandFlow({
                             <button
                               type="button"
                               onClick={() => handleApplyWipImport('append')}
-                              className="px-4 py-2 bg-white text-slate-800 border border-slate-300 rounded-lg text-xs font-semibold hover:bg-slate-50 transition flex items-center gap-1.5"
+                              disabled={parsedResult.summary.requiresConfirmation && !wipConfirmedFallback}
+                              className="px-4 py-2 bg-white text-slate-800 border border-slate-300 rounded-lg text-xs font-semibold hover:bg-slate-50 transition flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
                               <Plus className="w-3.5 h-3.5" />
                               <span>Append +{parsedResult.cases.length} Cases to Existing ({openingWIP.length})</span>

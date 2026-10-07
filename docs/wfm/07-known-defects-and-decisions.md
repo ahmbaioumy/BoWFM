@@ -880,6 +880,20 @@ Known caveat: on real files the forced staggered layout costs some SLA, so their
 
 ---
 
+### 2026-10-07 (G3 + G5) — Timezone markers converted silently; category spelling variants split one category *(fixed, warning only for G3)*
+
+**Defect.** (G3) `2026-01-05T08:00:00Z`, `...+04:00` and numeric epoch timestamps are converted to the clock of the PC opening the file (08:00Z = 12:00 in Dubai, 03:00 in New York) with no message. (G5) Category names were matched exactly, so `Billing`, `billing ` and `BILLING` became three categories, each seeded with 30 minutes and 20% shrinkage.
+
+**Decision (owner-approved 2026-10-07: G3 Option B).** Reading the digits as written would be wrong by the offset for a UTC export opened on a PC in the operation's timezone, so the conversion is KEPT (parser unchanged, same Dates for every input) and the planner is told: WARNING "Timezone markers converted" with the count, the distinct markers and the PC offset; backlog import shows the count in its preview. Marker detection shares the parser's single ISO regex (`detectTimezoneMarker`). G5: `categoryKey` = trim, collapse spaces, lower-case; every row takes the first spelling in file order; `discoverAndSyncCategories` matches existing categories by key (id and settings kept, spelling follows the file; two existing categories with one key: first wins, other reported); stored backlog cases follow the rename; backlog import and manual entry match by key; WARNING "Category names merged". Different words (`Bill  ing` vs `Billing`) stay separate. Engine untouched; the three built-in samples are unchanged. Suite D67.
+
+**Open (backlog).** IS2-a: warn when a category is still on the seeded 30 min / 20% values (needs an edited / not-edited marker in Settings). A same-key duplicate among stored categories is reported by the pure function but not yet shown in the UI.
+
+### 2026-10-07 (G2 + H2) — Numbers read from files were silently misread *(fixed)*
+
+**Defect.** Demand volume cells were cleaned with `replace(/[\s$,]/g,'')` then `parseFloat`, and the file delimiter was discarded by `parseCSVRaw`: `12,5` in a semicolon file read as 125, `30 min` as 30, `1e9` accepted. Backlog import used `parseFloat`/`parseInt` (`7,5` -> 7, `2h` -> 2) and gave an unknown category an invented 30 minutes and priority 1.
+
+**Decision (owner-approved 2026-10-07: read it when it is clear, block it when it is not).** `utils/number-cell.ts`: comma-delimited file = dot decimal, comma only as strict thousands (`1,234`); semicolon/tab file = convention decided per column (`12,5` proves comma-decimal, `12.5` proves dot-decimal, mixed = blocking error, `1.234`/`1,234` follow the proven convention, otherwise blocking error showing both readings). New ERROR "Unreadable volume" (up to 5 rows, cell stored 0); warnings for fractional volumes (engine rounds each interval, limitation L1) and volumes above 100,000. `utils/wip-import.ts`: unknown category -> fallback category with its own AHT and priority; unreadable/zero/negative/over-100,000 minutes -> category AHT; bad priority -> category priority; blank date -> default arrival; all counted and shown in the import preview; Replace/Append need a tick when more than 20% or more than 50 rows fell back on category. Engine untouched; clean files parse identically (built-in samples checked against the legacy reader). Suite D66.
+
 ### 2026-10-06 (G1) — Planning horizon stretched back to the oldest backlog case (CSV-13, CSV-14) *(fixed)*
 
 **Defect.** `computeIntervalHorizon` (and hand-rolled copies in `searchOptimalHC`, `searchOptimalHCAsync` and the
@@ -913,6 +927,63 @@ sync and async identical. Suite D62 pins this. The `primaryEligible` field (open
 overdue-at-start cases.
 
 **Residual.** SLA % can look healthy while a large overdue carry-over exists; read the count beside the headline (PRD L19).
+
+---
+
+### DES-8 - 24x7 parked work waited for the next midnight while agents were idle *(fixed 2026-10-06)*
+On a 24x7 calendar a case parked because its agent's daily budget ran out was put in `parkedWIP` and resumed at the next
+calendar midnight (a hard-coded `is24x7` branch in the `CasePark` budget path, hand-rolled date maths); every other calendar
+used `nextOpen(now)`. Other agents with budget stayed idle meanwhile; shift-end parks in staggered mode already handed over at once.
+A dead copy of the branch sat in `DayClose` (24x7 never schedules `DayClose`).
+
+**Measured before** (3 agents, probe fixtures): one shift - 4 of 4 parked cases waited needlessly (586 min); staggered 0/8/16 h,
+adherence 0.9 - 5 of 8 (4,132 min; one case parked 06:46, resumed 00:00, while another agent was free from 08:01).
+Sizing probe (24x7 week, 6/h, AHT 45, adherence 0.9, 24 h SLA): SLA 14 agents 100%, 16 agents 98% - not monotone in headcount.
+
+**After:** both branches deleted; every calendar uses `nextOpen(currTime)`. Avoidable waits 4/4 -> 0 and 5/8 -> 0; SLA at 14..17 agents
+100 / 100 / 100 / 100. A case with no capacity anywhere still waits for the next budget reset (legitimate). Budgets, shift-window
+presence (frozen decision 11), parked-first, EDF, random draws and the search code are untouched; business-hours results identical.
+Suite D64 pins this; D43.14 c247 golden digest re-pinned (HC 8, fairness OFF: SLA 100% -> 100%, parks 12 -> 9).
+
+---
+
+### HC-15 - Confidence block and history row described the roster before polish *(fixed 2026-10-07)*
+With shift placement ON, the Stage 3b roster polish evaluates every candidate roster with the full R-replication CI evaluation on the
+shared case sets, but kept only {passes, reasons, median}. On adoption only the roster map was updated, so `primaryPassedResult` and
+`evalCache[N]` still held the PRE-polish evaluation: `primaryStatistical`, the history row for N, the occupancy/ASA binding branches
+and the representative replication index described a roster that is not the recommended one, while the headline simulation ran on the
+adopted roster. Display-only: adoption itself already required the adopted roster to pass the full CI evaluation (pooled and siloed).
+
+**Measured before** (D50 fixture: placement ON, mid-day peak, SLA 85% / 3 h, R = 6, max HC 40; N = 9, polish adopted 7/7):
+seed 42 block mean 94.3 CI [94.1, 94.5] vs adopted roster 100 CI [100, 100]; seed 7 94.2 [93.8, 94.6] -> 100; seed 99 94.4 [94.1, 94.6] -> 100.
+History row for N (seed 42): 94.3 [94.1, 94.5], BO ASA 29.9 min. Headline run showed 100, so block and headline contradicted each other.
+Siloed (D52 fixture, N = 19): block 99.9 [99.9, 100], adopted roster 99.5 [99.5, 99.6], headline 99.6 - optimistic, not pessimistic.
+
+**After:** each candidate's full evaluation is kept (pooled keyed by k, siloed by `rosterVectorKey`, the key `createParallelRosterKSearch` uses);
+`adoptedPolishEvaluation` returns the one for exactly the adopted roster and both searches assign it to `primaryPassedResult` and
+`evalCache[N]` strictly after `finalizeRosterPolish` (`rosterPolish.currentSlaPct` stays the pre-polish median). No extra simulation.
+Seed 42: block 100 CI [100, 100], history row 100 [100, 100] BO ASA 5.9 min.
+
+**Fields that can change for placement-ON runs where a roster is adopted** (the representative replication index can change):
+`primaryStatistical`; the history row for N; `finalDESResult` (headline run; seed 42 BO ASA 7.7 -> 5.9 min, SLA % 100 -> 100); the N-1 boundary run,
+`boundaryEvidence` and its `differenceSummary` (seed 42 N-1 BO ASA 14.8 -> 14.2 min); `isInfeasibleAdjacent` and its warning; and the occupancy/ASA
+binding label. The binding label did not change on the pinned fixtures (still "Primary SLA ... Target"). **Unchanged:** recommended HC, gross HC,
+the adopted roster, `rosterPolish`, every history row except N, and every result with placement OFF or polish status other than adopted /
+adopted_partial (full-result digests pinned). Suite D65 pins this (independent re-evaluation of the adopted roster, sync = async on the full output).
+
+### IS3 - Messy files were read silently or half-read *(fixed 2026-10-07, Build A)*
+The file reader had no way to say a file was wrong: empty, zip/Excel, header-only, title-row-above-header, one-column, unclosed-quote and over-wide-row files loaded (or half-loaded) without a clear message, and short rows, duplicate headers and U+FFFD characters changed data silently.
+**After:** `parseCSVRaw` returns `problems`. Errors E1-E7 (precedence E1 > E2 > E3 > E7 > E6 > E4 > E5) refuse the file at pick time with a message under the upload box (backlog import area for the backlog file); the current session is untouched. Warnings W1-W3 load the file and appear as the non-blocking DQ rule 27 "File reading". Pipe added as lowest-priority delimiter. Row numbers are 1-based physical lines. Files that loaded before parse identically (suite D68 compares with a legacy copy of the reader). Not changed: quote handling.
+**Open item IS3-a:** a balanced quote in the middle of a cell (`ab"c"d`) still merges cells as before; it is not detected.
+
+### IS3-f - Upload traps *(fixed 2026-10-07, Build B)*
+Same file picked twice did nothing; a drop outside the box opened the file in the browser; overlapping picks could apply an older file; an unmapped required column was not named. **After:** file inputs (demand, backlog) are cleared after each pick; one page-level guard cancels `dragover`/`drop` outside drop boxes and file inputs; each read carries a sequence number (latest pick wins; a newer pick replaces an open reset prompt, a refused newest pick closes it); Data Quality names the unmapped column ("Choose the column for: Volume."). No parsing, rule or number change. Suite D69 pins the pure helper `missingRequiredMappings`; the rest is browser-verified. **IS3-f closed.**
+
+### SR - Stale results after data edits *(fixed 2026-10-07, G6 + H9)*
+Settings edits after a run raised a banner; data edits did not. Editing, deleting or importing opening backlog, or changing a column mapping, left the old headcount beside new data with no warning (browser-confirmed: Support 27 / 34 unchanged after a mapping change).
+**After:** the run snapshot keeps two content fingerprint strings (demand intervals: start, end, volume, category name; opening backlog: id, category name, arrival, remaining minutes, priority, in order), captured at run start from the values the search receives. Live fingerprints are memoised on `intervals` and `openingWIP`. The Results banner names settings, demand data and/or opening backlog; the sidebar shows an "Outdated" marker beside Results. Comparison is by content, so change-and-revert clears it; category ids are never used (they contain `Date.now()`). Results are not cleared. No engine change. Suite D70.
+**Open item SR-a:** exports from stale results carry no stale note (none exists for settings either).
+**SR-b (checked, no change):** Sensitivity builds its own scenarios from live settings and data and shows no run results, so it cannot mix old results with new data. The Results tabs (incl. Agent Browser) render the run output only; the banner sits above every Results tab.
 
 ---
 

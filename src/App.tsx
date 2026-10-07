@@ -22,6 +22,8 @@ import {
   discoverAndSyncCategories,
   mapRawRecordsToIntervals,
   parseCSVRaw,
+  type CSVProblem,
+  remapCasesToIntervalSpelling,
   validateDataQuality,
 } from './utils/csv-parser';
 import { searchOptimalHCAsync } from './utils/hc-search';
@@ -36,7 +38,14 @@ import { SensitivityFlow } from './components/SensitivityFlow';
 import { SimulationProgressModal } from './components/SimulationProgressModal';
 import { ResetConfirmModal } from './components/ResetConfirmModal';
 import { buildSampleDataset, nextMondayAt8 } from './utils/sample-data';
-import { diffRunInputs, RunInputs } from './utils/run-inputs';
+import {
+  diffRunData,
+  diffRunInputs,
+  fingerprintBacklog,
+  fingerprintIntervals,
+  RunDataFingerprints,
+  RunInputs,
+} from './utils/run-inputs';
 
 import {
   DEFAULT_CALENDAR,
@@ -93,6 +102,9 @@ export function App() {
   // Demand & Data State
   const [rawHeaders, setRawHeaders] = useState<string[]>([]);
   const [rawRows, setRawRows] = useState<Record<string, string>[]>([]);
+  const [rawDelimiter, setRawDelimiter] = useState<string>(',');
+  // Non-blocking warnings the file reader raised for the loaded file; set with rawRows, cleared on sample load and reset.
+  const [rawFileWarnings, setRawFileWarnings] = useState<CSVProblem[]>([]);
   const [columnMapping, setColumnMapping] = useState<ColumnMapping>({
     intervalStartCol: '',
     volumeCol: '',
@@ -103,7 +115,7 @@ export function App() {
   const [searchOutput, setSearchOutput] = useState<HCSearchOutput | null>(null);
   // Exact settings the current searchOutput was computed with. Results render from this (not the live
   // settings), so audits/formulas/exports describe the run even if the planner edits config afterwards.
-  const [runInputs, setRunInputs] = useState<RunInputs | null>(null);
+  const [runInputs, setRunInputs] = useState<(RunInputs & { data: RunDataFingerprints }) | null>(null);
   const [isSimulating, setIsSimulating] = useState(false);
   const [showProgressModal, setShowProgressModal] = useState(false);
   // Reset confirmation gate. 'reset' = plain Sidebar Reset click. { type: 'upload' | 'sample' }
@@ -131,13 +143,23 @@ export function App() {
     if (rawRows.length === 0 || !columnMapping.intervalStartCol || !columnMapping.volumeCol) {
       return [];
     }
-    return mapRawRecordsToIntervals(rawRows, columnMapping);
-  }, [rawRows, columnMapping]);
+    return mapRawRecordsToIntervals(rawRows, columnMapping, 'General', rawDelimiter);
+  }, [rawRows, columnMapping, rawDelimiter]);
+
+  // Content fingerprints of the live data, recomputed only when the data changes (not per render).
+  const liveDemandFp = useMemo(() => fingerprintIntervals(intervals), [intervals]);
+  const liveBacklogFp = useMemo(() => fingerprintBacklog(openingWIP), [openingWIP]);
+  const dataChangedSinceRun = useMemo(
+    () => diffRunData(runInputs?.data ?? null, { demand: liveDemandFp, backlog: liveBacklogFp }),
+    [runInputs, liveDemandFp, liveBacklogFp]
+  );
 
   // Synchronize Categories Discovery when Intervals change
   useEffect(() => {
     if (intervals.length > 0) {
       setCategories((prev) => discoverAndSyncCategories(intervals, prev, sla));
+      // Stored backlog cases follow a category respelling (same step as the category rename).
+      setOpeningWIP((prev) => remapCasesToIntervalSpelling(prev, intervals));
     }
   }, [intervals, sla]);
 
@@ -159,19 +181,29 @@ export function App() {
       labor,
       sla,
       openingWIP,
+      fileWarnings: rawFileWarnings,
     });
-  }, [intervals, columnMapping, categories, calendar, labor, sla, openingWIP]);
+  }, [intervals, columnMapping, categories, calendar, labor, sla, openingWIP, rawFileWarnings]);
 
   // Handle File Upload. If a prior session already has data loaded, route through the reset
   // confirmation first (see pendingResetAction) rather than blending the new file into
   // whatever calendar/labor/SLA/categories/opening-WIP a previous upload left behind. A
   // brand-new tab with nothing loaded yet applies the file immediately — nothing to lose.
-  function handleFileUpload(text: string, filename: string) {
+  // The file is read and checked FIRST: a file with an error is refused (message returned to the upload box)
+  // and nothing changes - no reset prompt, no state change, the current session stays exactly as it is.
+  function handleFileUpload(text: string, filename: string): string | null {
+    const refusal = parseCSVRaw(text).problems.find((p) => p.severity === 'error');
+    if (refusal) {
+      // Newest pick refused: a reset prompt still open for an older upload must not stay.
+      setPendingResetAction((prev) => (prev && prev !== 'reset' && prev.type === 'upload' ? null : prev));
+      return refusal.message;
+    }
     if (rawRows.length > 0) {
       setPendingResetAction({ type: 'upload', text, filename });
-      return;
+      return null;
     }
     applyFileUpload(text, filename);
+    return null;
   }
 
   function applyFileUpload(text: string, filename: string) {
@@ -179,17 +211,20 @@ export function App() {
     setSearchOutput(null);
     setRunInputs(null);
 
-    const { headers, rows } = parseCSVRaw(text);
+    const { headers, rows, delimiter, problems } = parseCSVRaw(text);
     setRawHeaders(headers);
     setRawRows(rows);
+    setRawDelimiter(delimiter);
+    setRawFileWarnings(problems.filter((p) => p.severity === 'warning'));
 
     const autoMapping = autoSuggestColumnMapping(headers, rows);
     setColumnMapping(autoMapping);
 
     if (rows.length > 0 && autoMapping.intervalStartCol && autoMapping.volumeCol) {
-      const initialIntervals = mapRawRecordsToIntervals(rows, autoMapping);
+      const initialIntervals = mapRawRecordsToIntervals(rows, autoMapping, 'General', delimiter);
       if (initialIntervals.length > 0) {
         setCategories((prev) => discoverAndSyncCategories(initialIntervals, prev, sla));
+        setOpeningWIP((prev) => remapCasesToIntervalSpelling(prev, initialIntervals));
       }
     }
 
@@ -215,6 +250,8 @@ export function App() {
 
     setRawHeaders(headers);
     setRawRows(rows);
+    setRawDelimiter(',');
+    setRawFileWarnings([]);
     const mapping: ColumnMapping = {
       intervalStartCol: 'IntervalStart',
       volumeCol: 'Volume',
@@ -222,8 +259,9 @@ export function App() {
     };
     setColumnMapping(mapping);
 
-    const sampleIntervals = mapRawRecordsToIntervals(rows, mapping);
+    const sampleIntervals = mapRawRecordsToIntervals(rows, mapping, 'General', ',');
     setCategories((prev) => discoverAndSyncCategories(sampleIntervals, prev, sla));
+    setOpeningWIP((prev) => remapCasesToIntervalSpelling(prev, sampleIntervals));
     setCurrentTab('dq');
   }
 
@@ -259,7 +297,14 @@ export function App() {
     });
 
     // Captured at run start: exactly what is passed to the search (not re-read after the await).
-    const runSnapshot: RunInputs = { calendar, labor, sla, categories, simParams };
+    const runSnapshot: RunInputs & { data: RunDataFingerprints } = {
+      calendar,
+      labor,
+      sla,
+      categories,
+      simParams,
+      data: { demand: fingerprintIntervals(intervals), backlog: fingerprintBacklog(openingWIP) },
+    };
 
     try {
       const result = await searchOptimalHCAsync({
@@ -338,6 +383,8 @@ export function App() {
     setSimParams(DEFAULT_SIM_PARAMS);
     setRawHeaders([]);
     setRawRows([]);
+    setRawDelimiter(',');
+    setRawFileWarnings([]);
     setColumnMapping({ intervalStartCol: '', volumeCol: '' });
     setOpeningWIP([]);
     setSearchOutput(null);
@@ -482,6 +529,7 @@ export function App() {
         onExportParams={handleExportParams}
         onImportParams={handleImportParams}
         hasResults={searchOutput !== null}
+        resultsOutdated={searchOutput !== null && (settingsChangedSinceRun.length > 0 || dataChangedSinceRun.length > 0)}
         dqPassed={dqResult?.passed === true}
         paramsPanelOpen={paramsPanelOpen}
         onToggleParamsPanel={() => setParamsPanelOpen((prev) => !prev)}
@@ -660,6 +708,7 @@ export function App() {
                 openingWIP={openingWIP}
                 simParams={(runInputs ?? liveInputs).simParams}
                 settingsChangedSinceRun={settingsChangedSinceRun}
+                dataChangedSinceRun={dataChangedSinceRun}
                 onExportAssumptionsJSON={handleExportRunSnapshotParams}
               />
             )}

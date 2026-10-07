@@ -26,9 +26,82 @@ import {
   isWorkingDay,
 } from './calendar';
 import { buildOpeningWipCases } from './des-engine';
+import { readNumberColumn } from './number-cell';
 
-export function parseCSVRaw(text: string): { headers: string[]; rows: Record<string, string>[] } {
-  if (!text || !text.trim()) return { headers: [], rows: [] };
+/** One finding about a file picked for upload. Errors refuse the file; warnings travel with it. */
+export interface CSVProblem {
+  severity: 'error' | 'warning';
+  code: string;
+  message: string;
+}
+
+const MAX_ROWS_NAMED = 5;
+
+function nameRows(lines: number[]): string {
+  const shown = lines.slice(0, MAX_ROWS_NAMED).join(', ');
+  return lines.length > MAX_ROWS_NAMED ? `${shown}, …` : shown;
+}
+
+/**
+ * Pipe is chosen only when the first line that carries any delimiter (looking at up to the first 6
+ * non-blank lines) has pipes and none of comma / semicolon / tab, so a file that has a comma,
+ * semicolon or tab on that line keeps the delimiter it always had (the one exception: a first line that contains only `|` now selects pipe).
+ */
+function firstDelimiterLineIsPipe(text: string): boolean {
+  let inQ = false;
+  let c = 0;
+  let s = 0;
+  let t = 0;
+  let p = 0;
+  let linesSeen = 0;
+  const endOfLine = (): boolean | null => {
+    if (c + s + t + p > 0) return p > 0 && c + s + t === 0;
+    c = s = t = p = 0;
+    linesSeen++;
+    return linesSeen >= 6 ? false : null;
+  };
+  const limit = Math.min(text.length, 4096);
+  for (let i = 0; i < limit; i++) {
+    const ch = text[i];
+    if (ch === '"') {
+      if (inQ && text[i + 1] === '"') i++;
+      else inQ = !inQ;
+    } else if (!inQ) {
+      if (ch === ',') c++;
+      else if (ch === ';') s++;
+      else if (ch === '\t') t++;
+      else if (ch === '|') p++;
+      else if (ch === '\n' || ch === '\r') {
+        const r = endOfLine();
+        if (r !== null) return r;
+      }
+    }
+  }
+  return c + s + t + p > 0 ? p > 0 && c + s + t === 0 : false;
+}
+
+export function parseCSVRaw(text: string): {
+  headers: string[];
+  rows: Record<string, string>[];
+  delimiter: string;
+  problems: CSVProblem[];
+} {
+  const fail = (code: string, message: string, delimiter = ','): ReturnType<typeof parseCSVRaw> => ({
+    headers: [],
+    rows: [],
+    delimiter,
+    problems: [{ severity: 'error', code, message }],
+  });
+
+  // E1 not readable text (NUL characters, or the "PK" signature of an Excel workbook / zip file)
+  if (text && (text.includes('\u0000') || text.startsWith('PK\u0003\u0004'))) {
+    return fail(
+      'E1',
+      'This is not a readable text file. It looks like an Excel workbook or a file saved in an unusual encoding. In Excel use Save As → CSV UTF-8, then upload that file.'
+    );
+  }
+  // E2 empty
+  if (!text || !text.trim()) return fail('E2', 'The file is empty.');
 
   // 1. Delimiter detection (, or ; or \t) by analyzing unquoted delimiters
   let delimiter = ',';
@@ -64,12 +137,21 @@ export function parseCSVRaw(text: string): { headers: string[]; rows: Record<str
   } else {
     delimiter = ',';
   }
+  // Fourth candidate, lowest priority: only when the first line carrying any separator has pipes and no comma/semicolon/tab
+  // (decimal commas in later data rows must not turn a pipe file into a one-column comma file).
+  if (firstDelimiterLineIsPipe(text)) {
+    delimiter = '|';
+  }
 
-  // 2. Tokenize into 2D records using character-by-character RFC 4180 state machine
-  const records: string[][] = [];
+  // 2. Tokenize into 2D records using character-by-character RFC 4180 state machine.
+  // `line` is the 1-based physical line of the file (blank lines and lines inside quoted cells count).
+  const records: { cells: string[]; line: number }[] = [];
   let currentRecord: string[] = [];
   let currentField = '';
   let inQuotes = false;
+  let line = 1;
+  let recordLine = 1;
+  let quoteOpenLine = 1;
   let i = 0;
   const len = text.length;
 
@@ -91,6 +173,11 @@ export function parseCSVRaw(text: string): { headers: string[]; rows: Record<str
         }
       } else {
         // All characters inside quotes (including \r, \n, delimiter, apostrophes) are preserved
+        if (char === '\r') {
+          if (!(i + 1 < len && text[i + 1] === '\n')) line++;
+        } else if (char === '\n') {
+          line++;
+        }
         currentField += char;
         i++;
         continue;
@@ -98,6 +185,7 @@ export function parseCSVRaw(text: string): { headers: string[]; rows: Record<str
     } else {
       if (char === '"') {
         inQuotes = true;
+        quoteOpenLine = line;
         i++;
         continue;
       } else if (char === delimiter) {
@@ -111,15 +199,19 @@ export function parseCSVRaw(text: string): { headers: string[]; rows: Record<str
         }
         currentRecord.push(currentField);
         currentField = '';
-        records.push(currentRecord);
+        records.push({ cells: currentRecord, line: recordLine });
         currentRecord = [];
+        line++;
+        recordLine = line;
         i++;
         continue;
       } else if (char === '\n') {
         currentRecord.push(currentField);
         currentField = '';
-        records.push(currentRecord);
+        records.push({ cells: currentRecord, line: recordLine });
         currentRecord = [];
+        line++;
+        recordLine = line;
         i++;
         continue;
       } else {
@@ -133,24 +225,106 @@ export function parseCSVRaw(text: string): { headers: string[]; rows: Record<str
   // Push trailing field/record
   if (currentField.length > 0 || currentRecord.length > 0) {
     currentRecord.push(currentField);
-    records.push(currentRecord);
+    records.push({ cells: currentRecord, line: recordLine });
   }
 
   // 3. Filter out empty rows safely (rows where all cells are empty/whitespace)
-  const cleanRecords = records.filter((rec) => rec.some((cell) => cell.trim().length > 0));
+  const clean = records.filter((rec) => rec.cells.some((cell) => cell.trim().length > 0));
 
-  if (cleanRecords.length === 0) {
-    return { headers: [], rows: [] };
+  if (clean.length === 0) return fail('E2', 'The file is empty.', delimiter);
+
+  const nonEmptyCount = (cells: string[]) => cells.filter((c) => c.trim().length > 0).length;
+  const rawHeaders = clean[0].cells;
+  const dataRecords = clean.slice(1);
+
+  // --- Errors, in precedence order E3 > E7 > E6 > E4 > E5 (E1, E2 handled above) ---
+  const err = (code: string, message: string) => fail(code, message, delimiter);
+
+  if (dataRecords.length === 0) {
+    return err('E3', 'The file has column headers but no data rows.');
+  }
+  if (
+    nonEmptyCount(rawHeaders) === 1 &&
+    nonEmptyCount(dataRecords[0].cells) >= 2 &&
+    (dataRecords.length < 2 || nonEmptyCount(dataRecords[1].cells) >= 2)
+  ) {
+    return err(
+      'E7',
+      `The first row (file row ${clean[0].line}) looks like a title, not column headers. Remove the row(s) above the header and upload again.`
+    );
+  }
+  if (rawHeaders.length === 1 && dataRecords.length >= 2) {
+    let other = false;
+    let q = false;
+    for (let k = 0; k < len && !other; k++) {
+      const ch = text[k];
+      if (ch === '"') {
+        if (q && text[k + 1] === '"') k++;
+        else q = !q;
+      } else if (!q && (ch === ',' || ch === ';' || ch === '\t' || ch === '|') && ch !== delimiter) {
+        other = true;
+      }
+    }
+    if (other) {
+      return err(
+        'E6',
+        'Only one column was found. Columns must be separated by comma, semicolon, tab or |. If there is a title row above the header, remove it.'
+      );
+    }
+  }
+  if (inQuotes) {
+    return err(
+      'E4',
+      `A quotation mark opened on file row ${quoteOpenLine} is never closed, so the rest of the file cannot be read reliably. Close or remove the quote on that row.`
+    );
+  }
+  const moreRows: { line: number; found: number }[] = [];
+  for (const rec of dataRecords) {
+    if (rec.cells.length > rawHeaders.length) {
+      let lastNonEmpty = -1;
+      rec.cells.forEach((c, idx) => {
+        if (c.trim().length > 0) lastNonEmpty = idx;
+      });
+      if (lastNonEmpty + 1 > rawHeaders.length) moreRows.push({ line: rec.line, found: lastNonEmpty + 1 });
+    }
+  }
+  if (moreRows.length > 0) {
+    return err(
+      'E5',
+      `${moreRows.length} row(s) have more columns than the header (file rows ${nameRows(moreRows.map((r) => r.line))}; expected ${rawHeaders.length}, found ${moreRows[0].found} on row ${moreRows[0].line}). A delimiter is extra on those rows, or there is a title row above the header.`
+    );
   }
 
-  const rawHeaders = cleanRecords[0];
-  const headers = rawHeaders.map((h, colIdx) => h.trim() || `Column_${colIdx + 1}`);
+  // --- Headers (duplicates renamed, nothing overwritten) and rows ---
+  const problems: CSVProblem[] = [];
+  const baseNames = rawHeaders.map((h, colIdx) => h.trim() || `Column_${colIdx + 1}`);
+  const used = new Set(baseNames);
+  const seen = new Map<string, number>();
+  const dupNames: string[] = [];
+  const headers = baseNames.map((name) => {
+    const n = (seen.get(name) ?? 0) + 1;
+    seen.set(name, n);
+    if (n === 1) return name;
+    if (!dupNames.includes(name)) dupNames.push(name);
+    let k = n;
+    let candidate = `${name} (${k})`;
+    while (used.has(candidate)) {
+      k++;
+      candidate = `${name} (${k})`;
+    }
+    used.add(candidate);
+    return candidate;
+  });
+
   const rows: Record<string, string>[] = [];
-
-  for (let r = 1; r < cleanRecords.length; r++) {
-    const rowCells = cleanRecords[r];
-    if (!rowCells.some((c) => c.trim().length > 0)) continue;
-
+  const shortLines: number[] = [];
+  let lastNamedHeader = -1;
+  rawHeaders.forEach((h, idx) => {
+    if (h.trim().length > 0) lastNamedHeader = idx;
+  });
+  for (const rec of dataRecords) {
+    const rowCells = rec.cells;
+    if (rowCells.length < lastNamedHeader + 1) shortLines.push(rec.line);
     const rowObj: Record<string, string> = {};
     headers.forEach((h, colIdx) => {
       rowObj[h] = rowCells[colIdx] !== undefined ? rowCells[colIdx] : '';
@@ -158,7 +332,38 @@ export function parseCSVRaw(text: string): { headers: string[]; rows: Record<str
     rows.push(rowObj);
   }
 
-  return { headers, rows };
+  if (shortLines.length > 0) {
+    problems.push({
+      severity: 'warning',
+      code: 'W1',
+      message: `${shortLines.length} row(s) have fewer columns than the header (file rows ${nameRows(shortLines)}); the missing cells were read as empty. Check those rows (missing delimiter, footer or total line).`,
+    });
+  }
+  if (dupNames.length > 0) {
+    problems.push({
+      severity: 'warning',
+      code: 'W2',
+      message: `Some columns have the same name (${dupNames.map((n) => `"${n}"`).join(', ')}); the later ones were renamed "${dupNames[0]} (2)" and so on. Check the column mapping.`,
+    });
+  }
+  if (text.includes('�')) {
+    problems.push({
+      severity: 'warning',
+      code: 'W3',
+      message:
+        'Some characters could not be read (the file is not saved as UTF-8). Names may look wrong; numbers and dates are not affected.',
+    });
+  }
+
+  return { headers, rows, delimiter, problems };
+}
+
+/** Required columns that are not mapped yet, named as the mapping screen shows them (empty = all set). */
+export function missingRequiredMappings(mapping: ColumnMapping): string[] {
+  const missing: string[] = [];
+  if (!mapping.intervalStartCol) missing.push('Date / Day');
+  if (!mapping.volumeCol) missing.push('Volume');
+  return missing;
 }
 
 export function autoSuggestColumnMapping(
@@ -384,6 +589,34 @@ function validateAndCreateDate(
   return d;
 }
 
+/** The single ISO-8601 pattern shared by the parser and the timezone-marker detector. */
+const ISO_DATE_RE =
+  /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:(Z)|([+-]\d{2}(?::?\d{2})?))?)?$/i;
+
+/**
+ * Reports whether a timestamp text carries a timezone marker, using the same rules as
+ * parseFlexibleDate: 'Z', a numeric offset as written ('+04:00'), or 'epoch' for a numeric
+ * Unix timestamp. Returns null when the text is read as written. Pure; parsing is unchanged.
+ */
+export function detectTimezoneMarker(dateStr: string | undefined, timeStr?: string): string | null {
+  if (!dateStr || typeof dateStr !== 'string') return null;
+  const trimmedDate = dateStr.trim();
+  if (!trimmedDate) return null;
+  const hasTime = !!(timeStr && typeof timeStr === 'string' && timeStr.trim());
+  if (/^\d{9,14}$/.test(trimmedDate) && !hasTime) return 'epoch';
+  const fullStr = hasTime ? `${trimmedDate} ${(timeStr as string).trim()}` : trimmedDate;
+  const m = fullStr.match(ISO_DATE_RE);
+  if (!m) return null;
+  if (m[7]) return 'Z';
+  if (m[8]) return m[8];
+  return null;
+}
+
+/** Name comparison key: trimmed, inner whitespace collapsed, lower-case. */
+export function categoryKey(name: string): string {
+  return String(name ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
 /**
  * Robust and strict date/time parser that handles:
  * - Separate date & time strings (e.g. date: "01/10/2026", time: "00:30")
@@ -412,9 +645,7 @@ export function parseFlexibleDate(dateStr: string, timeStr?: string): Date {
   }
 
   // 2. Strict ISO 8601 regex pattern (e.g. 2026-10-01T00:30:00.000Z or 2026-10-01 00:30:00)
-  const isoMatch = fullStr.match(
-    /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[T\s](\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?(?:(Z)|([+-]\d{2}(?::?\d{2})?))?)?$/i
-  );
+  const isoMatch = fullStr.match(ISO_DATE_RE);
   if (isoMatch) {
     const y = parseInt(isoMatch[1], 10);
     const mo = parseInt(isoMatch[2], 10);
@@ -560,9 +791,18 @@ export function generateNextWIPId(existingWIP: OpeningWIPCase[]): string {
 export function mapRawRecordsToIntervals(
   rawRows: Record<string, string>[],
   mapping: ColumnMapping,
-  defaultCategoryName: string = 'General'
+  defaultCategoryName: string = 'General',
+  delimiter: string = ','
 ): StandardInterval[] {
   const intervals: StandardInterval[] = [];
+
+  // Volume column is read as a whole: for semicolon/tab files the decimal convention
+  // (comma or dot) is decided per column (see number-cell.ts).
+  const volumeColumn = readNumberColumn(
+    rawRows.map((r) => String(r[mapping.volumeCol] ?? '')),
+    delimiter
+  );
+  const volumeProblems = new Map(volumeColumn.problems.map((p) => [p.index, p]));
 
   for (let i = 0; i < rawRows.length; i++) {
     const row = rawRows[i];
@@ -598,43 +838,38 @@ export function mapRawRecordsToIntervals(
     const volStr = row[mapping.volumeCol];
     const catStr =
       mapping.categoryCol && row[mapping.categoryCol]
-        ? row[mapping.categoryCol].trim()
+        ? row[mapping.categoryCol].trim().replace(/\s+/g, ' ')
         : defaultCategoryName;
 
     const startDate = parseFlexibleDate(dateStr, timeStr);
+    const markers: string[] = [];
+    const startMarker = detectTimezoneMarker(dateStr, timeStr);
+    if (startMarker) markers.push(startMarker);
 
-    // Parse volume safely: strip thousands separators, currency symbols, whitespace
+    // Parse volume strictly: clear values are read, unclear ones are blocked (stored as 0).
     let volume = 0;
     let volumeParsingIssue: string | null = null;
     if (volStr) {
-      const stripped = volStr.trim().replace(/[\s$,]/g, '');
-      const parsed = parseFloat(stripped);
-      if (Number.isFinite(parsed)) {
+      const problem = volumeProblems.get(i);
+      const parsed = volumeColumn.values[i];
+      if (problem) {
+        volumeParsingIssue = `${problem.kind}:row ${i + 2}: "${problem.text}" — ${problem.detail}`;
+        volume = 0;
+      } else if (parsed !== null && parsed !== undefined) {
         if (parsed < 0) {
           volumeParsingIssue = `Negative volume ${volStr} (interpreted as ${parsed}) — must be non-negative`;
           volume = 0;
         } else {
-          // Check if the raw string has separators that parseFloat would have truncated
-          if (volStr.includes(',') && volStr.includes('.')) {
-            // Likely European format or contains thousands separator
-            if (!/^\d{1,3}(,\d{3})*(\.\d+)?$|^\d{1,3}(\.\d{3})*(,\d+)?$/.test(volStr.trim())) {
-              volumeParsingIssue = `Volume "${volStr}" may have been mis-parsed due to non-standard formatting`;
-            }
-          } else if (volStr.includes(',') && !/^\d+(,\d+)?$/.test(volStr.trim())) {
-            // Has a comma but not in expected position
-            volumeParsingIssue = `Volume "${volStr}" contains unexpected formatting — thousands separators will be stripped (parsed as ${parsed})`;
-          }
           volume = parsed;
         }
-      } else {
-        volumeParsingIssue = `Volume cell "${volStr}" is not numeric`;
-        volume = 0;
       }
     }
 
     let endDate: Date;
     if (mapping.intervalEndCol && row[mapping.intervalEndCol]) {
       endDate = parseFlexibleDate(row[mapping.intervalEndCol]);
+      const endMarker = detectTimezoneMarker(row[mapping.intervalEndCol]);
+      if (endMarker && !markers.includes(endMarker)) markers.push(endMarker);
     } else {
       endDate = isNaN(startDate.getTime())
         ? new Date(NaN)
@@ -648,7 +883,33 @@ export function mapRawRecordsToIntervals(
       volume,
       category: catStr || defaultCategoryName,
       ...(volumeParsingIssue ? { volumeParsingIssue } : {}),
+      ...(markers.length > 0 ? { timezoneMarkers: markers } : {}),
     });
+  }
+
+  // Category spellings that differ only by letter case or spacing become ONE category: every
+  // row takes the first spelling of its key in file order. The file alone decides (no dependency
+  // on stored categories). Rows whose spelling changed remember the original for the DQ note.
+  // Pre-sort order equals file order here.
+  const firstSpelling = new Map<string, string>();
+  const spellingsByKey = new Map<string, Set<string>>();
+  for (const it of intervals) {
+    const key = categoryKey(it.category);
+    if (!firstSpelling.has(key)) firstSpelling.set(key, it.category);
+    let set = spellingsByKey.get(key);
+    if (!set) {
+      set = new Set<string>();
+      spellingsByKey.set(key, set);
+    }
+    set.add(it.category);
+  }
+  for (const it of intervals) {
+    const key = categoryKey(it.category);
+    const canonical = firstSpelling.get(key) as string;
+    if ((spellingsByKey.get(key) as Set<string>).size > 1 && it.category !== canonical) {
+      it.categoryVariant = it.category;
+    }
+    it.category = canonical;
   }
 
   // Sort chronologically (placing any invalid dates at end)
@@ -677,15 +938,36 @@ export function discoverAndSyncCategories(
   existingCategories: CategoryConfig[],
   globalSLA: SLAPolicyConfig
 ): CategoryConfig[] {
-  const uniqueSegNames = new Set<string>();
+  return syncCategoriesWithRenames(intervals, existingCategories, globalSLA).categories;
+}
+
+export interface CategorySyncResult {
+  categories: CategoryConfig[];
+  /** existing category whose spelling changed to the spelling now used by the intervals */
+  renames: Array<{ from: string; to: string }>;
+  /** existing categories with the same key as an earlier one: dropped (the first supplies the settings) */
+  duplicatesDropped: Array<{ kept: string; dropped: string }>;
+}
+
+export function syncCategoriesWithRenames(
+  intervals: StandardInterval[],
+  existingCategories: CategoryConfig[],
+  globalSLA: SLAPolicyConfig
+): CategorySyncResult {
+  // key -> spelling used by the intervals (first in order)
+  const uniqueByKey = new Map<string, string>();
   for (const it of intervals) {
     if (it.category && it.category.trim()) {
-      uniqueSegNames.add(it.category.trim());
+      const key = categoryKey(it.category);
+      if (!uniqueByKey.has(key)) uniqueByKey.set(key, it.category.trim().replace(/\s+/g, ' '));
     }
   }
+  const uniqueSegNames = new Set<string>(uniqueByKey.values());
+  const renames: Array<{ from: string; to: string }> = [];
+  const duplicatesDropped: Array<{ kept: string; dropped: string }> = [];
 
   if (uniqueSegNames.size === 0) {
-    return existingCategories.length > 0 ? existingCategories : [
+    const kept = existingCategories.length > 0 ? existingCategories : [
       {
         id: 'cat_default',
         name: 'General',
@@ -696,17 +978,29 @@ export function discoverAndSyncCategories(
         primaryWindowMinutes: convertDurationToMinutes(globalSLA.primaryWindow, globalSLA.primaryUnit),
       }
     ];
+    return { categories: kept, renames, duplicatesDropped };
   }
 
+  // Existing categories are matched by key; when two share a key the first in array order
+  // supplies the settings and the other is reported (and not carried over).
   const existingMap = new Map<string, CategoryConfig>();
-  existingCategories.forEach((c) => existingMap.set(c.name, c));
+  existingCategories.forEach((c) => {
+    const key = categoryKey(c.name);
+    const first = existingMap.get(key);
+    if (!first) {
+      existingMap.set(key, c);
+    } else if (uniqueByKey.has(key)) {
+      duplicatesDropped.push({ kept: first.name, dropped: c.name });
+    }
+  });
 
   const sortedNames = Array.from(uniqueSegNames).sort();
   const defaultPrimaryWinMin = convertDurationToMinutes(globalSLA.primaryWindow, globalSLA.primaryUnit);
 
   const synced: CategoryConfig[] = sortedNames.map((name, index) => {
-    const existing = existingMap.get(name);
+    const existing = existingMap.get(categoryKey(name));
     if (existing) {
+      if (existing.name !== name) renames.push({ from: existing.name, to: name });
       return {
         ...existing,
         name,
@@ -729,7 +1023,55 @@ export function discoverAndSyncCategories(
     };
   });
 
-  return synced;
+  // A dropped duplicate's old spelling also maps to the surviving category's new spelling.
+  for (const d of duplicatesDropped) {
+    const target = synced.find((c) => categoryKey(c.name) === categoryKey(d.dropped));
+    if (target && target.name !== d.dropped && !renames.some((r) => r.from === d.dropped)) {
+      renames.push({ from: d.dropped, to: target.name });
+    }
+  }
+
+  return { categories: synced, renames, duplicatesDropped };
+}
+
+/**
+ * Stored backlog cases take the category spelling now used by the demand intervals (matched by
+ * key), i.e. the same renames discoverAndSyncCategories applies to the categories themselves.
+ * Returns the same array when nothing changes (safe to feed to a state setter).
+ */
+export function remapCasesToIntervalSpelling<T extends { category: string }>(
+  cases: T[],
+  intervals: StandardInterval[]
+): T[] {
+  if (cases.length === 0 || intervals.length === 0) return cases;
+  const spelling = new Map<string, string>();
+  for (const it of intervals) {
+    const key = categoryKey(it.category);
+    if (key && !spelling.has(key)) spelling.set(key, it.category.trim().replace(/\s+/g, ' '));
+  }
+  return applyCategoryRenames(
+    cases,
+    Array.from(spelling.values()).map((to) => ({ from: to, to }))
+  );
+}
+
+/** Applies a rename list to stored backlog cases (matched by key). Returns the same array when nothing changes. */
+export function applyCategoryRenames<T extends { category: string }>(
+  cases: T[],
+  renames: Array<{ from: string; to: string }>
+): T[] {
+  if (renames.length === 0) return cases;
+  const map = new Map(renames.map((r) => [categoryKey(r.from), r.to]));
+  let changed = false;
+  const out = cases.map((c) => {
+    const to = map.get(categoryKey(c.category));
+    if (to !== undefined && to !== c.category) {
+      changed = true;
+      return { ...c, category: to };
+    }
+    return c;
+  });
+  return changed ? out : cases;
 }
 
 export function validateDataQuality(params: {
@@ -740,9 +1082,15 @@ export function validateDataQuality(params: {
   labor: LaborConfig;
   sla: SLAPolicyConfig;
   openingWIP: OpeningWIPCase[];
+  /** Non-blocking warnings the file reader raised for the accepted file (short rows, duplicate headers, characters). */
+  fileWarnings?: CSVProblem[];
 }): DQResult {
   const { intervals, mapping, categories, calendar, labor, sla, openingWIP } = params;
   const issues: DQIssue[] = [];
+
+  for (const w of params.fileWarnings ?? []) {
+    if (w.severity === 'warning') issues.push({ severity: 'warning', field: 'File reading', message: w.message });
+  }
 
   if (!mapping?.intervalStartCol || !mapping?.volumeCol) {
     issues.push({
@@ -860,12 +1208,113 @@ export function validateDataQuality(params: {
     });
   }
 
-  if (volumeParsingIssues.length > 0) {
+  // Timezone markers (Z / +hh:mm / epoch): converted to this PC's timezone, as always. Warn only.
+  {
+    let markedRows = 0;
+    const markerSet = new Set<string>();
+    let pcOffsetMin: number | null = null;
+    for (const it of intervals) {
+      if (it.timezoneMarkers && it.timezoneMarkers.length > 0) {
+        markedRows++;
+        it.timezoneMarkers.forEach((m) => markerSet.add(m));
+        if (pcOffsetMin === null && !isNaN(it.start.getTime())) pcOffsetMin = -it.start.getTimezoneOffset();
+      }
+    }
+    if (markedRows > 0) {
+      const off = pcOffsetMin ?? 0;
+      const sign = off < 0 ? '-' : '+';
+      const absOff = Math.abs(off);
+      const pcZone = `UTC${sign}${Math.floor(absOff / 60)}${absOff % 60 ? ':' + String(absOff % 60).padStart(2, '0') : ''}`;
+      const hasEpoch = markerSet.has('epoch');
+      const zoneMarkers = Array.from(markerSet).filter((m) => m !== 'epoch').sort();
+      const rowsText = `${markedRows.toLocaleString()} timestamp${markedRows === 1 ? '' : 's'}`;
+      let message: string;
+      if (zoneMarkers.length === 0) {
+        message = `${rowsText} ${markedRows === 1 ? 'was a' : 'were'} numeric (Unix epoch) value${markedRows === 1 ? '' : 's'}. ${markedRows === 1 ? 'It was' : 'They were'} converted to this PC's timezone (${pcZone}). Open the file on a PC set to the operation's timezone, or write the times as plain dates and times to have them read as written.`;
+      } else {
+        message = `${rowsText} carried a timezone marker (${zoneMarkers.join(', ')}${hasEpoch ? ', plus numeric epoch values' : ''}). ${markedRows === 1 ? 'It was' : 'They were'} converted to this PC's timezone (${pcZone}). Open the file on a PC set to the operation's timezone, or remove the markers to have times read as written.`;
+      }
+      issues.push({ severity: 'warning', field: 'Timezone markers converted', message });
+    }
+  }
+
+  // Category spellings merged (letter case / spacing only).
+  {
+    const groups = new Map<string, { canonical: string; variants: Map<string, number> }>();
+    for (const it of intervals) {
+      if (!it.categoryVariant) continue;
+      const key = categoryKey(it.category);
+      let g = groups.get(key);
+      if (!g) {
+        g = { canonical: it.category, variants: new Map<string, number>() };
+        groups.set(key, g);
+      }
+      g.variants.set(it.categoryVariant, (g.variants.get(it.categoryVariant) ?? 0) + 1);
+    }
+    if (groups.size > 0) {
+      const lines = Array.from(groups.keys())
+        .sort()
+        .map((k) => {
+          const g = groups.get(k) as { canonical: string; variants: Map<string, number> };
+          const names = Array.from(g.variants.keys()).sort().map((v) => `"${v}"`).join(', ');
+          const rowsMerged = Array.from(g.variants.values()).reduce((a, b) => a + b, 0);
+          return `${names} → "${g.canonical}" (${rowsMerged.toLocaleString()} row${rowsMerged === 1 ? '' : 's'})`;
+        });
+      const shown = lines.slice(0, 10).join('; ');
+      issues.push({
+        severity: 'warning',
+        field: 'Category names merged',
+        message: `Category names that differ only by letter case or spacing were merged into one category: ${shown}${lines.length > 10 ? `; +${lines.length - 10} more` : ''}.`,
+        details: 'The first spelling in the file is used. Names that differ in the words themselves stay separate categories.',
+      });
+    }
+  }
+
+  const unreadableVolumes = volumeParsingIssues.filter((v) => /^(unreadable|ambiguous|mixed):/.test(v.message));
+  const otherVolumeIssues = volumeParsingIssues.filter((v) => !/^(unreadable|ambiguous|mixed):/.test(v.message));
+
+  if (unreadableVolumes.length > 0) {
+    const examples = unreadableVolumes
+      .slice(0, 5)
+      .map((v) => v.message.replace(/^(unreadable|ambiguous|mixed):/, ''))
+      .join('; ');
+    const hasMixed = unreadableVolumes.some((v) => v.message.startsWith('mixed:'));
+    issues.push({
+      severity: 'error',
+      field: 'Unreadable volume',
+      message: `${unreadableVolumes.length} volume cell(s) cannot be read with certainty${hasMixed ? ' (mixed number formats)' : ''}: ${examples}${unreadableVolumes.length > 5 ? ` (and ${unreadableVolumes.length - 5} more)` : ''}.`,
+      details: 'Volumes must be plain numbers. Units, letters and exponents are not accepted; in a comma-separated file a comma is only allowed as a thousands separator (1,234); in a semicolon or tab file the decimal convention is taken from the column and must not be mixed. These cells are stored as 0 and the run is blocked until the file is corrected.',
+    });
+  }
+
+  if (otherVolumeIssues.length > 0) {
     issues.push({
       severity: 'warning',
       field: 'Volume Parsing',
-      message: `Found ${volumeParsingIssues.length} volume cell(s) with non-standard formatting (e.g. row ${volumeParsingIssues[0].row}: ${volumeParsingIssues[0].message}).`,
-      details: `Thousands separators and currency symbols are stripped automatically; negative volumes are rejected and treated as 0. Verify the affected rows match your expectation.`,
+      message: `Found ${otherVolumeIssues.length} volume cell(s) with a problem (e.g. row ${otherVolumeIssues[0].row}: ${otherVolumeIssues[0].message}).`,
+      details: `Negative volumes are rejected and treated as 0. Verify the affected rows match your expectation.`,
+    });
+  }
+
+  const fractionalVolumeRows: number[] = [];
+  const hugeVolumeRows: number[] = [];
+  intervals.forEach((it, i) => {
+    if (Number.isFinite(it.volume) && Math.abs(it.volume - Math.round(it.volume)) > 1e-9) fractionalVolumeRows.push(i + 2);
+    if (it.volume > 100000) hugeVolumeRows.push(i + 2);
+  });
+  if (fractionalVolumeRows.length > 0) {
+    issues.push({
+      severity: 'warning',
+      field: 'Fractional volume',
+      message: `${fractionalVolumeRows.length} interval volume(s) are not whole numbers (e.g. row ${fractionalVolumeRows[0]}). The simulation rounds each interval to whole cases.`,
+      details: 'The displayed total keeps the decimals; the engine uses the rounded per-interval values, so the simulated total can differ slightly.',
+    });
+  }
+  if (hugeVolumeRows.length > 0) {
+    issues.push({
+      severity: 'warning',
+      field: 'Very large volume',
+      message: `${hugeVolumeRows.length} interval volume(s) exceed 100,000 (e.g. row ${hugeVolumeRows[0]}). No real 30-minute interval is that large — check for a misread number.`,
     });
   }
 

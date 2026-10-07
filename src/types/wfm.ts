@@ -237,6 +237,10 @@ export interface StandardInterval {
   volume: number;
   category: string;
   volumeParsingIssue?: string;
+  /** Timezone markers carried by this row's start/end text ('Z', '+04:00', or 'epoch' for numeric timestamps). Display/warning only. */
+  timezoneMarkers?: string[];
+  /** Spelling in the file when this row's category was merged into another spelling (input safety part 2). */
+  categoryVariant?: string;
 }
 
 export interface OpeningWIPCase {

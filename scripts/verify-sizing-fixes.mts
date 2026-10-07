@@ -8,6 +8,7 @@
  * Run: npx tsx scripts/verify-sizing-fixes.mts
  */
 
+import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
@@ -47,12 +48,14 @@ import {
 } from '../src/utils/des-engine';
 import * as hcNs from '../src/utils/hc-search';
 import * as desNs from '../src/utils/des-engine';
-import { discoverAndSyncCategories, mapRawRecordsToIntervals, validateDataQuality } from '../src/utils/csv-parser';
+import { discoverAndSyncCategories, mapRawRecordsToIntervals, missingRequiredMappings, validateDataQuality } from '../src/utils/csv-parser';
 import { buildSampleDataset } from '../src/utils/sample-data';
 import { loadSampleFile } from './sample-files';
 import { DEFAULT_CALENDAR, DEFAULT_CATEGORIES, DEFAULT_LABOR, DEFAULT_SIM_PARAMS, DEFAULT_SLA } from '../src/utils/default-config';
 import {
   CalendarConfig,
+  CaseEntity,
+  OpeningWIPCase,
   CategoryConfig,
   LaborConfig,
   ShiftDistributionByCategory,
@@ -3168,7 +3171,7 @@ console.log('\n--- Suite D43: fair case-to-agent distribution ---');
   // --- D43.14: OFF is the exact legacy dispatch — timing digests equal the pre-change engine, including the
   // 24x7 scenario where daily budgets bind (30 parked cases) and ON legitimately differs -------------------
   {
-    const GOLDEN_OFF: Record<string, number> = { ...GOLDEN_TIMES, c247: 3849299782 };
+    const GOLDEN_OFF: Record<string, number> = { ...GOLDEN_TIMES, c247: 857025119 };
     for (const [name, golden] of Object.entries(GOLDEN_OFF)) {
       const d = run43((scn43 as any)[name](), { dispatchFairness: { enabled: false } });
       assert(timesDigest43(d) === golden, `D43.14 ${name}: fairness OFF timing identical to the pre-change engine`, `digest=${timesDigest43(d)} golden=${golden}`);
@@ -4803,6 +4806,824 @@ console.log('\n--- Suite D63: G1-a stray date blocks from 8 empty days ---');
   for (let s = 0; s < 15; s++) small.push(iv63(d63(10, 8 + Math.floor(s / 2), (s % 2) * 30), small.length));
   const rSmall = dq63(small);
   assert(!iso63(rSmall), 'D63.9 two days 10 days apart with 15 rows each: no isolated-date error', tags(rSmall));
+}
+
+// ---------------------------------------------------------------
+// Suite D64 - F2 (DES-8): on a 24x7 calendar a budget-exhausted park hands the case back at once
+// (CaseResume at nextOpen(now) = now), instead of holding it in parkedWIP until the next calendar midnight
+// while other agents sit idle with budget. Hand-built precomputedCases, every time derived by hand.
+// Budget = 7.5 h x adherence. Mon 12 Oct 2026 is day 1.
+// ---------------------------------------------------------------
+console.log('\n--- Suite D64: F2 24x7 park resumes when capacity exists ---');
+{
+  const catF2: CategoryConfig[] = [{ id: 'g', name: 'General', ahtMinutes: 240, shrinkagePct: 0.2, priority: 1, primaryWindowMinutes: 1440 }];
+  const f2At = (day: number, h: number, m = 0) => new Date(2026, 9, day, h, m);
+  const f2Case = (id: string, syn: number, arr: Date, aht: number, windowH = 24): CaseEntity => {
+    const dl = new Date(arr.getTime() + windowH * 3600000);
+    return {
+      id, syntheticId: syn, category: 'General', priority: 1, arrival: arr, clockStart: arr, totalAhtMinutes: aht,
+      remainingWorkMinutes: aht, primaryDeadline: dl, latestSafeStart: new Date(dl.getTime() - aht * 60000),
+      firstStartTime: null, completeTime: null, parkCount: 0, isOpeningWip: false,
+    };
+  };
+  const labF2 = (adh: number): LaborConfig => ({ ...DEFAULT_LABOR, dailyProductiveHours: 7.5, adherencePct: adh, workingDaysPerWeek: 7, offDaysPerWeek: 0 });
+  const slaF2: SLAPolicyConfig = { ...DEFAULT_SLA, primaryWindow: 24, primaryUnit: 'hours' };
+  const stagF2 = (offsets: number[]): ShiftDistributionByCategory => ({ __POOLED__: { slapMinutes: 60, slaps: offsets.map((o) => ({ startMinutesFromOpen: o, agentCount: 1 })) } } as any);
+  const runF2 = (cases: CaseEntity[], hc: number, adh: number, offsets: number[] | null, seed = 7) =>
+    runBackofficeDES({
+      operationalHC: hc, intervals: [], openingWIP: [], categories: catF2, calendar: CAL_24X7, labor: labF2(adh), sla: slaF2, seed,
+      shiftDistribution: offsets ? stagF2(offsets) : undefined,
+      precomputedCases: { cases, horizonStart: f2At(12, 0), horizonEnd: f2At(13, 0) },
+    });
+  const dayKeyF2 = (d: Date) => d.getFullYear() * 10000 + d.getMonth() * 100 + d.getDate();
+  const busyF2 = (des: any) => (des.agentTimeline as any[]).filter((s) => s.state === 'busy');
+  const slicesOf = (des: any, id: string) => busyF2(des).filter((s) => s.caseId === id).sort((a, b) => a.from - b.from);
+  const hhmm = (d: Date) => `${d.getDate()}/${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+  // Avoidable waits: a park gap where, at some 5-minute sample inside the gap, ANOTHER agent was idle, had daily
+  // budget left, and (staggered) was inside its own shift window. 0 on a correct engine.
+  const avoidable = (des: any, hc: number, adh: number, offsets: number[] | null): number => {
+    const budget = 450 * adh;
+    const sl = busyF2(des);
+    const byCase = new Map<string, any[]>();
+    for (const s of sl) { if (!byCase.has(s.caseId)) byCase.set(s.caseId, []); byCase.get(s.caseId)!.push(s); }
+    let n = 0;
+    for (const arr of byCase.values()) {
+      arr.sort((a, b) => a.from - b.from);
+      for (let i = 0; i + 1 < arr.length; i++) {
+        const a = arr[i], b = arr[i + 1];
+        if ((b.from - a.to) / 60000 <= 0.01) continue;
+        let found = false;
+        for (let t = a.to.getTime(); t < b.from.getTime() && !found; t += 5 * 60000) {
+          for (let ag = 0; ag < hc && !found; ag++) {
+            if (sl.some((s) => s.agentId === ag && s.from.getTime() <= t && t < s.to.getTime())) continue;
+            let used = 0;
+            for (const s of sl) if (s.agentId === ag && s.from.getTime() <= t && dayKeyF2(s.from) === dayKeyF2(new Date(t))) used += (Math.min(s.to.getTime(), t) - s.from.getTime()) / 60000;
+            let inShift = true;
+            if (offsets) { const d0 = new Date(t); d0.setHours(0, 0, 0, 0); const st = d0.getTime() + offsets[ag] * 60000; inShift = t >= st && t < st + 450 * 60000; }
+            if (inShift && used < budget - 0.01) found = true;
+          }
+        }
+        if (found) n++;
+      }
+    }
+    return n;
+  };
+  const budgetOk = (des: any, adh: number): boolean => {
+    const per = new Map<string, number>();
+    for (const s of busyF2(des)) { const k = `${s.agentId}:${dayKeyF2(s.from)}`; per.set(k, (per.get(k) ?? 0) + (s.to - s.from) / 60000); }
+    return [...per.values()].every((v) => v <= 450 * adh + 0.01);
+  };
+  const fmtSl = (a: any[]) => a.map((s) => `ag${s.agentId}@${hhmm(s.from)}-${hhmm(s.to)}`).join(' ');
+
+  // (a) all on one shift, 3 agents. W1-W3 400 min each from 00:00 (agents left with 50 min). D (due 12 h) and E (due 24 h),
+  // 100 min, arrive 06:40: two agents take them, work 50 min each, budget gone at 07:30 -> both park with 50 left.
+  // The third agent is idle with 50 min: D (earlier deadline) must resume 07:30-08:20 on it. E: nobody has budget -> waits for
+  // the day reset (Tue 13 Oct 00:00), legitimate.
+  const casesA = [
+    f2Case('W1', 1, f2At(12, 0), 400), f2Case('W2', 2, f2At(12, 0), 400), f2Case('W3', 3, f2At(12, 0), 400),
+    f2Case('D', 4, f2At(12, 6, 40), 100, 12), f2Case('E', 5, f2At(12, 6, 40), 100),
+  ];
+  const dA = runF2(casesA, 3, 1.0, null);
+  const dSl = slicesOf(dA, 'D'), eSl = slicesOf(dA, 'E');
+  assert(avoidable(dA, 3, 1.0, null) === 0, 'D64.1 24x7 one shift: 0 avoidable waits (before the fix: 2, D and E both waited to midnight)', `avoidable=${avoidable(dA, 3, 1.0, null)}`);
+  assert(dSl.length === 2 && hhmm(dSl[0].from) === '12/6:40' && hhmm(dSl[0].to) === '12/7:30' && hhmm(dSl[1].from) === '12/7:30' && hhmm(dSl[1].to) === '12/8:20' && dSl[0].agentId !== dSl[1].agentId,
+    'D64.2 case D: 06:40-07:30 on one agent, resumes at 07:30 on the agent that still has budget, done 08:20 (same day)', fmtSl(dSl));
+  assert(eSl.length === 2 && hhmm(eSl[1].from) === '13/0:00' && hhmm(eSl[1].to) === '13/0:50',
+    'D64.3 case E (nobody has budget at 07:30): resumes at the day reset, Tue 00:00-00:50', fmtSl(eSl));
+  assert(budgetOk(dA, 1.0), 'D64.4 no agent works beyond its 450-min daily budget (scenario a)', '');
+
+  // (b) staggered 0/8/16 h, adherence 0.9 (budget 405; shift windows 00:00-07:30 / 08:00-15:30 / 16:00-23:30).
+  // C1 00:00 (240) and C2 01:00 (240): the 00:00 agent works C1 00:00-04:00, then C2 04:00-06:45 (165 min = budget gone) and parks with 75 left.
+  // The 08:00 cohort starts -> C2 must resume 08:00-09:15 the same day, not Tue 00:00.
+  const offs = [0, 480, 960];
+  const casesB = [f2Case('C1', 1, f2At(12, 0), 240), f2Case('C2', 2, f2At(12, 1), 240), f2Case('C3', 3, f2At(12, 17), 240), f2Case('C4', 4, f2At(12, 18), 240)];
+  const dB = runF2(casesB, 3, 0.9, offs);
+  const c2 = slicesOf(dB, 'C2');
+  assert(avoidable(dB, 3, 0.9, offs) === 0, 'D64.5 24x7 staggered 0/8/16 h, adherence 0.9: 0 avoidable waits (before the fix: C2 waited to midnight)', `avoidable=${avoidable(dB, 3, 0.9, offs)}`);
+  assert(c2.length === 2 && hhmm(c2[0].from) === '12/4:00' && hhmm(c2[0].to) === '12/6:45' && hhmm(c2[1].from) === '12/8:00' && hhmm(c2[1].to) === '12/9:15',
+    'D64.6 C2 parks 06:45 (budget) and resumes 08:00 when the second cohort starts, done 09:15', fmtSl(c2));
+  // no work outside any agent's own shift window, none beyond budget
+  const outside = busyF2(dB).filter((s: any) => { const d0 = new Date(s.from); d0.setHours(0, 0, 0, 0); const st = d0.getTime() + offs[s.agentId] * 60000; return s.from.getTime() < st || s.to.getTime() > st + 450 * 60000; });
+  assert(outside.length === 0 && budgetOk(dB, 0.9), 'D64.7 staggered: every busy slice inside its agent shift window and within the 405-min budget', `outside=${outside.length}`);
+
+  // (c) all agents exhausted: 2 agents, W1/W2 400 min, D/E 100 min at 06:40 -> both park 07:30, nobody has budget.
+  const dC = runF2([f2Case('W1', 1, f2At(12, 0), 400), f2Case('W2', 2, f2At(12, 0), 400), f2Case('D', 3, f2At(12, 6, 40), 100), f2Case('E', 4, f2At(12, 6, 40), 100)], 2, 1.0, null);
+  const dcD = slicesOf(dC, 'D'), dcE = slicesOf(dC, 'E');
+  assert(dcD.length === 2 && dcE.length === 2 && hhmm(dcD[0].to) === '12/7:30' && hhmm(dcD[1].from) === '13/0:00' && hhmm(dcE[1].from) === '13/0:00',
+    'D64.8 every agent exhausted: D and E wait to the next budget reset (Tue 00:00) - legitimate wait, not an avoidable one', `D ${fmtSl(dcD)} E ${fmtSl(dcE)}`);
+  assert(avoidable(dC, 2, 1.0, null) === 0 && budgetOk(dC, 1.0), 'D64.9 all-exhausted run: 0 avoidable waits, nobody over budget', '');
+
+  // (d) conservation + invariants on (a), (b), (c)
+  for (const [lbl, des, adh] of [['a', dA, 1.0], ['b', dB, 0.9], ['c', dC, 1.0]] as const) {
+    const inv = verifyAgentTimelineInvariants(des as any, labF2(adh), CAL_24X7);
+    const tot = new Map<string, number>();
+    for (const s of busyF2(des)) tot.set(s.caseId, (tot.get(s.caseId) ?? 0) + (s.to - s.from) / 60000);
+    const completed = (des as any).caseResults.filter((c: any) => c.isCompleted);
+    const conserved = completed.every((c: any) => Math.abs((tot.get(c.caseId) ?? 0) - c.ahtMinutes) < 0.01);
+    assert(inv.valid && conserved && (des as any).doubleBookedAssignments === 0 && completed.length > 0, `D64.10${lbl} (${lbl}) invariants valid, handled minutes = AHT for every completed case, no double booking`, `${inv.errors.join('; ')} completed=${completed.length}`);
+  }
+
+  // (e) SLA % non-decreasing in headcount, 24x7 week, 6 cases/hour, AHT 45, adherence 0.9, 24 h SLA (before the fix: 14 -> 100%, 16 -> 98%)
+  {
+    const iv: StandardInterval[] = [];
+    for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) { const s = new Date(2026, 9, 12 + d, h, 0); iv.push({ intervalIndex: iv.length, start: s, end: new Date(s.getTime() + 3600000), volume: 6, category: 'General' } as StandardInterval); }
+    const catS: CategoryConfig[] = [{ id: 'g', name: 'General', ahtMinutes: 45, shrinkagePct: 0.2, priority: 1 }];
+    const slaS: SLAPolicyConfig = { ...DEFAULT_SLA, primaryWindow: 24, primaryUnit: 'hours', clockBasis: 'wall_clock', clockStartPolicy: 'arrival', minCoverageEnabled: false };
+    const pcts: number[] = [];
+    for (const hc of [14, 15, 16, 17]) {
+      const r = runBackofficeDES({ operationalHC: hc, intervals: iv, openingWIP: [], categories: catS, calendar: CAL_24X7, labor: labF2(0.9), sla: slaS, seed: 11, queueArchitecture: 'pooled', skipCaseResultsAndTimeline: true });
+      pcts.push(r.primaryAchievedPct);
+    }
+    assert(pcts.every((p, i) => i === 0 || p >= pcts[i - 1] - 1e-9), 'D64.11 SLA % is non-decreasing in headcount for N = 14..17 (before the fix 14 -> 100%, 16 -> 98%)', `SLA% by N=14..17: ${pcts.map((p) => p.toFixed(1)).join(', ')}`);
+  }
+
+  // (f) business-hours digest (Mon-Fri default calendar, uniform and staggered) identical before/after the fix
+  {
+    const digest = (des: any): number => {
+      let h = 2166136261;
+      for (const c of [...des.caseResults].sort((a: any, b: any) => (a.caseId < b.caseId ? -1 : 1))) {
+        const str = `${c.caseId}:${c.firstStartTime?.getTime() ?? 'x'}:${c.completeTime?.getTime() ?? 'x'}:${c.parkCount}`;
+        for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+      }
+      return h >>> 0;
+    };
+    const iv: StandardInterval[] = [];
+    for (let d = 0; d < 5; d++) for (const h of [8, 10, 12, 14]) { const s = new Date(2026, 9, 12 + d, h, 0); iv.push({ intervalIndex: iv.length, start: s, end: new Date(s.getTime() + 1800000), volume: 1, category: 'General' } as StandardInterval); }
+    const mk = (offsets: number[] | null) => runBackofficeDES({ operationalHC: 3, intervals: iv, openingWIP: [], categories: catF2, calendar: DEFAULT_CALENDAR, labor: { ...DEFAULT_LABOR, adherencePct: 0.9 }, sla: slaF2, seed: 7, queueArchitecture: 'pooled', shiftDistribution: offsets ? stagF2(offsets) : undefined });
+    const dU = digest(mk(null)), dS = digest(mk([0, 120, 240]));
+    assert(dU === 1141821764, 'D64.12a business-hours uniform run digest pinned (measured on the unchanged engine)', `digest=${dU}`);
+    assert(dS === 147910604, 'D64.12b business-hours staggered 0/2/4 h run digest pinned (measured on the unchanged engine)', `digest=${dS}`);
+  }
+
+  // (g) stress: 24x7, 41 cases, 4 agents, budget 225 min (adherence 0.5) - completes, parks per case <= agents x days, work slices bounded
+  {
+    const cs: CaseEntity[] = [];
+    for (let i = 0; i < 41; i++) cs.push(f2Case(`S${String(i).padStart(2, '0')}`, i + 1, new Date(f2At(12, 0).getTime() + i * 70 * 60000), 120 + ((i * 37) % 90), 36));
+    const dG = runF2(cs, 4, 0.5, null);
+    const days = new Set(busyF2(dG).map((s: any) => dayKeyF2(s.from))).size;
+    const maxPark = Math.max(...(dG as any).caseResults.map((c: any) => c.parkCount));
+    const nSlices = busyF2(dG).length;
+    assert(dG.totalCases === 41 && maxPark <= 4 * days && nSlices <= 41 * 4 * days && nSlices <= 400, 'D64.13 stress: completes; parks per case <= agents x days; busy slices <= 400', `cases=${dG.totalCases} maxPark=${maxPark} days=${days} slices=${nSlices}`);
+    assert(budgetOk(dG, 0.5), 'D64.14 stress: nobody over the 225-min daily budget', '');
+    const dG2 = runF2(cs, 4, 0.5, null);
+    const sig = (d: any) => JSON.stringify((d.caseResults as any[]).map((c) => [c.caseId, c.firstStartTime?.getTime() ?? null, c.completeTime?.getTime() ?? null, c.parkCount]));
+    assert(sig(dG) === sig(dG2), 'D64.15 determinism: same seed twice gives identical case results (stress)', '');
+    assert(sig(runF2(casesB, 3, 0.9, offs)) === sig(dB), 'D64.16 determinism: same seed twice gives identical case results (staggered)', '');
+  }
+}
+
+// =================================================================
+// Suite D65 - F3 (HC-15): when the roster polish adopts a re-spread roster, the confidence block,
+// the history row for N, the occupancy/ASA binding branches and the representative replication
+// describe THAT roster. Pre-fix primaryPassedResult / evalCache[N] kept the PRE-polish evaluation
+// (D50 fixture: block 94.3 CI [94.1, 94.5] while the adopted roster scores 100 CI [100, 100] and the
+// headline run showed 100). The decision (HC, adopted roster, rosterPolish) must NOT move; runs
+// with no adoption (placement OFF, no_improvement) must be byte-identical. Pins marked "pre" were
+// measured on the unchanged code.
+// =================================================================
+console.log('\n--- Suite D65: F3 statistics describe the adopted roster ---');
+{
+  // Key-order-insensitive digest: the async search assembles its result object in a different key order than the sync one (same values).
+  const sortKeys = (_k: string, v: any) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v);
+  const dg = (x: unknown) => createHash('sha1').update(JSON.stringify(x, sortKeys)).digest('hex').slice(0, 16);
+  const cal65: CalendarConfig = { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 20 };
+  const laborOff65: LaborConfig = { ...LABOR, dailyProductiveHours: 8 };
+  const laborOn65: LaborConfig = { ...laborOff65, shiftPlacementEnabled: true, shiftSlapMinutes: 30 };
+  const mkIv65 = (cats: Array<[string, (h: number) => number]>): StandardInterval[] => {
+    const out: StandardInterval[] = [];
+    for (let day = 0; day < 5; day++) {
+      for (let h = 8; h < 20; h++) {
+        for (let m = 0; m < 60; m += 30) {
+          for (const [category, vf] of cats) {
+            out.push({ intervalIndex: out.length, start: new Date(2026, 2, 2 + day, h, m), end: new Date(2026, 2, 2 + day, h, m + 30), volume: vf(h), category });
+          }
+        }
+      }
+    }
+    return out;
+  };
+  const mkSla65 = (pct: number, windowH: number): SLAPolicyConfig => ({
+    primaryPct: pct, primaryWindow: windowH, primaryUnit: 'hours', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes',
+    asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'next_open',
+    occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 90,
+  });
+  const cat1: CategoryConfig[] = [{ id: 'c1', name: 'General', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 }];
+  const cat2: CategoryConfig[] = [
+    { id: 'A', name: 'A', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 },
+    { id: 'B', name: 'B', ahtMinutes: 25, shrinkagePct: 0.1, priority: 2 },
+  ];
+  const peak = (h: number) => (h >= 12 && h < 16 ? 14 : 3);
+  const iv1 = mkIv65([['General', peak]]);
+  const iv2 = mkIv65([['A', (h) => (h === 8 ? 60 : 4)], ['B', (h) => (h >= 12 && h < 16 ? 10 : 2)]]);
+
+  type Scn = { intervals: StandardInterval[]; categories: CategoryConfig[]; labor: LaborConfig; sla: SLAPolicyConfig; seed: number; userMaxHC: number; arch?: 'siloed' };
+  const baseOf = (s: Scn) => ({ intervals: s.intervals, openingWIP: [] as any[], categories: s.categories, calendar: cal65, labor: s.labor, sla: s.sla, seed: s.seed, userMaxHC: s.userMaxHC, replications: 6, ...(s.arch ? { queueArchitecture: s.arch } : {}) });
+  const distOf = (d: any) => JSON.stringify(d ? Object.keys(d).sort().map((k) => [k, d[k].slaps]) : null);
+
+  // Polish-adopted scenarios: (a) (b) (c) (d) (e) (h) (j).
+  const polishCase = async (tag: string, s: Scn, pin: { N: number; mean: number; rp: string; others: string; dist: string; bind: string }) => {
+    const syn: any = searchOptimalHC(baseOf(s));
+    const asy: any = await searchOptimalHCAsync(baseOf(s));
+    const N: number = syn.recommendedHC;
+    const rp = syn.rosterPolish;
+    assert(rp?.status === 'adopted' || rp?.status === 'adopted_partial', `${tag}.0 scenario adopts a polished roster`, `status=${rp?.status}`);
+    const sets = hcNs.generatePrecomputedReplications({ intervals: s.intervals, openingWIP: [], categories: s.categories, calendar: cal65, sla: s.sla, baseSeed: s.seed, replications: 6 });
+    const ind: any = evaluateCandidateStatistical({
+      operationalHC: N, intervals: s.intervals, openingWIP: [], categories: s.categories, calendar: cal65, labor: s.labor, sla: s.sla,
+      baseSeed: s.seed, replications: 6, queueArchitecture: s.arch ?? 'pooled', precomputedCaseSets: sets,
+      shiftDistribution: syn.shiftPlacement?.winningDistribution, dispatchFairness: undefined,
+    });
+    const ps = syn.primaryStatistical;
+    const brief = (x: any) => `mean=${x?.achievedPctMean} med=${x?.achievedPctMedian} CI=[${x?.ci95Low},${x?.ci95High}] R=${x?.replications}`;
+    // (a) confidence block = independent evaluation of the adopted roster
+    assert(JSON.stringify(ps) === JSON.stringify(ind.primaryStats), `${tag}.a1 primaryStatistical equals an independent evaluation of the adopted roster`, `reported ${brief(ps)} | independent ${brief(ind.primaryStats)}`);
+    assert(ps?.achievedPctMean === pin.mean && ps?.replications === 6, `${tag}.a2 primaryStatistical mean/R literal`, `got ${brief(ps)}`);
+    if (pin.mean === 100) assert(ps?.ci95Low === 100 && ps?.ci95High === 100 && ps?.achievedPctMedian === 100, `${tag}.a3 primaryStatistical CI [100, 100], median 100`, brief(ps));
+    // (b) history row for N carries those numbers; other rows pinned
+    const row = syn.searchHistory.find((r: any) => r.hc === N);
+    const rowOk = !!row && row.primaryPct === ind.primaryStats.achievedPctMedian && row.primaryCiLow === ind.primaryStats.ci95Low && row.primaryCiHigh === ind.primaryStats.ci95High
+      && row.boAsaMinutes === ind.representativeResult.boAsaMeanMinutes && row.occupancyPct === ind.representativeResult.occupancyPct && row.rawOccupancyPct === ind.representativeResult.rawOccupancyPct
+      && row.passed === ind.passesAllConstraints && JSON.stringify(row.failingReasons) === JSON.stringify(ind.failingReasons);
+    assert(rowOk, `${tag}.b1 history row for N equals the adopted evaluation`, JSON.stringify(row));
+    assert(syn.searchHistory.filter((r: any) => r.hc === N).length === 1, `${tag}.b2 exactly one history row for N`, '');
+    assert(dg(syn.searchHistory.filter((r: any) => r.hc !== N)) === pin.others, `${tag}.b3 history rows for other N unchanged (pre)`, `got ${dg(syn.searchHistory.filter((r: any) => r.hc !== N))}`);
+    // (c) (d) the decision is untouched
+    assert(dg(rp) === pin.rp, `${tag}.c rosterPolish unchanged (pre)`, `got ${dg(rp)}`);
+    assert(N === pin.N && dg(distOf(syn.shiftPlacement?.winningDistribution)) === pin.dist, `${tag}.d recommended HC and adopted roster unchanged (pre)`, `N=${N} dist=${dg(distOf(syn.shiftPlacement?.winningDistribution))}`);
+    // (e) sync deep-equals async on the full output (boundary evidence included)
+    assert(dg(syn) === dg(asy), `${tag}.e sync result deep-equals async result (full output)`, `sync ${dg(syn)} async ${dg(asy)}`);
+    // (h) headline run = the adopted evaluation's representative run
+    assert(syn.finalDESResult.primaryAchievedPct === ind.representativeResult.primaryAchievedPct, `${tag}.h headline primaryAchievedPct equals the adopted evaluation's representative run`, `headline ${syn.finalDESResult.primaryAchievedPct} vs rep ${ind.representativeResult.primaryAchievedPct}`);
+    // (j) binding label
+    assert(`${syn.bindingConstraintType}|${syn.bindingConstraintDescription}` === pin.bind, `${tag}.j binding-constraint label pinned`, `got ${syn.bindingConstraintType}|${syn.bindingConstraintDescription}`);
+  };
+
+  const sla65 = mkSla65(85, 3);
+  await polishCase('D65.1 pooled seed 42', { intervals: iv1, categories: cat1, labor: laborOn65, sla: sla65, seed: 42, userMaxHC: 40 }, { N: 9, mean: 100, rp: '5ca7f75aac8b4e42', others: 'b98412b976e5b850', dist: 'eea4224868125973', bind: 'statistical_primary_sla|Primary SLA 85% Target (Statistical DES, 90% CI)' });
+  await polishCase('D65.2 pooled seed 7', { intervals: iv1, categories: cat1, labor: laborOn65, sla: sla65, seed: 7, userMaxHC: 40 }, { N: 9, mean: 100, rp: '343796a0ef1aa6d1', others: '029a912afc357141', dist: 'eea4224868125973', bind: 'statistical_primary_sla|Primary SLA 85% Target (Statistical DES, 90% CI)' });
+  await polishCase('D65.3 pooled seed 99', { intervals: iv1, categories: cat1, labor: laborOn65, sla: sla65, seed: 99, userMaxHC: 40 }, { N: 9, mean: 100, rp: '5ca7f75aac8b4e42', others: '311f6baea3e00365', dist: 'eea4224868125973', bind: 'statistical_primary_sla|Primary SLA 85% Target (Statistical DES, 90% CI)' });
+  // (g) siloed adopted_partial (D52 fixture): a vector is adopted
+  await polishCase('D65.4 siloed (D52 fixture)', { intervals: iv2, categories: cat2, labor: laborOn65, sla: mkSla65(95, 4), seed: 42, userMaxHC: 60, arch: 'siloed' }, { N: 19, mean: 99.5, rp: '574fd697c0fc5960', others: '51ae9df0b3740505', dist: 'ef0e7a02e1a93f74', bind: 'statistical_primary_sla|Primary SLA 95% Target (Statistical DES, 90% CI)' });
+
+  // (f) nothing adopted: the full result must be byte-identical to today
+  {
+    const noImp: Scn = { intervals: iv1, categories: cat1, labor: laborOn65, sla: mkSla65(95, 2), seed: 42, userMaxHC: 40 };
+    const a: any = searchOptimalHC(baseOf(noImp));
+    const aa: any = await searchOptimalHCAsync(baseOf(noImp));
+    assert(a.rosterPolish?.status === 'no_improvement', 'D65.5a no_improvement scenario (placement ON, 95/2h) really is no_improvement', `status=${a.rosterPolish?.status}`);
+    assert(dg(a) === '733df309dc766f59' && dg(aa) === dg(a), 'D65.5b no_improvement: full result identical to today (pre) and sync = async', `sync ${dg(a)} async ${dg(aa)}`);
+    const off: Scn = { intervals: iv1, categories: cat1, labor: laborOff65, sla: sla65, seed: 42, userMaxHC: 40 };
+    const o: any = searchOptimalHC(baseOf(off));
+    const oa: any = await searchOptimalHCAsync(baseOf(off));
+    assert(o.rosterPolish === undefined && dg(o) === '9038b551a950a83b' && dg(oa) === dg(o), 'D65.6 placement OFF: full result identical to today (pre) and sync = async', `sync ${dg(o)} async ${dg(oa)}`);
+  }
+  // (i) placement stays opt-in
+  assert(!DEFAULT_LABOR.shiftPlacementEnabled, 'D65.7 default labor config: shiftPlacementEnabled is OFF', `got ${String(DEFAULT_LABOR.shiftPlacementEnabled)}`);
+}
+
+// ----------------------------------------------------
+// Suite D66 - Input safety part 1 (G2 + H2): numbers read from files. A volume / remaining-minutes
+// cell is either read exactly as meant or the planner is told; never silently misread. Semicolon
+// file `12,5` must be 12.5 (old behaviour: 125); `2h`, `30 min`, `1e9` blocked; backlog bad rows use
+// THEIR category's own handling time / priority (old: invented 30 / 1) and are counted.
+// ----------------------------------------------------
+import { parseCSVRaw, parseFlexibleDate } from '../src/utils/csv-parser';
+import { classifyNumberCell, readNumberColumn } from '../src/utils/number-cell';
+import { parseWipRows } from '../src/utils/wip-import';
+
+console.log('\n--- Suite D66: input safety part 1 (numbers read from files) ---');
+{
+  const map66 = { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any;
+  const fileFor = (delim: string, cells: string[]) =>
+    ['IntervalStart', 'Volume', 'Category'].join(delim) + '\n' +
+    cells.map((c, i) => `2026-10-05 ${String(9 + Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}${delim}${c}${delim}General`).join('\n');
+  const load66 = (delim: string, cells: string[]) => {
+    const p = parseCSVRaw(fileFor(delim, cells));
+    const ivs = mapRawRecordsToIntervals(p.rows, map66, 'General', p.delimiter);
+    const dq = validateDataQuality({ intervals: ivs, mapping: map66, categories: DEFAULT_CATEGORIES, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, openingWIP: [] });
+    return { p, ivs, dq, total: ivs.reduce((s, x) => s + x.volume, 0), err: dq.issues.find((i) => i.field === 'Unreadable volume') };
+  };
+  const vols = (r: { ivs: StandardInterval[] }) => r.ivs.map((x) => x.volume).join('|');
+
+  // 1. semicolon file with decimal commas
+  const a = load66(';', ['12,5', '10,5', '8,25']);
+  assert(a.p.delimiter === ';', 'D66.1a parseCSVRaw returns the detected delimiter', a.p.delimiter);
+  assert(Math.abs(a.total - 31.25) < 1e-9 && !a.err, 'D66.1b semicolon file 12,5 / 10,5 / 8,25 totals 31.25 (old: 1055) with no error', `total=${a.total}`);
+  assert(a.dq.issues.some((i) => i.field === 'Fractional volume'), 'D66.1c fractional volumes carry the rounding warning');
+  const aw = load66(';', ['12', '10', '8']);
+  assert(!aw.dq.issues.some((i) => i.field === 'Fractional volume') && aw.total === 30, 'D66.1d whole-number file: no fractional warning');
+
+  // 2. comma file: clean values unchanged, unclear blocked
+  const b = load66(',', ['"1,234"', '"$1,200"', ' 7 ', '$1200', '"12,345,678"', '12.5']);
+  assert(vols(b) === '1234|1200|7|1200|12345678|12.5' && !b.err, 'D66.2a comma file: "1,234", $1,200, " 7 ", $1200, 12,345,678, 12.5 read as today', vols(b));
+  for (const bad of ['"12,5"', '30 min', '12abc', '1e9', '2h', '0x10', '12..5', '1:30']) {
+    const r = load66(',', ['5', bad]);
+    assert(!!r.err && r.err.severity === 'error' && r.ivs.some((x) => x.volume === 0) && /row 3/.test(r.err.message), `D66.2b comma file cell ${bad} is a blocking Unreadable volume error naming row 3, stored 0`, r.err?.message);
+  }
+  const many = load66(',', ['1', '2h', '3', 'x', '5', 'y', '7', 'z']);
+  assert(many.err!.message.includes('row 3') && many.err!.message.includes('row 5') && many.err!.message.includes('row 7') && many.err!.message.includes('row 9'), 'D66.2c error names the offending rows', many.err?.message);
+
+  // 3. semicolon / tab: per-column convention
+  const c1 = load66(';', ['1.234', '2.345']);
+  assert(!!c1.err && c1.err.message.includes('1234') && c1.err.message.includes('1.234'), 'D66.3a ambiguous-only column blocks and shows both readings', c1.err?.message);
+  const c2 = load66(';', ['1.234', '12,5']);
+  assert(!c2.err && vols(c2) === '1234|12.5', 'D66.3b 1.234 + 12,5 reads 1234 and 12.5', vols(c2));
+  const c3 = load66(';', ['12,5', '12.5']);
+  assert(!!c3.err && /mixed number formats/.test(c3.err.message), 'D66.3c column mixing 12,5 and 12.5 blocks as mixed number formats', c3.err?.message);
+  const c4 = load66(';', ['1.234,5', '3,5']);
+  assert(!c4.err && vols(c4) === '1234.5|3.5', 'D66.3d 1.234,5 reads 1234.5', vols(c4));
+  const c5 = load66('\t', ['1,234.5', '2.5']);
+  assert(!c5.err && vols(c5) === '1234.5|2.5', 'D66.3e tab file 1,234.5 reads 1234.5', vols(c5));
+  const c6 = load66(';', ['1,234', '3.5']);
+  assert(!c6.err && vols(c6) === '1234|3.5', 'D66.3f ambiguous 1,234 follows the dot convention proven by 3.5', vols(c6));
+
+  // 4. large volume + negative
+  assert(load66(',', ['100001', '5']).dq.issues.some((i) => i.field === 'Very large volume'), 'D66.4a volume above 100,000 warns');
+  const neg = load66(',', ['-5', '5']);
+  assert(neg.dq.issues.some((i) => i.field === 'Volume Parsing') && neg.ivs.some((x) => x.volume === 0), 'D66.4b negative volume keeps today behaviour (warning, stored 0)');
+
+  // 5. helper table
+  const cls = (s: string, d = ',') => { const r = classifyNumberCell(s, d); return r.kind === 'number' ? r.value : r.kind; };
+  assert(cls('12') === 12 && cls('12.5') === 12.5 && cls('-5') === -5 && cls('') === 'blank' && cls(' 7 ') === 7, 'D66.5a helper: 12, 12.5, -5, empty, " 7 "');
+  assert(cls('12,5') === 'unreadable' && cls('12,5', ';') === 12.5 && cls('0x10') === 'unreadable' && cls('1e9') === 'unreadable' && cls('30 min') === 'unreadable', 'D66.5b helper: 12,5 by delimiter, 0x10, 1e9, 30 min');
+  assert(readNumberColumn(['1.234', '5.5'], ';').values.join('|') === '1.234|5.5', 'D66.5c helper: ambiguous cell follows dot convention proven in column');
+
+  // 6. clean data parses exactly as before: built-in samples vs the legacy reader
+  const legacy = (s: string) => { const v = parseFloat(String(s).trim().replace(/[\s$,]/g, '')); return Number.isFinite(v) && v >= 0 ? v : 0; };
+  for (const st of ['claims', 'support', 'healthcare'] as const) {
+    const ds = buildSampleDataset(st, new Date(2026, 9, 5, 8, 0));
+    const ivs = mapRawRecordsToIntervals(ds.rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+    const legacySum = ds.rows.reduce((s, r) => s + legacy(r['Volume']), 0);
+    assert(ivs.reduce((s, x) => s + x.volume, 0) === legacySum && !ivs.some((x) => x.volumeParsingIssue), `D66.6 built-in sample ${st}: volumes identical to the legacy reader, no issues`);
+  }
+
+  // 7. backlog import
+  const cats66 = [{ name: 'Email', ahtMinutes: 20, priority: 3 }, { name: 'Chat', ahtMinutes: 10, priority: 2 }];
+  const mapW = { caseIdCol: 'ID', categoryCol: 'Cat', dateCol: 'Date', timeCol: '', remainingWorkCol: 'Rem', priorityCol: 'Prio' };
+  const def66 = new Date(2026, 9, 1, 8, 0);
+  const row = (id: string, cat: string, rem: string, prio: string, date = '05/10/2026') => ({ ID: id, Cat: cat, Rem: rem, Prio: prio, Date: date });
+  const rowsW = [
+    row('A', 'Chat', '15', '2'),            // clean
+    row('', 'Foo', '', ''),                 // unknown category
+    row('', '', '', ''),                    // blank category
+    row('', 'Chat', '2h', ''),              // unreadable minutes
+    row('', 'Chat', '-5', ''),              // negative
+    row('', 'Chat', '0', ''),               // zero
+    row('', 'Chat', '1e9', ''),             // exponent
+    row('', 'Chat', '100001', ''),          // above limit
+    row('', 'Chat', '', 'high'),            // bad priority
+    row('', 'Chat', '', '', ''),            // blank date
+    row('', 'Chat', '', '', '31/31/2026'),  // impossible date: skipped
+  ];
+  const w = parseWipRows(rowsW, mapW, cats66, def66, [], ',');
+  assert(w.cases.length === 10 && w.invalidDates === 1, 'D66.7a impossible-date row skipped, 10 imported', `${w.cases.length}/${w.invalidDates}`);
+  assert(w.cases[0].id === 'A' && w.cases[0].remainingWorkMinutes === 15 && w.cases[0].priority === 2 && +w.cases[0].arrival === +parseFlexibleDate('05/10/2026'), 'D66.7b valid row unchanged');
+  assert(w.cases[1].category === 'Email' && w.cases[1].remainingWorkMinutes === 20 && w.cases[1].priority === 3 && w.cases[2].remainingWorkMinutes === 20, "D66.7c unknown/blank category uses the fallback category's own AHT 20 and priority 3 (old: 30 / 1)");
+  assert([3, 4, 5, 6, 7].every((i) => w.cases[i].remainingWorkMinutes === 10), 'D66.7d 2h, -5, 0, 1e9, 100001 minutes all fall back to the category AHT 10');
+  assert(w.cases[8].priority === 2 && +w.cases[9].arrival === +def66, 'D66.7e bad priority -> category priority; blank date -> default arrival');
+  assert(w.cases.map((c) => c.id).join(',') === 'A,WIP-0001,WIP-0002,WIP-0003,WIP-0004,WIP-0005,WIP-0006,WIP-0007,WIP-0008,WIP-0009', 'D66.7f ids and row order as before', w.cases.map((c) => c.id).join(','));
+  const s = w.summary;
+  assert(s.category.count === 2 && s.remainingMinutes.count === 5 && s.priority.count === 1 && s.date.count === 1 && s.noHandlingTime.count === 0, 'D66.7g each fallback counted per kind', JSON.stringify([s.category.count, s.remainingMinutes.count, s.priority.count, s.date.count]));
+  assert(s.adjustedRows === 9 && s.importedAsTyped === 1 && s.remainingMinutes.examples.length === 5 && s.remainingMinutes.examples[0].text === '2h', 'D66.7h summary: 1 as typed, 9 adjusted, examples listed', JSON.stringify([s.adjustedRows, s.importedAsTyped]));
+  const ws = parseWipRows([row('', 'Chat', '7,5', '')], mapW, cats66, def66, [], ';');
+  const wc = parseWipRows([row('', 'Chat', '7,5', '')], mapW, cats66, def66, [], ',');
+  assert(ws.cases[0].remainingWorkMinutes === 7.5 && wc.cases[0].remainingWorkMinutes === 10 && wc.summary.remainingMinutes.count === 1, 'D66.7i 7,5 reads 7.5 in a semicolon file; unreadable (category AHT, counted) in a comma file');
+  const noAht = parseWipRows([row('', 'Chat', '', '')], mapW, [{ name: 'Chat', ahtMinutes: 0, priority: 2 }], def66, [], ',');
+  assert(noAht.cases[0].remainingWorkMinutes === 30 && noAht.summary.noHandlingTime.count === 1, 'D66.7j category with no handling time: 30 assumed but counted');
+  const mk = (n: number, bad: number) => Array.from({ length: n }, (_, i) => row('', i < bad ? 'Foo' : 'Chat', '5', '2'));
+  assert(parseWipRows(mk(100, 30), mapW, cats66, def66, [], ',').summary.requiresConfirmation === true, 'D66.7k 30% fallback rows: confirmation required');
+  assert(parseWipRows(mk(100, 5), mapW, cats66, def66, [], ',').summary.requiresConfirmation === false, 'D66.7l 5% fallback rows: no confirmation');
+  assert(parseWipRows(mk(1000, 60), mapW, cats66, def66, [], ',').summary.requiresConfirmation === true, 'D66.7m 60 fallback rows (6%): confirmation required (more than 50 rows)');
+}
+
+// ----------------------------------------------------
+// Suite D67 - Input safety part 2 (G3 + G5). G3 (Option B): timestamps carrying a timezone marker
+// (Z, +hh:mm, epoch) are still converted to the PC clock (parser unchanged) and the planner is told.
+// Assertions compare absolute instants, so they hold on any PC timezone. G5: category names that
+// differ only by letter case / inner spacing are ONE category; settings and ids survive.
+// ----------------------------------------------------
+import { applyCategoryRenames, categoryKey, detectTimezoneMarker, remapCasesToIntervalSpelling, syncCategoriesWithRenames } from '../src/utils/csv-parser';
+
+console.log('\n--- Suite D67: input safety part 2 (timezone markers + category variants) ---');
+{
+  const mapA = { intervalStartCol: 'Start', volumeCol: 'Volume', categoryCol: 'Category', timeCol: 'Time', intervalEndCol: 'End' } as any;
+  const mkRow = (start: string, vol: string, cat = 'General', time = '', end = '') => ({ Start: start, Volume: vol, Category: cat, Time: time, End: end });
+  const dq67 = (ivs: StandardInterval[], cats = DEFAULT_CATEGORIES) =>
+    validateDataQuality({ intervals: ivs, mapping: mapA, categories: cats, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, openingWIP: [] });
+
+  // 1. G3: absolute instants unchanged by the new code (timezone-independent assertions)
+  const abs = (s: string) => parseFlexibleDate(s).getTime();
+  assert(abs('2026-01-05T08:00:00Z') === Date.UTC(2026, 0, 5, 8, 0, 0), 'D67.1a ...T08:00:00Z is the absolute instant 08:00 UTC (conversion kept)');
+  assert(abs('2026-01-05T08:00:00+04:00') === Date.UTC(2026, 0, 5, 4, 0, 0), 'D67.1b ...T08:00:00+04:00 is the absolute instant 04:00 UTC');
+  assert(abs('2026-01-05T08:00:00-05:00') === Date.UTC(2026, 0, 5, 13, 0, 0), 'D67.1c ...T08:00:00-05:00 is the absolute instant 13:00 UTC');
+  assert(abs('2026-01-05T08:00:00.500Z') === Date.UTC(2026, 0, 5, 8, 0, 0), 'D67.1d ...T08:00:00.500Z is the absolute instant 08:00:00 UTC');
+  assert(abs('1767600000') === 1767600000000, 'D67.1e epoch 1767600000 is the absolute instant 1767600000000 ms');
+  const local = parseFlexibleDate('2026-01-05 08:00');
+  assert(local.getFullYear() === 2026 && local.getDate() === 5 && local.getHours() === 8 && local.getMinutes() === 0, 'D67.1f marker-free text is still read as written (local 08:00)');
+
+  // 2. marker detection (same single ISO regex)
+  const det = (s: string, t?: string) => detectTimezoneMarker(s, t);
+  assert(det('2026-01-05T08:00:00Z') === 'Z' && det('2026-01-05T08:00:00+04:00') === '+04:00' && det('2026-01-05T08:00:00-05:00') === '-05:00' && det('2026-01-05T08:00:00.500Z') === 'Z' && det('1767600000') === 'epoch', 'D67.2a detected: Z, +04:00, -05:00, .500Z, epoch');
+  assert(det('2026-01-05 08:00') === null && det('05/01/2026 08:00') === null && det('2026-01-05') === null && det('') === null, 'D67.2b not detected: plain, dd/mm/yyyy, date-only, empty');
+  assert(det('2026-01-05', '08:00:00-05:00') === '-05:00', 'D67.2c marker in a separate time column is detected');
+
+  // 3. count + distinct markers + warning
+  const marked = [
+    mkRow('2026-01-05T08:00:00Z', '10'),
+    mkRow('2026-01-05T08:30:00+04:00', '10'),
+    mkRow('2026-01-05', '10', 'General', '09:00:00-05:00'),
+    mkRow('2026-01-05 10:00', '10'),
+    mkRow('2026-01-05 10:30', '10', 'General', '', '2026-01-05T11:00:00Z'),
+  ];
+  const ivM = mapRawRecordsToIntervals(marked, mapA, 'General', ',');
+  const rowsMarked = ivM.filter((x) => (x.timezoneMarkers?.length ?? 0) > 0).length;
+  const distinct = Array.from(new Set(ivM.flatMap((x) => x.timezoneMarkers ?? []))).sort().join('|');
+  assert(rowsMarked === 4 && distinct === '+04:00|-05:00|Z', 'D67.3a hand count: 4 rows carry markers (incl. split date/time columns and an end column), markers +04:00, -05:00, Z', `${rowsMarked} / ${distinct}`);
+  const tz = dq67(ivM).issues.find((i) => i.field === 'Timezone markers converted');
+  assert(!!tz && tz.severity === 'warning' && /^4 timestamps carried a timezone marker \(\+04:00, -05:00, Z\)/.test(tz.message) && /converted to this PC's timezone \(UTC[+-]\d/.test(tz.message), 'D67.3b one non-blocking warning with count, markers and PC offset', tz?.message);
+  const epochOnly = mapRawRecordsToIntervals([mkRow('1767600000', '5'), mkRow('1767601800', '5')], mapA, 'General', ',');
+  const tzE = dq67(epochOnly).issues.find((i) => i.field === 'Timezone markers converted');
+  assert(!!tzE && tzE.severity === 'warning' && /^2 timestamps were numeric \(Unix epoch\)/.test(tzE.message), 'D67.3c epoch-only file: numeric wording, 2 timestamps', tzE?.message);
+  const clean = mapRawRecordsToIntervals([mkRow('2026-01-05 08:00', '5'), mkRow('2026-01-05 08:30', '5'), mkRow('05/01/2026 09:00', '5')], mapA, 'General', ',');
+  assert(!dq67(clean).issues.some((i) => i.field === 'Timezone markers converted' || i.field === 'Category names merged'), 'D67.3d marker-free file: no timezone and no merge warning');
+
+  // 4. G5: case / spacing variants
+  const catRows = [
+    mkRow('2026-01-05 08:00', '10', 'Billing'),
+    mkRow('2026-01-05 08:30', '4', 'billing '),
+    mkRow('2026-01-05 09:00', '6', 'BILLING'),
+    mkRow('2026-01-05 09:30', '5', 'billing'),
+    mkRow('2026-01-05 10:00', '3', 'Bill  ing'),
+  ];
+  const ivC = mapRawRecordsToIntervals(catRows, mapA, 'General', ',');
+  const catsC = syncCategoriesWithRenames(ivC, [], DEFAULT_SLA).categories;
+  assert(ivC.filter((x) => x.category === 'Billing').length === 4 && ivC.filter((x) => x.category === 'Bill ing').length === 1, 'D67.4a Billing / "billing " / BILLING / billing all read as Billing; "Bill  ing" is its own Bill ing', ivC.map((x) => x.category).join('|'));
+  assert(catsC.map((c) => c.name).join('|') === 'Bill ing|Billing', 'D67.4b two categories: Bill ing and Billing', catsC.map((c) => c.name).join('|'));
+  assert(ivC.reduce((s, x) => s + x.volume, 0) === 28, 'D67.4c total volume equals the hand sum (28)');
+  const mg = dq67(ivC, catsC).issues.find((i) => i.field === 'Category names merged');
+  assert(!!mg && mg.severity === 'warning' && mg.message.includes('"BILLING"') && mg.message.includes('"billing"') && mg.message.includes('→ "Billing" (3 rows)') && !mg.message.includes('Bill ing'), 'D67.4d one warning lists the variants with the row count (3 rows); Bill ing not listed', mg?.message);
+  const many = Array.from({ length: 12 }, (_, g) => [mkRow(`2026-01-0${(g % 9) + 1} 0${Math.floor(g / 9)}:00`, '1', `Cat${g}`), mkRow(`2026-01-0${(g % 9) + 1} 0${Math.floor(g / 9)}:30`, '1', `CAT${g}`)]).flat();
+  const mgMany = dq67(mapRawRecordsToIntervals(many, mapA, 'General', ',')).issues.find((i) => i.field === 'Category names merged');
+  assert(!!mgMany && /; \+2 more\.$/.test(mgMany.message), 'D67.4e 12 merged groups: 10 listed then "+2 more"', mgMany?.message);
+  assert(categoryKey('  Bill   ING ') === 'bill ing' && categoryKey('Billing') === 'billing', 'D67.4f categoryKey: trim, collapse spaces, lower-case');
+
+  // 5. G5: re-sync with existing categories
+  const exist = (name: string, aht: number, id: string) => ({ ...DEFAULT_CATEGORIES[0], id, name, ahtMinutes: aht, shrinkagePct: 0.1 });
+  const onlyLower = mapRawRecordsToIntervals([mkRow('2026-01-05 08:00', '5', 'billing')], mapA, 'General', ',');
+  const r1 = syncCategoriesWithRenames(onlyLower, [exist('BILLING', 12, 'cat_keep')], DEFAULT_SLA);
+  assert(r1.categories.length === 1 && r1.categories[0].id === 'cat_keep' && r1.categories[0].ahtMinutes === 12 && r1.categories[0].shrinkagePct === 0.1 && r1.categories[0].name === 'billing', 'D67.5a existing BILLING + file "billing": one category, id/AHT/shrinkage kept, file spelling used');
+  assert(r1.renames.length === 1 && r1.renames[0].from === 'BILLING' && r1.renames[0].to === 'billing', 'D67.5b rename list BILLING -> billing', JSON.stringify(r1.renames));
+  const ivSame = mapRawRecordsToIntervals([mkRow('2026-01-05 08:00', '5', 'Billing')], mapA, 'General', ',');
+  const r2 = syncCategoriesWithRenames(ivSame, [exist('Billing', 12, 'a'), exist('BILLING', 14, 'b')], DEFAULT_SLA);
+  assert(r2.categories.length === 1 && r2.categories[0].id === 'a' && r2.categories[0].ahtMinutes === 12 && r2.duplicatesDropped.length === 1 && r2.duplicatesDropped[0].dropped === 'BILLING' && r2.duplicatesDropped[0].kept === 'Billing', 'D67.5c two existing categories with one key: first supplies settings, other reported', JSON.stringify(r2.duplicatesDropped));
+  const ivOrder = mapRawRecordsToIntervals([mkRow('2026-01-05 08:00', '5', 'billing'), mkRow('2026-01-05 08:30', '5', 'BILLING')], mapA, 'General', ',');
+  const r3 = syncCategoriesWithRenames(ivOrder, [exist('Billing', 12, 'z')], DEFAULT_SLA);
+  assert(r3.categories.length === 1 && r3.categories[0].id === 'z' && r3.categories[0].ahtMinutes === 12 && r3.categories[0].name === 'billing', 'D67.5d upload order billing then BILLING keeps the existing settings');
+  const wipStored = [{ id: 'W1', category: 'BILLING', priority: 1, arrival: new Date(2026, 0, 5, 8), clockStart: new Date(2026, 0, 5, 8), remainingWorkMinutes: 5 }];
+  const renamed = applyCategoryRenames(wipStored, r1.renames);
+  assert(renamed[0].category === 'billing' && applyCategoryRenames(renamed, r1.renames) === renamed && remapCasesToIntervalSpelling(wipStored, onlyLower)[0].category === 'billing' && remapCasesToIntervalSpelling(renamed, onlyLower) === renamed, 'D67.5e stored backlog cases follow the rename; no change returns the same array');
+  assert(discoverAndSyncCategories(ivOrder, [exist('Billing', 12, 'z')], DEFAULT_SLA)[0].id === 'z', 'D67.5f discoverAndSyncCategories (wrapper) agrees');
+
+  // 6. backlog import matches by key
+  const mapW67 = { caseIdCol: 'ID', categoryCol: 'Cat', dateCol: 'Date', timeCol: '', remainingWorkCol: 'Rem', priorityCol: 'Prio' };
+  const wb = parseWipRows([{ ID: 'X', Cat: 'billing', Rem: '9', Prio: '2', Date: '05/01/2026' }, { ID: 'Y', Cat: ' BILL ING ', Rem: '9', Prio: '2', Date: '05/01/2026' }], mapW67, [{ name: 'Billing', ahtMinutes: 12, priority: 2 }, { name: 'Bill ing', ahtMinutes: 8, priority: 3 }], new Date(2026, 0, 5, 8), [], ',');
+  assert(wb.cases[0].category === 'Billing' && wb.cases[1].category === 'Bill ing' && wb.summary.category.count === 0 && wb.unmatchedCategories.length === 0, 'D67.6a backlog rows "billing" / " BILL ING " match Billing / Bill ing, not counted as fallback');
+  const wz = parseWipRows([{ ID: 'X', Cat: 'Billing', Rem: '9', Prio: '2', Date: '2026-01-05T08:00:00Z' }, { ID: 'Y', Cat: 'Billing', Rem: '9', Prio: '2', Date: '05/01/2026' }], mapW67, [{ name: 'Billing', ahtMinutes: 12, priority: 2 }], new Date(2026, 0, 5, 8), [], ',');
+  assert(wz.summary.timezone.count === 1 && wz.summary.timezone.markers.join() === 'Z' && wz.cases[0].arrival.getTime() === Date.UTC(2026, 0, 5, 8), 'D67.6b backlog: 1 arrival with a marker counted, instant unchanged');
+
+  // 7. built-in samples unchanged
+  for (const st of ['claims', 'support', 'healthcare'] as const) {
+    const ds = buildSampleDataset(st, new Date(2026, 9, 5, 8, 0));
+    const m = { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any;
+    const ivs = mapRawRecordsToIntervals(ds.rows, m);
+    const rawNames = Array.from(new Set(ds.rows.map((r) => String(r['Category']).trim()))).sort();
+    const syncedNames = syncCategoriesWithRenames(ivs, [], DEFAULT_SLA).categories.map((c) => c.name);
+    const rep = validateDataQuality({ intervals: ivs, mapping: m, categories: syncCategoriesWithRenames(ivs, [], DEFAULT_SLA).categories, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, openingWIP: [] });
+    assert(ivs.length === ds.rows.length && ivs.reduce((s, x) => s + x.volume, 0) === ds.rows.reduce((s, r) => s + Number(r['Volume']), 0) && syncedNames.join('|') === rawNames.join('|') && !rep.issues.some((i) => i.field === 'Timezone markers converted' || i.field === 'Category names merged'), `D67.7 built-in sample ${st}: interval count, total volume and category names identical, no new warnings`);
+  }
+}
+
+// ----------------------------------------------------
+// Suite D68: input safety part 3, Build A (file reader rules E1-E7 / W1-W3, pipe delimiter, refusal at pick time).
+// A file with an error-severity problem is REFUSED before anything else happens (App.handleFileUpload /
+// DemandFlow.readWipFile check problems first); only warnings travel with an accepted file into data quality.
+// File row = 1-based physical line (header = row 1), counting blank lines and lines inside quoted cells.
+// The legacy copy below is the reader exactly as it was before this build; every file that loaded then must
+// load identically now.
+// ----------------------------------------------------
+console.log('\n--- Suite D68: input safety part 3 (file reader rules + refusal) ---');
+{
+  function legacyParseCSVRaw(text: string): { headers: string[]; rows: Record<string, string>[]; delimiter: string } {
+    if (!text || !text.trim()) return { headers: [], rows: [], delimiter: ',' };
+
+    // 1. Delimiter detection (, or ; or \t) by analyzing unquoted delimiters
+    let delimiter = ',';
+    let commaCount = 0;
+    let semiCount = 0;
+    let tabCount = 0;
+    let inQ = false;
+
+    for (let i = 0; i < Math.min(text.length, 4096); i++) {
+      const ch = text[i];
+      if (ch === '"') {
+        if (inQ && text[i + 1] === '"') {
+          i++; // skip escaped quote
+        } else {
+          inQ = !inQ;
+        }
+      } else if (!inQ) {
+        if (ch === ',') commaCount++;
+        else if (ch === ';') semiCount++;
+        else if (ch === '\t') tabCount++;
+        else if (ch === '\n' || ch === '\r') {
+          if (commaCount > 0 || semiCount > 0 || tabCount > 0) {
+            break;
+          }
+        }
+      }
+    }
+
+    if (tabCount > commaCount && tabCount > semiCount) {
+      delimiter = '\t';
+    } else if (semiCount > commaCount && semiCount > tabCount) {
+      delimiter = ';';
+    } else {
+      delimiter = ',';
+    }
+
+    // 2. Tokenize into 2D records using character-by-character RFC 4180 state machine
+    const records: string[][] = [];
+    let currentRecord: string[] = [];
+    let currentField = '';
+    let inQuotes = false;
+    let i = 0;
+    const len = text.length;
+
+    while (i < len) {
+      const char = text[i];
+
+      if (inQuotes) {
+        if (char === '"') {
+          if (i + 1 < len && text[i + 1] === '"') {
+            // Escaped quote: "" -> "
+            currentField += '"';
+            i += 2;
+            continue;
+          } else {
+            // Closing quote
+            inQuotes = false;
+            i++;
+            continue;
+          }
+        } else {
+          // All characters inside quotes (including \r, \n, delimiter, apostrophes) are preserved
+          currentField += char;
+          i++;
+          continue;
+        }
+      } else {
+        if (char === '"') {
+          inQuotes = true;
+          i++;
+          continue;
+        } else if (char === delimiter) {
+          currentRecord.push(currentField);
+          currentField = '';
+          i++;
+          continue;
+        } else if (char === '\r') {
+          if (i + 1 < len && text[i + 1] === '\n') {
+            i++;
+          }
+          currentRecord.push(currentField);
+          currentField = '';
+          records.push(currentRecord);
+          currentRecord = [];
+          i++;
+          continue;
+        } else if (char === '\n') {
+          currentRecord.push(currentField);
+          currentField = '';
+          records.push(currentRecord);
+          currentRecord = [];
+          i++;
+          continue;
+        } else {
+          currentField += char;
+          i++;
+          continue;
+        }
+      }
+    }
+
+    // Push trailing field/record
+    if (currentField.length > 0 || currentRecord.length > 0) {
+      currentRecord.push(currentField);
+      records.push(currentRecord);
+    }
+
+    // 3. Filter out empty rows safely (rows where all cells are empty/whitespace)
+    const cleanRecords = records.filter((rec) => rec.some((cell) => cell.trim().length > 0));
+
+    if (cleanRecords.length === 0) {
+      return { headers: [], rows: [], delimiter };
+    }
+
+    const rawHeaders = cleanRecords[0];
+    const headers = rawHeaders.map((h, colIdx) => h.trim() || `Column_${colIdx + 1}`);
+    const rows: Record<string, string>[] = [];
+
+    for (let r = 1; r < cleanRecords.length; r++) {
+      const rowCells = cleanRecords[r];
+      if (!rowCells.some((c) => c.trim().length > 0)) continue;
+
+      const rowObj: Record<string, string> = {};
+      headers.forEach((h, colIdx) => {
+        rowObj[h] = rowCells[colIdx] !== undefined ? rowCells[colIdx] : '';
+      });
+      rows.push(rowObj);
+    }
+
+    return { headers, rows, delimiter };
+  }
+
+  const H = 'Start,Volume,Category';
+  const R1 = '2026-01-05 08:00,10,A';
+  const R2 = '2026-01-05 08:30,5,A';
+  const R3 = '2026-01-05 09:00,4,B';
+  const sig = (t: string) => parseCSVRaw(t).problems.map((p) => `${p.severity}:${p.code}`).join('|');
+  const msg = (t: string, code: string) => parseCSVRaw(t).problems.find((p) => p.code === code)?.message ?? '';
+
+  // E1 not readable text
+  const e1a = parseCSVRaw(`${H}\n2026-01-05 08:00,1\u00000,A\n${R2}`);
+  const e1b = parseCSVRaw('PK\u0003\u0004\u0014\u0000\u0006\u0000binary');
+  assert(sig(`${H}\n2026-01-05 08:00,1\u00000,A\n${R2}`) === 'error:E1' && e1a.rows.length === 0 && /not a readable text file/.test(e1a.problems[0].message), 'D68.1a NUL character -> one error E1, nothing returned');
+  assert(sig('PK\u0003\u0004zip') === 'error:E1' && e1b.headers.length === 0, 'D68.1b text starting with PK (Excel workbook) -> E1 (also wins over NUL)');
+
+  // E2 empty
+  assert(sig('') === 'error:E2' && sig('  \n\r\n  ') === 'error:E2' && parseCSVRaw('').problems[0].message === 'The file is empty.', 'D68.2 empty / only blank lines -> E2');
+
+  // E3 header only
+  assert(sig(`${H}\n\n\n`) === 'error:E3' && sig(H) === 'error:E3', 'D68.3 header only (blank lines ignored) -> E3');
+
+  // E7 title row
+  const e7 = `Daily report\n${H}\n${R1}\n${R2}`;
+  assert(sig(e7) === 'error:E7' && /file row 1/.test(msg(e7, 'E7')), 'D68.7a title row above the header -> E7 naming file row 1', msg(e7, 'E7'));
+  assert(sig(`\n\nDaily report\n${H}\n${R1}\n${R2}`) === 'error:E7' && /file row 3/.test(msg(`\n\nDaily report\n${H}\n${R1}\n${R2}`, 'E7')), 'D68.7b title row after blank lines -> row 3 named');
+
+  // E6 one column only
+  const e6 = 'Value\n7\n1;2,3';
+  assert(sig(e6) === 'error:E6' && /^Only one column was found\. Columns must be separated by comma, semicolon, tab or \|\./.test(msg(e6, 'E6')), 'D68.6 one column while another separator appears in the data -> E6', msg(e6, 'E6'));
+  assert(sig('Value\n7\n8\n9') === '' && parseCSVRaw('Value\n7\n8\n9').rows.length === 3, 'D68.6b a genuine one-column file without any other separator is still read as before (no problem)');
+
+  // E4 unterminated quote (row number counts blank lines and lines inside quoted cells)
+  const e4 = `${H}\n2026-01-05 08:00,10,"A\nB"\n\n2026-01-05 09:00,4,"Open\n${R2}`;
+  assert(sig(e4) === 'error:E4' && /opened on file row 5 is never closed/.test(msg(e4, 'E4')), 'D68.4a unterminated quote -> E4 naming file row 5 (blank line and quoted line break counted)', msg(e4, 'E4'));
+  assert(/opened on file row 3 /.test(msg(`${H}\n${R1}\n2026-01-05 09:00,4,"5 screen\n${R2}`, 'E4')), 'D68.4b simple case: quote opened on row 3');
+
+  // E5 more non-empty cells than the header
+  const e5 = `${H}\n${R1}\n2026-01-05 08:30,5,A,extra\n${R3}`;
+  assert(sig(e5) === 'error:E5' && /1 row\(s\) have more columns than the header \(file rows 3; expected 3, found 4/.test(msg(e5, 'E5')) && /delimiter is extra on those rows, or there is a title row above the header/.test(msg(e5, 'E5')), 'D68.5a extra non-empty cell -> E5 with file row, expected 3 / found 4', msg(e5, 'E5'));
+  const many = [H, ...Array.from({ length: 7 }, (_, k) => `2026-01-05 0${k + 1}:00,5,A,x`)].join('\n');
+  assert(/7 row\(s\)/.test(msg(many, 'E5')) && /file rows 2, 3, 4, 5, 6, …;/.test(msg(many, 'E5')), 'D68.5b seven bad rows: count 7, five rows named then an ellipsis', msg(many, 'E5'));
+
+  // precedence E1 > E2 > E3 > E7 > E6 > E4 > E5
+  assert(sig('PK\u0003\u0004') === 'error:E1' && sig(`Title\n${H}\n${R1}\n${R2},x\n"open`) === 'error:E7', 'D68.P precedence: E1 beats the rest; E7 beats E4/E5');
+  assert(sig('Value\n7\n1;2,3\n"open') === 'error:E6', 'D68.P2 E6 beats E4');
+  assert(sig(`${H}\n${R1},x\n"open`) === 'error:E4', 'D68.P3 E4 beats E5');
+
+  // trailing delimiter on every row; extra empty cells ignored
+  const trail = `${H},\n${R1},\n${R2},\n${R3},`;
+  assert(sig(trail) === '' && parseCSVRaw(trail).rows.length === 3, 'D68.8a trailing delimiter on every row (header too) -> no problem');
+  assert(sig(`${H}\n${R1},\n${R2},,\n${R3}`) === '', 'D68.8b extra EMPTY cells on data rows are ignored');
+
+  // quoted delimiter and quoted line break are not problems; later row numbers still right
+  const q = `${H}\n2026-01-05 08:00,10,"A, B"\n2026-01-05 08:30,5,"Line1\nLine2"\n${R3}\n2026-01-05 10:00,2`;
+  const qp = parseCSVRaw(q);
+  assert(qp.rows.length === 4 && qp.rows[0].Category === 'A, B' && qp.rows[1].Category === 'Line1\nLine2' && qp.problems.length === 1 && qp.problems[0].code === 'W1' && /file rows 6\)/.test(qp.problems[0].message), 'D68.9 quoted comma and quoted line break read as before; the short row after them is file row 6', qp.problems[0]?.message);
+  assert(sig(`${H}\n2026-01-05 08:00,10,"A, B"\n2026-01-05 08:30,5,"Line1\nLine2"\n${R3}`) === '', 'D68.9b same file without the short row -> zero problems');
+
+  // W1 short rows: padded as before
+  const w1 = `${H}\n${R1}\n\n2026-01-05 08:30,5\n${R3}\nTotal`;
+  const w1p = parseCSVRaw(w1);
+  assert(sig(w1) === 'warning:W1' && /^2 row\(s\) have fewer columns than the header \(file rows 4, 6\); the missing cells were read as empty\./.test(w1p.problems[0].message) && w1p.rows.length === 4 && w1p.rows[1].Category === '' && w1p.rows[3].Start === 'Total', 'D68.W1 short rows -> warning W1 naming file rows 4 and 6 (blank line counted); cells padded empty', w1p.problems[0]?.message);
+
+  // W2 duplicate header: both columns keep their own values
+  const w2p = parseCSVRaw('Start,Volume,Volume\n2026-01-05 08:00,10,20');
+  assert(sig('Start,Volume,Volume\n2026-01-05 08:00,10,20') === 'warning:W2' && w2p.headers.join('|') === 'Start|Volume|Volume (2)' && w2p.rows[0].Volume === '10' && w2p.rows[0]['Volume (2)'] === '20', 'D68.W2 duplicate header: second renamed "Volume (2)", values 10 and 20 both kept, warning W2');
+
+  // W3 replacement characters
+  const w3 = `${H}\n2026-01-05 08:00,10,Caf�\n${R2}`;
+  assert(sig(w3) === 'warning:W3' && parseCSVRaw(w3).rows.length === 2, 'D68.W3 U+FFFD present -> warning W3, file still loads');
+
+  // UTF-16 "Unicode Text" decodes to tab-delimited text: keeps loading
+  const u16 = 'Start\tVolume\tCategory\r\n2026-01-05 08:00\t10\tA\r\n2026-01-05 08:30\t5\tA\r\n';
+  const u16p = parseCSVRaw(u16);
+  assert(u16p.delimiter === '\t' && u16p.rows.length === 2 && u16p.problems.length === 0, 'D68.U16 decoded UTF-16 tab file loads: tab delimiter, 2 rows, no problem');
+
+  // pipe delimiter
+  const pipe = 'Start|Volume|Category\n2026-01-05 08:00|1,5|A\n2026-01-05 08:30|2,5|A\n2026-01-05 09:00|3|B';
+  const pp = parseCSVRaw(pipe);
+  assert(pp.delimiter === '|' && pp.headers.join(',') === 'Start,Volume,Category' && pp.rows.length === 3 && pp.problems.length === 0, 'D68.10a pipe file: delimiter |, three columns, 3 rows, no problem');
+  const pm = { intervalStartCol: 'Start', volumeCol: 'Volume', categoryCol: 'Category' } as any;
+  const pv = mapRawRecordsToIntervals(pp.rows, pm, 'General', pp.delimiter).reduce((s, x) => s + x.volume, 0);
+  assert(Math.abs(pv - 7) < 1e-9, 'D68.10b pipe file total volume equals the hand sum (1.5 + 2.5 + 3 = 7, comma decimals read per the part-1 rules)', String(pv));
+  assert(parseCSVRaw('a,b|c\n1,2|3').delimiter === ',' && parseCSVRaw('Title\nA|B\n1|2').delimiter === '|', 'D68.10c pipe has the lowest priority; used when the first delimiter line has only pipes (title line above is skipped over)');
+
+  // warnings travel into data quality as non-blocking issues
+  const okIv = mapRawRecordsToIntervals(parseCSVRaw(`${H}\n${R1}\n${R2}`).rows, pm, 'General', ',');
+  const dqW = validateDataQuality({ intervals: okIv, mapping: pm, categories: DEFAULT_CATEGORIES, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, openingWIP: [], fileWarnings: w1p.problems });
+  const dqN = validateDataQuality({ intervals: okIv, mapping: pm, categories: DEFAULT_CATEGORIES, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, openingWIP: [] });
+  const fw = dqW.issues.filter((i) => i.field === 'File reading');
+  assert(fw.length === 1 && fw[0].severity === 'warning' && dqW.passed === dqN.passed && dqN.issues.filter((i) => i.field === 'File reading').length === 0, 'D68.11 file warnings appear as one non-blocking "File reading" issue; without them none and the pass/fail verdict is unchanged');
+
+  // regression: clean files and built-in samples identical to the legacy reader, zero problems
+  const toText = (headers: string[], rows: Record<string, string>[], d: string) => [headers.join(d), ...rows.map((r) => headers.map((h) => r[h]).join(d))].join('\n');
+  for (const st of ['claims', 'support', 'healthcare'] as const) {
+    const ds = buildSampleDataset(st, new Date(2026, 9, 5, 8, 0));
+    for (const d of [',', ';', '\t']) {
+      const text = toText(ds.headers, ds.rows, d);
+      const noClash = ![...ds.headers, ...ds.rows.flatMap((r) => Object.values(r))].some((c) => String(c).includes(d) || String(c).includes('"'));
+      const a = parseCSVRaw(text);
+      const b = legacyParseCSVRaw(text);
+      assert(noClash && a.problems.length === 0 && JSON.stringify(a.headers) === JSON.stringify(b.headers) && JSON.stringify(a.rows) === JSON.stringify(b.rows) && a.delimiter === b.delimiter && a.delimiter === d && a.rows.length === ds.rows.length, `D68.12 sample ${st} as ${d === '\t' ? 'tab' : d} file: zero problems; headers, rows and delimiter identical to the legacy reader`);
+    }
+  }
+  for (const t of [`${H}\n${R1}\n${R2}\n${R3}\n`, `${H}\r\n${R1}\r\n${R2}\r\n`.replace(/,/g, ';'), `${H}\n${R1}\n${R2}`.replace(/,/g, '\t'), `${H}\n\n${R1}\n\n${R2}\n\n`, q.replace(/\n2026-01-05 10:00,2$/, '')]) {
+    const a = parseCSVRaw(t);
+    const b = legacyParseCSVRaw(t);
+    assert(a.problems.length === 0 && JSON.stringify(a.headers) === JSON.stringify(b.headers) && JSON.stringify(a.rows) === JSON.stringify(b.rows) && a.delimiter === b.delimiter, 'D68.13 clean hand file (comma / semicolon / tab / CRLF / blank lines / quoted cells): zero problems and identical to the legacy reader');
+  }
+  // PK-prefixed headers are valid text, not a zip signature
+  {
+    const pkc = parseCSVRaw('PK,Start,Volume\nA,2026-01-05 08:00,1\nA,2026-01-05 08:30,2');
+    const pks = parseCSVRaw('PKey;Start;Volume\nA;2026-01-05 08:00;1\nA;2026-01-05 08:30;2');
+    assert(pkc.problems.length === 0 && pkc.headers.join('|') === 'PK|Start|Volume' && pkc.rows.length === 2, 'D68.14a header starting PK (comma) loads with zero problems');
+    assert(pks.problems.length === 0 && pks.delimiter === ';' && pks.headers.join('|') === 'PKey|Start|Volume' && pks.rows.length === 2, 'D68.14b header starting PKey (semicolon) loads with delimiter ;');
+  }
+}
+
+// D69 - unmapped required columns are named (Input safety part 3, Build B / UI-39)
+{
+  console.log('\n--- D69: missingRequiredMappings ---');
+  assert(missingRequiredMappings({ intervalStartCol: 'Date', volumeCol: 'Vol' }).length === 0, 'D69.1 both required columns mapped: nothing missing');
+  assert(missingRequiredMappings({ intervalStartCol: 'Date', volumeCol: '' }).join('|') === 'Volume', 'D69.2 only volume unmapped: names Volume');
+  assert(missingRequiredMappings({ intervalStartCol: '', volumeCol: 'Vol' }).join('|') === 'Date / Day', 'D69.3 only date unmapped: names Date / Day (the label on the mapping screen)');
+  assert(missingRequiredMappings({ intervalStartCol: '', volumeCol: '' }).join(', ') === 'Date / Day, Volume', 'D69.4 both unmapped: both listed, in screen order');
+  assert(missingRequiredMappings({ intervalStartCol: 'Date', volumeCol: 'Vol', timeCol: '', categoryCol: '' }).length === 0, 'D69.5 optional columns (time, category) left empty are never reported');
+}
+
+// D70 - stale results after data edits (G6 + H9): content fingerprints of demand intervals and opening backlog
+import { diffRunData, diffRunInputs as diffRunInputs70, fingerprintBacklog, fingerprintIntervals } from '../src/utils/run-inputs';
+{
+  console.log('\n--- D70: stale results after data edits ---');
+  const day = (h: number, m = 0) => new Date(2026, 0, 5, h, m);
+  const mkIv = (): StandardInterval[] =>
+    [8, 9, 10].flatMap((h, i) => ['Claims', 'Billing'].map((c, j) => ({ intervalIndex: i * 2 + j, start: day(h), end: day(h, 30), volume: 10 + i + j, category: c } as StandardInterval)));
+  const mkWip = (): OpeningWIPCase[] =>
+    [1, 2, 3].map((n) => ({ id: `W${n}`, category: n === 2 ? 'Billing' : 'Claims', priority: 1, arrival: day(7, n), clockStart: day(7, n), remainingWorkMinutes: 20 + n }));
+  const snap = (iv: StandardInterval[], wip: OpeningWIPCase[]) => ({ demand: fingerprintIntervals(iv), backlog: fingerprintBacklog(wip) });
+  const run = snap(mkIv(), mkWip());
+  const kinds = (iv: StandardInterval[], wip: OpeningWIPCase[]) => diffRunData(run, snap(iv, wip)).join('|');
+
+  assert(kinds(mkIv(), mkWip()) === '', 'D70.1 identical data (rebuilt objects) -> not stale');
+  assert(diffRunData(null, snap(mkIv(), mkWip())).length === 0, 'D70.1b no run -> nothing reported');
+  const v = mkIv(); v[3].volume += 1;
+  assert(kinds(v, mkWip()) === 'demand data', 'D70.2 one interval volume changed -> demand data');
+  const c = mkIv(); c[1].category = 'Other';
+  assert(kinds(c, mkWip()) === 'demand data', 'D70.3 one interval category changed -> demand data');
+  const t = mkIv(); t[0].start = day(8, 5);
+  assert(kinds(t, mkWip()) === 'demand data', 'D70.3b one interval start changed -> demand data');
+  assert(kinds(mkIv().slice(1), mkWip()) === 'demand data', 'D70.3c one interval removed -> demand data');
+  const wAdd = mkWip(); wAdd.push({ id: 'W4', category: 'Claims', priority: 1, arrival: day(7), clockStart: day(7), remainingWorkMinutes: 5 });
+  assert(kinds(mkIv(), wAdd) === 'opening backlog', 'D70.4a backlog case added -> opening backlog');
+  assert(kinds(mkIv(), mkWip().slice(1)) === 'opening backlog', 'D70.4b backlog case removed -> opening backlog');
+  const wMin = mkWip(); wMin[0].remainingWorkMinutes += 1;
+  const wCat = mkWip(); wCat[0].category = 'Billing';
+  const wArr = mkWip(); wArr[0].arrival = day(6, 59);
+  const wPri = mkWip(); wPri[0].priority = 2;
+  assert([wMin, wCat, wArr, wPri].every((w) => kinds(mkIv(), w) === 'opening backlog'), 'D70.4c backlog minutes / category / arrival / priority edited -> opening backlog each');
+  assert(kinds(v, wAdd) === 'demand data|opening backlog', 'D70.5 demand and backlog changed together -> both named');
+  const s0: any = { calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, categories: DEFAULT_CATEGORIES, simParams: DEFAULT_SIM_PARAMS };
+  const s1 = { ...s0, labor: { ...DEFAULT_LABOR, shrinkage: 0.5 } };
+  assert(diffRunInputs70(s0, s1).join('|') === 'Labor' && kinds(mkIv(), mkWip()) === '', 'D70.6 settings-only change: settings named, no data kinds');
+  assert(snap(mkIv(), mkWip()).demand === snap(mkIv(), mkWip()).demand && snap(mkIv(), mkWip()).backlog === snap(mkIv(), mkWip()).backlog, 'D70.7 same inputs -> same fingerprints');
+  const idA = mkIv().map((x) => ({ ...x, categoryId: 'cat-1' } as any));
+  const idB = mkIv().map((x) => ({ ...x, categoryId: 'cat-999' } as any));
+  assert(fingerprintIntervals(idA) === fingerprintIntervals(idB), 'D70.8 different category ids, same names -> not stale');
+
+  // real mapping function on a small raw file
+  const raw = parseCSVRaw('Start,Alt,Volume,Cat\n2026-01-05 08:00,2026-01-05 09:00,5,A\n2026-01-05 08:30,2026-01-05 09:30,7,B\n2026-01-05 09:00,2026-01-05 10:00,9,A\n');
+  const mapAt = (startCol: string, catCol: string) => mapRawRecordsToIntervals(raw.rows, { intervalStartCol: startCol, volumeCol: 'Volume', categoryCol: catCol } as any, 'General', raw.delimiter);
+  const base70 = snap(mapAt('Start', 'Cat'), []);
+  const mapped = (st: string, ct: string) => diffRunData(base70, snap(mapAt(st, ct), [])).join('|');
+  assert(mapped('Alt', 'Cat') === 'demand data', 'D70.9a date mapping changed so intervals change -> demand data');
+  assert(mapped('Start', '') === 'demand data', 'D70.9b category mapping cleared so intervals change -> demand data');
+  assert(mapped('Alt', 'Cat') === 'demand data' && mapped('Start', 'Cat') === '', 'D70.9c mapping changed and changed back -> not stale');
+  const ivR = mapAt('Start', 'Cat');
+  const wipR = mkWip().map((w) => ({ ...w, category: 'A' }));
+  const remapped = remapCasesToIntervalSpelling(wipR, ivR);
+  assert(fingerprintBacklog(remapped) === fingerprintBacklog(wipR), 'D70.10 remapCasesToIntervalSpelling returning equal content -> backlog not stale');
 }
 
 console.log('\n==================================================');

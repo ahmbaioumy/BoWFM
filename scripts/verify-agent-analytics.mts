@@ -204,6 +204,55 @@ console.log('\n--- Suite AA: agent analytics ---');
   assert(allLate > 0 && lateShare / allLate > 2 / 8, 'AA.30 late cohort does a larger-than-headcount share of last-2h work', `${lateShare}/${allLate}`);
   assert(sa.rows.every((r) => r.scheduledMin >= r.availableMin - 1e-9), 'AA.31 staggered: scheduled >= available');
   assert(buildAgentInsights(sa).some((t) => t.includes('late-coverage')), 'AA.32 insights call out late-coverage agents');
+  // Every agent in a staggered run works a fixed shift of dailyProductiveHours (6h = 360 min) from their own start.
+  const earlyAgents = sa.rows.filter((r) => !r.isLateShift);
+  assert(earlyAgents.length === 6 && earlyAgents.every((r) => r.scheduledMin <= r.onShiftDays * 360 + 1e-6), 'AA.32b staggered 09:00-17:00 / 6h: early-cohort scheduled <= on-shift days x 360 (not to business close)', earlyAgents.map((r) => `${r.scheduledMin}/${r.onShiftDays}`).join(' '));
+
+  // ---- Long-day staggered fixture: 08:00-22:00 (14h) calendar, 9 productive hours, 2 categories, pooled ----
+  const LBIZ: CalendarConfig = { workingDays: [1, 2, 3, 4, 5], dailyOpenHour: 8, dailyOpenMinute: 0, dailyCloseHour: 22, dailyCloseMinute: 0, holidays: [] };
+  const mkLab = (adh: number): LaborConfig => ({ dailyProductiveHours: 9, adherencePct: adh, workingDaysPerWeek: 5, offDaysPerWeek: 2, contractualHoursSource: 'derived', shifts: [] });
+  const lcat: CategoryConfig[] = [
+    { id: 'g', name: 'Gold', ahtMinutes: 20, shrinkagePct: 0.2, priority: 1 },
+    { id: 's', name: 'Silver', ahtMinutes: 20, shrinkagePct: 0.2, priority: 1 },
+  ];
+  const liv: StandardInterval[] = [];
+  let lidx = 0;
+  for (let d = 0; d < 10; d++) {
+    if (!LBIZ.workingDays.includes(new Date(2026, 9, 5 + d).getDay())) continue;
+    for (let h = 8; h < 22; h++) {
+      for (const m of [0, 30]) {
+        for (const cn of ['Gold', 'Silver']) liv.push({ intervalIndex: lidx++, start: new Date(2026, 9, 5 + d, h, m), end: new Date(2026, 9, 5 + d, h, m + 30), volume: cn === 'Gold' ? 4 : 3, category: cn });
+      }
+    }
+  }
+  const ldist: ShiftDistributionByCategory = { __POOLED__: { slapMinutes: 30, slaps: [{ startMinutesFromOpen: 0, agentCount: 5 }, { startMinutesFromOpen: 300, agentCount: 3 }] } };
+  const runLong = (adh: number, withDist = true) => runBackofficeDES({ operationalHC: 8, intervals: liv, openingWIP: [], categories: lcat, calendar: LBIZ, labor: mkLab(adh), sla: SLA, seed: 7, queueArchitecture: 'pooled', ...(withDist ? { shiftDistribution: ldist } : {}) });
+  const ld = runLong(1.0);
+  // Full in-horizon days only (Oct 6-13): excludes the first day and any post-horizon drain day.
+  const FULL = { fromDate: '2026-10-06', toDate: '2026-10-13' };
+  const la = computeAgentAnalytics({ des: ld, calendar: LBIZ, labor: mkLab(1.0) });
+  const lf = computeAgentAnalytics({ des: ld, calendar: LBIZ, labor: mkLab(1.0), filter: FULL });
+  const earlyL = la.rows.filter((r) => !r.isLateShift);
+  const earlyF = lf.rows.filter((r) => !r.isLateShift);
+  assert(earlyL.length === 5 && la.rows.filter((r) => r.isLateShift).length === 3, 'AA.33-pre long-day fixture: 5 agents at 08:00, 3 flagged late at 13:00', JSON.stringify(la.rows.map((r) => r.cohortStart)));
+  assert(la.rows.every((r) => r.scheduledMin <= r.onShiftDays * 540 + 1e-6), 'AA.33 long-day staggered: every agent scheduled <= on-shift days x 540', la.rows.map((r) => `${r.scheduledMin}/${r.onShiftDays}`).join(' '));
+  const lone = computeAgentAnalytics({ des: ld, calendar: LBIZ, labor: mkLab(1.0), filter: { fromDate: '2026-10-07', toDate: '2026-10-07', agentIds: [0] } });
+  assert(lone.rows.length === 1 && lone.rows[0].onShiftDays === 1 && approx(lone.rows[0].scheduledMin, 540, 1e-6), 'AA.34 early-cohort agent on a full in-horizon day is scheduled exactly 540', `${lone.rows[0]?.scheduledMin}`);
+  assert(lf.rows.every((r) => Math.abs(r.occupancyPct - r.utilisationPct) < 0.5), 'AA.35 adherence 1.0 staggered: occupancy == utilisation for every agent (full days)', lf.rows.map((r) => `${r.occupancyPct.toFixed(1)}/${r.utilisationPct.toFixed(1)}`).join(' '));
+  const ld9 = runLong(0.9);
+  const l9 = computeAgentAnalytics({ des: ld9, calendar: LBIZ, labor: mkLab(0.9), filter: FULL });
+  const l9day = computeAgentAnalytics({ des: ld9, calendar: LBIZ, labor: mkLab(0.9), filter: { fromDate: '2026-10-07', toDate: '2026-10-07' } });
+  assert(l9day.rows.every((r) => approx(r.scheduledMin, 540, 1e-6)), 'AA.36 adherence 0.9 staggered: scheduled is still 540 per full day', l9day.rows.map((r) => r.scheduledMin.toFixed(1)).join(' '));
+  assert(l9.rows.some((r) => r.occupancyPct - r.utilisationPct > 0.5), 'AA.36b adherence 0.9 staggered: budget ends before the shift, so occupancy > utilisation for some agent (legitimate gap kept)', l9.rows.map((r) => `${r.occupancyPct.toFixed(1)}/${r.utilisationPct.toFixed(1)}`).join(' '));
+  const lateUtilTxt = buildAgentInsights(lf).find((t) => t.includes('late-coverage')) ?? '';
+  const um = /Their utilisation is ([\d.]+)% vs ([\d.]+)%/.exec(lateUtilTxt);
+  assert(!!um && Math.abs(Number(um[1]) - Number(um[2])) < 5, 'AA.37 insight: late vs earlier-start utilisation differ by < 5 points (adherence 1.0, full days)', lateUtilTxt);
+  const gold = computeAgentAnalytics({ des: ld, calendar: LBIZ, labor: mkLab(1.0), filter: { category: 'Gold', ...FULL } });
+  const goldGap = (r: { scheduledMin: number; availableMin: number; onShiftDays: number }) => (r.scheduledMin - r.availableMin) / Math.max(1, r.onShiftDays);
+  const gEarly = gold.rows.filter((r) => !r.isLateShift);
+  const gLate = gold.rows.filter((r) => r.isLateShift);
+  assert(gEarly.length === 5 && gLate.length === 3 && [...gEarly, ...gLate].every((r) => goldGap(r) < 20), 'AA.38 pooled category filter: scheduled - available per day ~0 for early and late cohorts alike', [...gEarly, ...gLate].map((r) => goldGap(r).toFixed(0)).join(' '));
+  assert(!!ld.shiftDistributionUsed && !runLong(1.0, false).shiftDistributionUsed, 'AA.39 a run with a shiftDistribution reports shiftDistributionUsed; a run without does not');
 }
 
 // ------------------------------------------------------------------------------------------

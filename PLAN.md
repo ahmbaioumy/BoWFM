@@ -571,3 +571,661 @@ Weekly cap 25% (hard stop). Meter at plan time: 21%. No new agent at a reading o
 | 5 | No regression | lint clean; `npm test` green; `test:audit` 24/24 identical; built-in samples load with data quality passed (support and healthcare samples include weekends) |
 | 6 | Browser | Upload week + near stray row: blocking message visible, Run disabled |
 | 7 | Docs and artifact | PRD rule text matches; `npm run check:artifact` passes |
+
+---
+
+# BUILD PLAN — F2: 24x7 parked work resumes when capacity exists, not at midnight (DES-8)
+
+Weekly cap 35% (hard stop). Meter at plan time: 30%. No new agent at a reading of 34%.
+
+**Task:** on a 24x7 calendar a case parked because an agent ran out of daily productive time must be available to other free agents at once, not held until the next midnight.
+**End user:** the WFM planner of a 24x7 operation.
+**Tier 3** (simulation behaviour). Reviewers: `tester` + `auditor` (+ final `challenger` if the meter allows).
+
+## Facts (investigator, with probes in scratch `f2/`)
+
+- Parking: `dispatchSingleQueue` (`des-engine.ts:1437-1517`). A budget-bound park schedules `CasePark`; its non-handover branch (`:1659-1686`) puts the case in a side map (`parkedWIP`) and schedules `CaseResume`.
+- On every other calendar the resume time is `nextOpen(now)`, which is "now" while the business is open. On 24x7 a hard-coded branch (`:1671-1683`) sets it to the next calendar midnight by hand-rolled date maths. A dead copy of that branch sits in `DayClose` (`:1887-1899`; 24x7 never schedules `DayClose`).
+- While the case waits in the side map no dispatch can reach it, although other agents are idle with budget. Shift-end parks in staggered mode already hand over immediately (correct).
+- Probe, 3 agents, 24x7: all agents on one shift: 4 of 4 parked cases waited needlessly (586 min total). Staggered shifts with adherence 0.9: 5 of 8, 4,132 avoidable minutes (one case parked 06:46, resumed 00:00, while another agent was free from 08:01).
+- Sizing probe (24x7 week, 6 per hour, AHT 45, adherence 0.9): SLA at 16 agents 98.0% today vs 100.0% with the branch removed; today SLA is NOT monotone in headcount (14 agents 100%, 16 agents 98% at a 24 h SLA); the patch removes that. Recommendation unchanged on that dataset (floor-bound at 16).
+- No document records midnight resume on 24x7 as deliberate; `PRD.md:806` and `project_context.md:465-470` already describe next-day resume as `DayClose`-only (stale for this branch). The fix reverses no recorded decision.
+
+## Design
+
+1. Remove the 24x7 midnight branch at `des-engine.ts:1671-1683`; every calendar uses `nextOpen(currTime, calendar)`. Remove the dead copy in `DayClose`. No other logic changes: daily budget, shift-window presence (frozen decision 11), parked-first rule, EDF order, random draws and both search functions are untouched.
+2. If nobody has capacity when the case is parked, it simply stays in the live queue and is taken at the next completion, arrival or shift start / day reset — which is when capacity appears.
+
+## Steps (builder `sonnet-executor`, fail-first)
+
+1. Tests first, red on today code (new suite appended before the RESULTS block of `scripts/verify-sizing-fixes.mts`): (a) 24x7, all agents on one shift, hand-built cases straddling the daily budget: each parked case resumes at the first instant another agent is idle with budget (0 avoidable waits; today 4); (b) 24x7 staggered offsets 0/8/16 h, adherence 0.9: 0 avoidable waits (today 5), named case resumes at 08:01-ish on the same day, not 00:00; (c) when ALL agents are exhausted the case still waits for the day reset (wait is legitimate) and nothing is worked beyond any agent budget or outside its shift window; (d) conservation: handled minutes equal total work, no overlap, no agent over budget (reuse `verifyAgentTimelineInvariants`); (e) SLA monotone in headcount on the 24x7 sizing fixture for N = 14, 15, 16, 17; (f) a business-hours calendar digest unchanged.
+2. Engine edit (design 1).
+3. Existing tests: a pinned digest for a 24x7 budget-park scenario (D43.14, `verify-sizing-fixes.mts:~3169`) and possibly D43.7, D45.1e-f are expected to change. Each changed expectation is re-derived, listed with before/after and a one-line justification, and reviewed. Non-24x7 expectations must NOT change.
+4. Verify: lint; build; `npm test`; `npm run test:audit` (report any cell that moves — sample files on 24x7 settings may legitimately change; business-hours cells must not); `check:artifact`.
+5. Docs: `PRD.md` (simulation section: park/resume wording, version bump), `project_context.md` (§5 and the stale `DayClose`-only note, §11 recently fixed), `docs/wfm/07-known-defects-and-decisions.md` (new entry with the probe numbers), `docs/wfm/05-scheduling.md:90-91` if its wording needs it.
+
+## Scope lock
+
+`src/utils/des-engine.ts` (the two branches only), `scripts/verify-sizing-fixes.mts` (append; listed expectation updates only), `scripts/verify-fixes.mts` ONLY if a 24x7 pinned value there changes (listed), audit baseline file under `docs/audit/` only if `test:audit` 24x7 cells legitimately move (listed, with before/after), `PRD.md`, `project_context.md`, `docs/wfm/05-scheduling.md`, `docs/wfm/07-known-defects-and-decisions.md`, rebuilt `BoWFM.html`.
+
+## Acceptance criteria and proof
+
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | No avoidable wait on 24x7 | Tester own script on the two probe scenarios: avoidable waits 0 (were 4 and 5); park and resume times listed |
+| 2 | Legitimate waits kept | All agents exhausted: case resumes at the day reset; zero work beyond budget or outside shift windows (tester tally from the agent timeline) |
+| 3 | SLA monotone in headcount | 24x7 fixture: SLA% non-decreasing for N = 14..17 |
+| 4 | Business-hours results unchanged | Three built-in samples 31/40, 27/34, 31/39; `test:audit` business-hours cells identical; digest test |
+| 5 | 24x7 results move the right way | Any changed 24x7 number: SLA at fixed headcount not lower, recommended headcount not higher; each listed |
+| 6 | Changed expectations justified | List of every edited existing assertion with before/after; auditor confirms none is non-24x7 |
+| 7 | Mutation proof | Tester re-adds the midnight branch in a scratch copy: new tests fail |
+| 8 | Gates, docs, artifact | lint, `npm test`, `check:artifact` green; docs updated |
+| 9 | Scope respected | `git diff <checkpoint>..HEAD --stat` only scope-lock files |
+
+## F2 plan — challenger verdict: PASS (no blockers). Revisions accepted:
+
+- No livelock: a budget park uses up the whole remaining budget (`des-engine.ts:1489`), the agent goes off (`:1662-1669`), and dispatch skips agents with no budget (`:1341-1349`, `:1445`). Parks per case per day are bounded by the number of agents.
+- Design 2 reworded: the case still passes through `parkedWIP` and a `CaseResume` scheduled for the same instant; with no capacity it then waits in the live queue for the next `AgentAvailable` (budget reset: once a day, or per cohort at shift start in staggered mode). The existing `try/catch` around `nextOpen` stays untouched.
+- Criterion 5 restated: "measured on the listed fixtures: SLA at fixed headcount not lower; any recommendation that RISES is listed with an explanation" — a direction is not guaranteed by the engine.
+- Added tests: (g) bounded work on a stress fixture (24x7, many cases, small budgets): parks per case no more than agents x days, total event count bounded, run completes; (h) determinism: two runs with the same seed give identical case results (same-instant resume ordering); (i) zero budget everywhere: resume only at the reset.
+- Before deleting the `DayClose` copy: confirm by grep that no 24x7 path schedules `DayClose`.
+
+---
+
+# BUILD PLAN — F3: statistics describe the roster that is actually recommended (HC-15)
+
+Weekly cap 40% (owner: "increase and resume", +5 step assumed). Meter at plan time: 33-34%. No new agent at a reading of 39%.
+
+**Task:** when shift placement adopts a polished roster, the confidence block and the search-history row for the recommended headcount must describe that adopted roster, not the one before polish.
+**End user:** the WFM planner using shift placement (opt-in setting `labor.shiftPlacementEnabled`). Runs without it are unaffected.
+**Tier 3** (search result fields; sync + async). Reviewers: `tester` + `auditor`.
+
+## Facts (investigator, probe in scratch `f3/p.mts`)
+
+- Polish blocks: sync `hc-search.ts:2768-2800`, async `:3529-3577`. Every polish candidate is already evaluated with the full R-replication CI evaluation on the shared case sets (`:2779-2783`, `:3552-3556`), but only `{passes, reasons, median}` is kept (`:2791-2792`, `:3568-3569`); the full evaluation is discarded.
+- On adoption only the roster map is updated (`:2799`, `:3576`). `primaryPassedResult` and `evalCache` keep the PRE-polish evaluation, so `primaryStatistical` (`:2965` / `:3773`), every history row (`:2898-2910` / `:3691-3702`), the occupancy/ASA binding-constraint branches (`:2887-2892` / `:3680-3684`) and the representative replication index (`:2803-2807` / `:3597-3601`) are PRE, while the headline simulation (`:2808-2821`) is POST.
+- Probe (D50 fixture, seed 42, N = 9, polish adopted 7/7): confidence block shows mean 94.3, CI [94.1, 94.5]; the adopted roster really scores 100, CI [100, 100]; headline shows 100. Same for seeds 7 and 99.
+- Decision is not affected: adoption requires the polished roster to pass the full CI evaluation (pooled path confirmed; siloed path to be confirmed by the builder). Only displayed numbers are wrong (pessimistic in the probe).
+- No test asserts these fields under polish; no document records the behaviour as deliberate.
+
+## Design
+
+1. Keep the full evaluation of each polish candidate (pooled: by k; siloed: by vector key) in a small map inside the polish block.
+2. One shared helper next to `finalizeRosterPolish` returns the evaluation of the ADOPTED roster (or nothing when nothing is adopted). Both search functions call it identically right after the roster is adopted and then set `primaryPassedResult` to it and overwrite `evalCache` for the recommended headcount. No new evaluation is run (zero extra simulations).
+3. Consequences, all intended: `primaryStatistical`, the history row for N, the occupancy/ASA binding branches and the representative replication index now describe the adopted roster. The audit (headline) run therefore uses the adopted roster representative replication. One history row per N as before (replaced, not added).
+4. The pre-polish median stays visible as today (`rosterPolish.currentSlaPct`, "SLA x -> y" status line). No new result fields, no type change, no UI change.
+5. If the adopted evaluation is missing for any reason (should not happen), keep today behaviour — never substitute a made-up value.
+
+## Steps (builder `sonnet-executor`, fail-first)
+
+1. Tests first, red on today code (new suite before the RESULTS block of `scripts/verify-sizing-fixes.mts`), D50 fixture seed 42 with placement ON: (a) `primaryStatistical` (mean, median, CI low/high, R) equals an INDEPENDENT `evaluateCandidateStatistical` call for the adopted roster at N on the same seed and case sets, and equals the literals mean 100 / CI [100, 100]; (b) the history row for N carries the same numbers; rows for other N unchanged vs today (pin literals measured before the change); (c) `rosterPolish` object byte-identical to today (pin a digest before the change); (d) recommended HC and adopted roster identical to today; (e) sync result deep-equals async result; (f) no-adoption scenarios (`no_improvement`, placement OFF): entire result identical to today (digest); (g) one siloed polish scenario if a fixture exists in D51/D52: same assertions (a)-(e); (h) the representative-run consistency: headline SLA % of the audit run lies within the CI of the reported block or the existing `infeasibleAdjacentWarning` rule fires — no contradiction of the kind "CI [94.1, 94.5] with headline 100".
+2. Implement design 1-2 in BOTH functions identically; confirm for the siloed path that the adopted vector is always an evaluated-and-passing one (if not: STOP and report).
+3. Verify: lint; build; `npm test`; `npm run test:audit` (24/24 identical expected — the audit samples run with placement OFF; report otherwise); `check:artifact`. Any existing expectation that changes must be a placement-ON polish-adopted scenario, listed with before/after and justification.
+4. Docs: `PRD.md` Stage 3b (~861-890) one sentence + version bump; `project_context.md` §6.4b and §11; `docs/wfm/07-known-defects-and-decisions.md` new entry with the probe numbers.
+
+## Scope lock
+
+`src/utils/hc-search.ts` (the two polish blocks + one helper beside `finalizeRosterPolish`; the candidate-evaluation record type if needed), `scripts/verify-sizing-fixes.mts` (append; listed expectation updates only), `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`, rebuilt `BoWFM.html`. No UI file, no `wfm.ts`, no engine file.
+
+## Acceptance criteria and proof
+
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | Confidence block describes the adopted roster | Tester own script: D50 fixture seeds 42, 7, 99: reported mean / CI equal an independent evaluation of the adopted roster (probe values 100 / [100, 100]; were 94.3 / [94.1, 94.5]) |
+| 2 | History row for N matches | Same numbers in the row for N; other rows unchanged |
+| 3 | Decision untouched | Recommended HC, adopted roster and `rosterPolish` identical before / after on all probe scenarios |
+| 4 | Nothing changes without adoption | Placement OFF and `no_improvement` runs: full result digest identical before / after; three built-in samples 31/40, 27/34, 31/39; sample audit 24/24 |
+| 5 | Sync = async | Deep-equal results on the polish fixtures |
+| 6 | Screen | Browser: placement ON run where polish is adopted: confidence block and headline no longer contradict each other |
+| 7 | Mutation proof | Remove the two assignments in a scratch copy: new tests fail |
+| 8 | Gates, docs, artifact, scope | lint, `npm test`, `check:artifact` green; docs updated; diff only scope-lock files |
+
+## F3 plan — challenger verdict: FAIL on test design (core design sound). Revisions accepted; these override the sections above:
+
+- **Criterion and test (h) replaced:** "agree" means the headline run equals the adopted evaluation representative run: `finalDESResult.primaryAchievedPct` equals `primaryPassedResult.representativeResult.primaryAchievedPct` for the adopted roster (builder confirms the audit seed reproduces that replication; if it does not: STOP and report). CI containment of a single run is NOT asserted.
+- **Blast radius stated in full:** with placement ON and polish adopted, the representative replication index changes, so these may legitimately change and are listed before/after: `finalDESResult` (headline run), the N-1 boundary run and `boundaryEvidence`, `differenceSummary`, `isInfeasibleAdjacent` / its warning text, and the occupancy/ASA binding label. Criterion 3 reworded: recommended HC, adopted roster and `rosterPolish` identical; the listed fields are expected to change.
+- Siloed path confirmed safe by the challenger (`hc-search.ts:1224-1236`: the adopted vector is always an evaluated, passing one). The evaluation map must use the same key function as `createParallelRosterKSearch` (`idOf`, `:1182`).
+- `primaryPassedResult` is reassigned strictly AFTER `finalizeRosterPolish` (so `rosterPolish.currentSlaPct` stays the pre-polish median, `:2797`).
+- When `coverageIsBetter` fails or nothing is adopted the helper returns nothing and behaviour is as today.
+- Added tests: default of `labor.shiftPlacementEnabled` is OFF (pinned); placement-OFF full-result digest identical; binding label pinned on the polish fixture; sync = async compared on the full result including boundary evidence.
+
+---
+
+# BUILD PLAN — Input safety, part 1: numbers read from files (G2 + H2)
+
+Owner 2026-10-07: "go ahead" on the four input-safety recommendations (comma decimals accepted in semicolon files, unclear values blocked; timestamps read as written; category variants merged with a note; bad backlog rows imported with safe values and a counted warning). The group is split to fit the weekly cap (40%, meter 34%; no new agent at a reading of 39%): **part 1 = numbers (this plan)**; part 2 = timestamps (G3) + category variants (G5); part 3 = raw-file handling and messages (G4 + H6).
+
+**Task:** a number in an uploaded file is either read exactly as the planner meant it or the planner is told; it is never silently misread.
+**End user:** the WFM planner uploading a demand file and a backlog file.
+**Tier 3** (data handling feeding headcount). Reviewers: `tester` + `auditor`.
+
+## Facts from the audit (lines may have shifted; builder locates by content)
+
+- Demand volume cells (`csv-parser.ts`, volume parse, was `:608-621`): `12,5` in a semicolon file is read as 125; `8,25` as 825; cells such as `30 min`, `12abc`, `0x10`, `1e9` are accepted in part. Browser-confirmed: true total 31.25 shown as 1,055 with "PASSED DQ GATE" (CSV-4, CSV-8).
+- Backlog file import (`DemandFlow.tsx`, `getParsedWipCases`, was `:185-262`): unknown or blank category gets the fallback category NAME but an invented 30 minutes and priority 1 (`:195-214`); remaining minutes read with `parseFloat` (`7,5` gives 7, `2h` gives 2, `1:30` gives 1; negative or text falls back silently; `1e9` accepted) (`:215-220`); priority read with `parseInt` (`:208-211`); blank date silently defaults (`:227-238`); warning text says "mm/dd is rejected" although `03/04/2026` is read as 3 April (`:1073`) (UI-28, UI-29, UI-31, UI-35).
+
+## Rules
+
+1. **One strict number reader** (new pure helper in `src/utils/`, used by both paths): a cell is a number only if, after trimming, it is entirely digits with at most one decimal separator and an optional leading minus. No units, letters, exponents, hex, or stray symbols. Returns the number or "not a number".
+2. **Decimal comma:** accepted only when the file delimiter is NOT a comma (semicolon or tab file). There a comma is the decimal separator and a dot is accepted as a thousands separator only in the strict pattern 1.234,5. In a comma-delimited file a (quoted) cell containing a comma is "not a number". A dot is always a decimal point in comma-delimited files.
+3. **Demand file:** every volume cell that is not a number under rules 1-2 is reported through the existing blocking invalid-volume data-quality error, naming up to 5 file row numbers and the offending text. Negative and zero volumes keep today behaviour. New warning when any single interval volume exceeds 100,000 (likely a misread).
+4. **Backlog file import** (owner: import with safe values and a counted, visible warning):
+   - unknown or blank category: row goes to the fallback category with THAT category own AHT and priority (never an invented 30 / 1); counted and listed;
+   - remaining minutes not a number, negative, or above 100,000: the category AHT is used; counted and listed with the offending text; zero is kept as today;
+   - priority not a positive whole number: category priority; counted;
+   - blank date: arrival defaults as today; counted;
+   - the preview shows one summary block before Append: "N rows imported as typed; M rows adjusted" with a line per reason and up to 5 example rows each; the misleading date sentence is corrected to say day-first is assumed and only impossible dates are rejected.
+   - A matched category whose AHT is missing or 0: the row is counted under "no handling time available" and uses 30 as today, but is now listed.
+5. No engine change. No change to how valid files are read: a file that parses cleanly today must give identical intervals and identical backlog cases.
+
+## Steps (builder `sonnet-executor`, fail-first)
+
+1. Tests first (new suite before the RESULTS block of `scripts/verify-sizing-fixes.mts`): the helper (table of cells: `12`, `12.5`, `12,5` comma-file / semicolon-file, `1.234,5`, `1,234.5`, `30 min`, `12abc`, `0x10`, `1e9`, `-5`, empty, ` 7 `, `1:30`, `2h`); demand parsing of a semicolon file with `12,5; 10,5; 8,25` gives total 31.25 (today 1,055) and the same cells in a comma file give a blocking error naming rows; a clean dot-decimal comma file and each built-in sample parse to byte-identical intervals as today (digest pinned before the change); backlog import function on a fixture with each bad-row kind gives the stated values and counts. The backlog parsing logic is extracted from the component into a pure function in `src/utils/` (same behaviour for valid rows) so it can be tested; the component calls it.
+2. Implement helper, demand path, backlog path, preview summary.
+3. Verify: lint; build; `npm test`; `npm run test:audit` (24/24 identical); `check:artifact`.
+4. Docs: `PRD.md` (file-format rules, data-quality table, backlog import section, limitation L-entries touched, version bump), `project_context.md` (§4 new helper files, §11), `docs/wfm/07-known-defects-and-decisions.md` (entry).
+
+## Scope lock
+
+New `src/utils/number-cell.ts` (helper) and `src/utils/wip-import.ts` (pure backlog-row parser); `src/utils/csv-parser.ts` (volume cell parse, the invalid-volume issue text, the new large-volume warning; passing the detected delimiter through); `src/components/DemandFlow.tsx` (`getParsedWipCases` call site and the import preview summary/warning block only); `scripts/verify-sizing-fixes.mts` (append); `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`; rebuilt `BoWFM.html`. Not in scope: timestamps, category matching rules, raw CSV tokenising, manual backlog form.
+
+## Acceptance criteria and proof
+
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | Comma decimals read correctly | Browser: the audit file `a_semicolon.csv` (`12,5`, `10,5`, `8,25`): total volume 31.25, not 1,055 |
+| 2 | Unclear numbers blocked | Comma-delimited file with a quoted `12,5`, and files with `30 min`, `12abc`, `1e9`: blocking error naming rows and text; Run disabled |
+| 3 | Clean files unchanged | Three built-in samples 31/40, 27/34, 31/39; sample audit 24/24; interval digests identical |
+| 4 | Backlog rows never silently wrong | Fixture file with one row of each bad kind: stored minutes / priority / category as in rule 4; summary block shows the right counts and examples (tester counts by hand) |
+| 5 | Valid backlog file unchanged | Same cases as today (digest) |
+| 6 | Screen | Browser: backlog import preview shows the summary before Append; corrected date sentence |
+| 7 | Mutation proof | Replace the strict reader with `parseFloat` in a scratch copy: new tests fail |
+| 8 | Gates, docs, artifact, scope | lint, `npm test`, `check:artifact` green; docs updated; diff only scope-lock files |
+
+## Input safety part 1 — challenger verdict: FAIL (accepted). FINAL rules below override rules 1-4, the scope lock and the criteria above where they differ.
+
+What the challenger found in the real code: the delimiter is discarded by `parseCSVRaw` (`csv-parser.ts:30-65`) and never reaches the volume parse (`:560`, called from `App.tsx:134`, `:190`, `:225`); today volume cells are cleaned with `replace(/[\s$,]/g, "")` then `parseFloat` (`:610-611`), so a quoted `"1,234"` in a comma file is correctly 1234 today — my rule 2 would have blocked it; the existing invalid-volume issue is only a WARNING naming the first row (`:863-870`); the engine rounds each interval volume (`des-engine.ts:636`).
+
+**Number rules (final; owner principle: read it when it is clear, block it when it is not):**
+- Cleaning kept from today: surrounding spaces, inner spaces and one leading currency symbol are ignored. Then the cell must be digits with optional separators and an optional leading minus. Units, letters, exponents, hex: unreadable.
+- **Comma-delimited file:** dot = decimal. A comma is accepted only as a thousands separator in the strict pattern `1,234` / `12,345,678` (optionally followed by `.dd`). Any other comma: unreadable.
+- **Semicolon or tab file:** the convention is decided per COLUMN. A cell like `12,5` or `8,25` (comma not followed by exactly 3 digits) proves comma-decimal; a cell like `12.5` proves dot-decimal; `1.234,5` proves comma-decimal; `1,234.5` proves dot-decimal. With comma-decimal, a dot is thousands only in the strict pattern. Both conventions proven in one column: blocking error "mixed number formats". Cells of the form `1.234` or `1,234` (1-3 digits, one separator, exactly 3 digits, integer part not 0) are AMBIGUOUS: they follow the proven convention of the column; if nothing in the column proves a convention: blocking error naming the rows and both possible readings.
+- **Unreadable or ambiguous volume:** new ERROR-severity data-quality issue "Unreadable volume" naming up to 5 file rows with the cell text; the stored volume for such a cell is 0 so nothing half-parsed can reach the engine. The old warning text about stripped separators is rewritten.
+- **Fractional volumes:** new warning when any volume is not a whole number: "the simulation rounds each interval to whole cases" (existing limitation L1). Criterion 1 proves the DISPLAYED total (31.25); the engine input is the rounded per-interval values, stated in the PRD.
+- Large-value warnings: interval volume above 100,000 (no real 30-minute interval is that large); backlog remaining minutes above 100,000 (about 69 days of work on one case) treated as unreadable.
+
+**Plumbing:** `parseCSVRaw` also returns the detected `delimiter`; `App.tsx` keeps it beside the raw rows and passes it to `mapRawRecordsToIntervals` (new optional parameter, default comma, so existing callers and tests behave as before); `DemandFlow.tsx` `readWipFile` keeps the backlog file delimiter the same way.
+
+**Backlog import (final):** as rule 4 above, plus: the pure function takes the default arrival as a parameter (no clock read inside; the caller passes what it uses today, so preview and apply agree); ids, row order and skipped invalid-date rows exactly as today; **when more than 20% of the rows, or more than 50 rows, were moved to the fallback category, Append stays disabled until the planner ticks "I understand these rows will be imported under <category>"**.
+
+**Scope lock — extended:** also `src/App.tsx` (keeping and passing the delimiter: the three call sites and one piece of state only).
+
+**Criteria — changed / added:**
+
+| # | Criterion | Proof |
+|---|---|---|
+| 2 | Unclear numbers blocked, clear ones kept | Comma file: quoted `1,234` reads 1234 (as today); quoted `12,5`, `30 min`, `12abc`, `1e9` block naming rows. Semicolon file: `12,5` reads 12.5; column with only `1.234` values blocks as ambiguous naming both readings; column with `1.234` and `12,5` reads 1234 and 12.5; column mixing `12,5` and `12.5` blocks as mixed |
+| 3b | Currency and spaces as today | `$1200` and ` 7 ` read 1200 and 7 |
+| 9 | Fractional volume warning | File with 12.5: warning shown; whole-number files: none |
+| 10 | Mass fallback needs confirmation | Backlog file where 30% of rows have an unknown category: Append disabled until ticked; 5%: enabled |
+
+
+---
+
+# BUILD PLAN — Input safety, part 2: timestamps read as written (G3) + category name variants merged (G5)
+
+Owner 2026-10-07: part 1 approved and merged into local `main` (zero remaining minutes → category handling time: kept). Weekly cap 40% (hard stop), meter 37% at plan time; no new agent at a reading of 39%.
+
+**Task:** the same demand or backlog file must give the same intervals on any PC timezone, and category names that differ only by letter case or spacing must become one category, with a visible note.
+**End user:** the WFM planner opening `BoWFM.html` from disk.
+**Tier 3** (data handling that changes sizing inputs). Reviewers: `tester` + `auditor`; `user-side` folded into the tester brief; final `challenger` if budget allows.
+**Skills:** `wfm-engine-testing` (fail-first), `browser-automation` (free gate, tester).
+
+## Facts (investigator, probes in scratch `is2/`)
+
+- `parseFlexibleDate` (`csv-parser.ts:397-532`) is the single parser; callers: demand start/end (`:614`, `:637`), backlog import (`wip-import.ts:174`), manual backlog entry (`DemandFlow.tsx:235`).
+- Timezone-dependent today: ISO with `Z` (`:434-447`, `Date.UTC`), ISO with offset (`:449-454`, `new Date(str)`), and digits-only epoch (`:408-413`). Probe, `2026-01-05T08:00:00Z`: 08:00 on a UTC PC, 12:00 in Dubai, 03:00 in New York; `…+04:00` lands on the 4th at 23:00 in New York. Everything else (no zone, `dd/mm/yyyy`, date-only) is already read as written.
+- No test and no document pins the timezone-dependent behaviour.
+- Categories: cell is trimmed only (`:608-612`); `discoverAndSyncCategories` (`:675-733`) keys by exact name, so `Billing`, `billing `, `BILLING` give 3 categories, each seeded AHT 30 / shrinkage 20% (`:720-721`). Intervals carry the category NAME; every downstream match is exact (`hc-search`, `des-engine`, analytics, Results). Backlog import matches case-insensitively but does not collapse inner spaces (`wip-import.ts:119`).
+- There is no "file supplies AHT" concept: "fallback" = the seeded 30 min / 20%. No marker tells seeded values from typed ones.
+- Category id uses `Date.now()` (`:718`, DOC-44) — left alone here (J5).
+
+## Design
+
+### G3 — timestamps
+1. ISO branch: the `Z` and `±hh[:mm]` groups are recognised but IGNORED; the digits go to `validateAndCreateDate` (the existing no-zone path). Lines 434-454 are removed — one code path.
+2. Epoch numbers (9–14 digits): read as their UTC wall-clock digits (`getUTC*` components → `validateAndCreateDate`), so they too are identical on every PC. **Owner to confirm** (alternative: leave epochs timezone-dependent).
+3. New exported pure helper `hasZoneMarker(str)`; `mapRawRecordsToIntervals` counts rows whose start or end carried a marker (or was an epoch) and attaches the count to the parse result the same way part 1 attached volume issues (no type change if avoidable; otherwise one optional field in `types/wfm.ts`, listed in scope).
+4. Data quality: one WARNING "Timezone markers ignored": "N timestamps carried a timezone marker (Z or +hh:mm). Times were read exactly as written; the marker was ignored." Epoch wording: "N timestamps were numeric (epoch) and were read as UTC clock time." Never blocking.
+5. Backlog import preview: same count in the part-1 summary block.
+6. Known consequence, documented: a clock time that does not exist on the PC (daylight-saving gap) is already rejected as an invalid date; unchanged.
+
+### G5 — category variants
+7. One exported pure helper `categoryKey(name)` = trim, collapse runs of whitespace to one space, lower-case. `Bill  ing` → `bill ing` (does NOT merge with `Billing` — different words).
+8. `mapRawRecordsToIntervals`: each row's category is replaced by the canonical display name of its key. Display name = the name of an EXISTING category with the same key when one is passed in (keeps the planner's settings on re-upload), otherwise the first spelling in file order. Because intervals carry the canonical name, every downstream exact match keeps working untouched.
+   - If `mapRawRecordsToIntervals` does not receive the existing categories today, add one optional parameter (existing category names) and pass it at the three `App.tsx` call sites.
+9. `discoverAndSyncCategories`: `existingMap` keyed by `categoryKey`; two existing categories with the same key are left as they are (never auto-delete planner settings) and reported.
+10. Backlog import (`wip-import.ts`) and manual backlog entry match with `categoryKey`.
+11. Data quality: one WARNING "Category names merged": lists each merged group, e.g. `"billing ", "BILLING" → "Billing" (42 rows)`; up to 10 groups, then "+N more". Not blocking.
+12. Data quality: one WARNING "Categories on starting values": lists categories whose handling time is exactly 30 minutes AND shrinkage exactly 20% (the seeded pair), text "still on the starting values — confirm they are intended". Not blocking; no new stored marker. Must NOT appear for the three built-in samples if their categories are configured (builder checks; if a sample legitimately uses 30 / 20% the wording stays neutral).
+
+## Steps (builder `sonnet-executor`, fail-first, token-economical)
+
+1. Tests first — new suite **D67** inserted before the RESULTS block of `scripts/verify-sizing-fixes.mts`: (a) `…T08:00:00Z`, `…T08:00:00+04:00`, `…T08:00:00.500Z`, `…08:00:00-05:00`, `2026-01-05 08:00` all give local hour 8 on the 5th; (b) the same assertions hold when the suite is re-run under another timezone (tester does this with PowerShell `$env:TZ`); (c) epoch `1767600000` → hour 8 on the 5th; (d) marker count = hand count, warning issued, not blocking; (e) no-zone and `dd/mm/yyyy` inputs unchanged; (f) `Billing`, `billing `, `BILLING` → 1 category named `Billing`, intervals all `Billing`, total volume = hand sum, merge warning lists both variants with row counts; (g) `Bill  ing` stays separate as `Bill ing`; (h) re-upload with an existing `BILLING` category (AHT 12) → name `BILLING` kept, AHT 12 kept; (i) backlog row `billing` matches `Billing` (not counted as fallback); (j) starting-values warning lists a seeded category and not one edited to 25 min; (k) three built-in samples: same interval count, total volume and category list as before.
+2. `csv-parser.ts`: G3 items 1–4, G5 items 7–9, 11–12.
+3. `wip-import.ts`, `DemandFlow.tsx` (manual entry match + preview count), `App.tsx` (optional parameter only).
+4. `npm run lint`, `npm run build:standalone`, `npm test` once.
+5. Docs: `PRD.md` (date formats: zone markers ignored; DQ table +3 rules → 27; category rule; version bump), `project_context.md` (§5/§11; also fix the stale "14 data-quality rules" line and nothing else), `docs/wfm/07` entry; part-1 leftovers IS1-d (suite list in PRD) and IS1-e (lost backslash) corrected in the same pass.
+
+## Scope lock
+
+`src/utils/csv-parser.ts`, `src/utils/wip-import.ts`, `src/components/DemandFlow.tsx` (manual-entry category match + preview count only), `src/App.tsx` (optional parameter plumbing only), `src/types/wfm.ts` (one optional field, only if unavoidable), `scripts/verify-sizing-fixes.mts` (append D67 only), `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`, rebuilt `BoWFM.html`. No engine file. No `package.json`.
+
+## Acceptance criteria and proof
+
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | Same file, same intervals on any PC | Tester's own file with `Z`, offset and epoch rows parsed under UTC, Asia/Dubai, America/New_York → identical interval start hours and days (were 08 / 12 / 03) |
+| 2 | Times read as written | `…T08:00:00+04:00` → 08:00 on the 5th in all three zones |
+| 3 | Planner is told | Warning text visible in the browser with the right count; Run stays enabled |
+| 4 | Files without markers unchanged | Three samples: same interval count / total volume as `main`; browser 31/40, 27/34, 31/39 |
+| 5 | Case/space variants are one category | `Billing`, `billing `, `BILLING` → 1 category in Settings, volume = hand sum, merge note lists variants |
+| 6 | Different words stay apart | `Bill  ing` separate |
+| 7 | Planner settings survive re-upload | Existing category keeps its name, AHT and shrinkage when the new file spells it differently |
+| 8 | Headcount effect shown | Same data as 1 category vs 3 split variants: report both recommended HC values (merged must equal the clean single-name file exactly) |
+| 9 | Backlog matches variants | Backlog row `billing` lands in `Billing`, not the fallback count |
+| 10 | Starting-values note | Listed for an untouched new category, gone after AHT is edited |
+| 11 | No regression | lint clean; `npm test` green (1,161 + new); zero console errors |
+| 12 | Mutation proof | Restore `Date.UTC` path → D67 fails under a non-UTC zone; remove `categoryKey` lower-casing → D67 fails |
+| 13 | Docs and artifact | PRD / project_context / docs 07 updated; `npm run check:artifact` passes |
+| 14 | Scope respected | `git diff <checkpoint>..HEAD --stat` lists only scope-lock files |
+
+## Input safety part 2 — challenger verdict: FAIL (accepted). Revised rules below override the plan above.
+
+**Challenger findings accepted:**
+- Blocker: plan item 8 (pass existing categories into `mapRawRecordsToIntervals`) would create a render loop or stale names (`App.tsx:131-143`: intervals memo + effect that always returns a new categories array).
+- Major: reading `Z` / offset stamps as written makes the common case WRONG: a UTC export opened on a PC in the operation timezone is correct today (08:00Z shows 12:00 in Dubai) and would shift 4 hours with only a reassuring warning. Same for epoch numbers.
+- Major: two existing categories with one key; stored backlog cases carrying an old spelling; the starting-values warning would fire on every fresh upload and on the samples.
+- Minors: second regex duplicating the ISO pattern; marker count misses split date/time columns; mutation proof needs a non-UTC run.
+
+**G3 revised — OWNER DECISION REOPENED (supervisor recommendation changed):**
+- Option B (recommended): keep today conversion to the PC clock (correct whenever the PC is in the operation timezone, for UTC exports AND local-offset exports). Add a WARNING naming the distinct markers found and the PC offset used: "N timestamps carried a timezone marker (Z, +04:00). They were converted to this PC timezone (UTC+4). Open the file on a PC set to the operation timezone, or remove the markers to have times read as written." Mixed markers in one file are fine under B (each instant is converted correctly). Parser unchanged; marker flag returned from the single ISO regex (no second regex); count taken where rows are mapped, including split date/time columns and epoch numbers.
+- Option A (earlier owner choice): read digits as written, warning that nothing was converted, mixed markers escalated. Same result on every PC, but wrong by the offset for UTC exports.
+- Option C: block files with markers.
+
+**G5 revised:**
+- `categoryKey(name)` = trim, collapse whitespace runs, lower-case (exported, pure).
+- `mapRawRecordsToIntervals` canonicalises from the FILE ONLY: every row takes the first spelling of its key in file order (trimmed, spaces collapsed). No dependency on existing categories, so the memo is untouched.
+- `discoverAndSyncCategories` matches existing categories by key; a matched category keeps its id and all settings and takes the spelling now used by the intervals. Two existing categories with the same key: the first in array order supplies the settings, the other is dropped and named in the merge note.
+- Stored references: the same sync step returns a rename list; `App.tsx` applies it to stored backlog cases (and any other stored per-category list the builder finds — to be listed in the hand-back). Backlog import and manual entry match by key.
+- WARNING "Category names merged" lists groups with row counts (up to 10).
+- The "categories on starting values" warning is REMOVED from this part (needs an edited/not-edited marker in Settings; recorded as backlog IS2-a).
+- Extra tests: duplicate existing keys; backlog already loaded then demand re-uploaded with another spelling → backlog cases still match; upload order `billing` then `BILLING` keeps settings.
+- Scope lock change: `App.tsx` = rename-list wiring in the existing sync effect only (no new parameter to the intervals memo).
+
+Status: waiting for owner decision on G3 (B recommended). Build not started. Meter 38% of 40% cap.
+
+
+---
+
+# BUILD PLAN — Input safety, part 3: messy files and missing messages (G4 + H6)
+
+Owner 2026-10-07: part 2 approved and merged into local `main`; cap raised to **45%** (hard stop; no new agent at a reading of 44%). Meter at plan time: 38%.
+
+**Task:** a damaged or wrong-type file must never load silently with shifted or lost data; every bad file gets a plain message naming the file row; small upload traps are closed.
+**End user:** the WFM planner opening `BoWFM.html` from disk.
+**Tier 2** (changed behaviour in file reading; no engine maths). Reviewers: `tester` + `auditor`; `user-side` folded into the tester brief.
+**Skills:** `wfm-engine-testing` (fail-first), `browser-automation`.
+
+## Findings covered (from FINDINGS.md)
+
+CSV-2 ragged rows and duplicate headers; CSV-3 unterminated quote; CSV-5 title row above the header; CSV-6 pipe-delimited file read as one column; CSV-7 binary / Excel file; CSV-18 messages lack file row numbers; P3-T3 empty and header-only file; UI-37/UI-39 unhelpful "Upload and map…" when a required column is unmapped; UI-38 drop outside the box loses all work, same file picked twice does nothing, two quick uploads finish out of order.
+
+## Design
+
+### Raw reader (`parseCSVRaw`, `csv-parser.ts` ~28-160)
+Returns, besides `headers`, `rows`, `delimiter`, a list `problems: { severity: 'error' | 'warning'; code; message }[]`. Pure, deterministic.
+
+| # | Case | Rule | Severity |
+|---|---|---|---|
+| R1 | Not a text file (NUL bytes, `PK` zip signature, or many control characters in the first 2,000 characters) | "This is not a text CSV file (it looks like an Excel workbook or another binary file). In Excel use Save As → CSV, then upload that file." No headers/rows returned. | error |
+| R2 | Empty file / only blank lines | "The file is empty." | error |
+| R3 | Header only, no data rows | "The file has column headers but no data rows." | error |
+| R4 | Unterminated quote | "A quotation mark opened on file row N is never closed, so the rest of the file cannot be read reliably. Close or remove the quote on that row." Rows before row N are still returned for the mapping preview. | error |
+| R5 | Row with a different number of cells than the header (after ignoring fully blank lines and ignoring EXTRA cells that are all empty) | "N row(s) have a different number of columns than the header (file rows 7, 19, …; expected 4, found 3). A delimiter is missing or extra on those rows." Up to 5 rows named. Rows are still returned as today so the preview works, but the run is blocked. | error |
+| R6 | Duplicate header names (same after trim, case-insensitive) | Later duplicates renamed `Volume (2)`, `Volume (3)`; nothing overwritten; "Two columns are both named "Volume"; the second is shown as "Volume (2)". Check the column mapping." | warning |
+| R7 | Title row above the header: first non-blank line has exactly 1 non-empty cell AND the next line has 2 or more | "The first row looks like a title, not column headers. Remove the row(s) above the header and upload again." | error |
+| R8 | Pipe-delimited file | `|` added to delimiter detection; for number reading it is treated like semicolon/tab (per-column convention from part 1). | — |
+| R9 | One column only after detection, and the header contains `,` `;` tab or `|`-like separators inside quotes, or no separator at all with 2+ data rows | "Only one column was found. The file must use comma, semicolon, tab or | between columns." | error |
+
+- File row numbers in every message are 1-based physical line numbers of the file (header = row 1), counting blank lines (CSV-18). The same numbering is used by the part-1 "Unreadable volume" rows if they differ today (builder checks; align only if it is a one-line change, otherwise report).
+
+### Showing the problems (`App.tsx`, `DemandFlow.tsx`, `csv-parser.ts` `validateDataQuality`)
+- Errors R1–R5, R7, R9: shown at once under the upload box in a red message; also carried into data quality as blocking issues, so Run is disabled and the Data Quality tab names the reason. For R1–R3, R7, R9 the mapping step is not shown.
+- Warning R6: shown under the upload box and in data quality; not blocking.
+- Same reader and messages for the backlog file (`readWipFile`): errors shown in the backlog import area; Append / Replace disabled.
+- UI-39: when a file is loaded but a required column is not mapped, the Data Quality tab says which: "Choose the column for: Volume." instead of "Upload and map…".
+
+### Upload traps (`DemandFlow.tsx`, `App.tsx`)
+- File input value cleared after every pick, so picking the same file again re-reads it (demand and backlog inputs).
+- Page-level guard: `dragover` / `drop` outside the drop box are cancelled (`preventDefault`) so the browser does not navigate away and lose the session. Registered in one effect with cleanup.
+- Out-of-order reads: each read carries a sequence number; a result older than the latest pick is ignored.
+
+## Steps (builder `sonnet-executor`, fail-first, token-economical)
+
+1. Tests first — suite **D68** before the RESULTS block of `scripts/verify-sizing-fixes.mts`: one fixture per rule R1–R9 with the exact expected severity, code and the row numbers named; ragged row with only extra EMPTY cells → no problem; quoted cell containing the delimiter or a line break → no problem; duplicate headers → both columns readable, values not overwritten; pipe file → correct columns and total volume = hand sum; three built-in samples → zero problems and identical headers/rows as before; a clean comma, semicolon and tab file → zero problems; a problem of severity error makes `validateDataQuality` blocking; R6 does not.
+2. `csv-parser.ts`: reader rules and data-quality carry-through.
+3. `App.tsx` / `DemandFlow.tsx`: messages, UI-39 text, input reset, drop guard, sequence guard; backlog path.
+4. `npm run lint`, `npm run build:standalone`, `npm test` once.
+5. Docs: `PRD.md` (file-reading rules, data-quality table, delimiter list incl. `|`, version bump), `project_context.md` (§11 recently fixed; rule count), `docs/wfm/07` entry.
+
+## Scope lock
+
+`src/utils/csv-parser.ts`, `src/utils/number-cell.ts` (pipe delimiter treated like semicolon — only if needed), `src/utils/wip-import.ts` (only if needed to pass problems through), `src/components/DemandFlow.tsx` (upload box, backlog import area, Data Quality empty-state text), `src/App.tsx` (problem state, sequence guard, drop guard), `src/types/wfm.ts` (optional fields only if unavoidable), `scripts/verify-sizing-fixes.mts` (append D68 only), `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`, rebuilt `BoWFM.html`. No engine file, no `package.json`.
+
+## Acceptance criteria and proof
+
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | Excel / binary file is refused in plain words | Browser: upload a real `.xlsx` → message R1 visible, no garbage in mapping dropdowns, Run disabled |
+| 2 | Empty and header-only files | Browser: each → its message; Run disabled |
+| 3 | Missing delimiter on one row | File with one short row → error names that file row and expected/found counts; Run disabled; the same file repaired → runs |
+| 4 | Unclosed quote | Category `5" screen` unquoted mid-file → error naming the row; old behaviour (1 row loaded silently) gone |
+| 5 | Duplicate header | Two `Volume` columns → both selectable in mapping, values of the first not overwritten, warning shown, Run allowed |
+| 6 | Title row | BI-style title line above the header → message R7 |
+| 7 | Pipe file | Loads with correct columns; total volume = tester hand sum |
+| 8 | Good files unchanged | Three samples and a quoted-comma / embedded-newline file → zero problems; browser 31/40, 27/34, 31/39 |
+| 9 | Unmapped column named | Clear the Volume mapping → Data Quality tab names Volume |
+| 10 | Same file twice | Pick file, fix it on disk (or pick again) → it is re-read (change event fires) |
+| 11 | Drop outside the box | Dispatch a `drop` event on the page body → `defaultPrevented` true, page still loaded with data |
+| 12 | Backlog file | Binary and ragged backlog files → message in the import area, Append / Replace disabled |
+| 13 | No regression | lint clean; `npm test` green (1,191 + new); zero console errors |
+| 14 | Mutation proof | Remove the cell-count check and the unterminated-quote check in a scratch copy → D68 fails each time |
+| 15 | Docs and artifact | PRD / project_context / docs 07 updated; `npm run check:artifact` passes |
+| 16 | Scope respected | `git diff <checkpoint>..HEAD --stat` lists only scope-lock files |
+
+## Input safety part 3 — challenger verdict: FAIL (accepted). Revised rules below override the plan above.
+
+**Accepted findings:** (1) blocker — a bad file picked on a loaded session would still trigger the reset prompt and replace good data with nothing; (2) R5 as written blocks files that load correctly today (short rows with empty trailing columns, footer rows); (3) empty file never reaches the reader (`if (text)` in both read paths); (4) encoding story incomplete (UTF-16 with BOM loads today and must keep loading; Latin-1 gives replacement characters silently); (5) where the problem list lives was undefined (stale-state risk); (6) R4 row number needs a line counter; balanced mid-cell quotes still merge cells; (7) delimiter detection reads the first line only; (8) upload traps interact with the reset prompt; (9) too big for one build.
+
+**Core change of design: a file with an ERROR is REFUSED at pick time.** The file is read and checked before anything else happens. Any error-severity problem → a red message under the upload box, the current session is left exactly as it is, no reset prompt, no state change. So errors never enter application state and need no data-quality carry-through. Only WARNINGS travel with an accepted file: stored together with the raw rows (set in the same places, cleared on sample load and on reset) and shown in data quality, not blocking.
+
+**Split into two builds.** Build A = reader rules + pick-time refusal + messages (demand and backlog) + warnings in data quality + tests + docs. Build B = upload traps (clear input after pick, page-level drop guard that ignores the drop box and file inputs, latest-pick-wins sequence guard that also supersedes a pending reset prompt) + UI-39 (name the unmapped column). The settings-import input in `Sidebar.tsx` is out of scope (H10).
+
+**Reader rules, final (Build A):**
+- E1 not readable text: any NUL character in the decoded text, or text starting with `PK` → error: "This is not a readable text file. It looks like an Excel workbook or a file saved in an unusual encoding. In Excel use Save As → CSV UTF-8, then upload that file." The "many control characters" test is dropped. UTF-16 with a byte-order mark (Excel "Unicode Text") is decoded by the browser and must keep loading (fixture: decoded tab-delimited text).
+- E2 empty file (including zero bytes: both read paths stop swallowing empty text; a failed read shows "The file could not be read.").
+- E3 header only, no data rows (blank lines ignored).
+- E4 unterminated quote at end of file → error naming the physical file row where that quote opened (the reader now tracks line numbers, counting lines inside quoted cells). Quote handling itself is NOT changed: balanced mid-cell quotes that merge cells remain as today (recorded as open item IS3-a; changing it is an owner decision).
+- E5 a row has MORE non-empty cells than the header → error naming up to 5 file rows with expected/found counts and the hint "a delimiter is extra on those rows, or there is a title row above the header". Extra cells that are all empty are ignored (trailing delimiter).
+- E6 only one column found while the file has 2+ data rows and the header or data contains another candidate separator → error: "Only one column was found. Columns must be separated by comma, semicolon, tab or |. If there is a title row above the header, remove it."
+- E7 title row: first non-blank line has exactly 1 non-empty cell and the following lines have 2 or more → error asking to remove the rows above the header.
+- W1 short rows (FEWER cells than the header): cells padded as empty exactly as today; warning "N row(s) have fewer columns than the header (file rows …); the missing cells were read as empty. Check those rows (missing delimiter, footer or total line)."
+- W2 duplicate header names → later ones renamed `Name (2)`, nothing overwritten; warning.
+- W3 replacement characters (U+FFFD) present → warning: "Some characters could not be read (the file is not saved as UTF-8). Names may look wrong; numbers and dates are not affected."
+- Delimiter detection: unchanged for every file that loads today; `|` added as a fourth candidate with the lowest tie-break priority; when the first line yields one column, detection looks at the next lines (up to 5) instead. For number reading `|` behaves like semicolon/tab.
+- Precedence: E1 > E2 > E3 > E7 > E6 > E4 > E5.
+- Same reader and refusal for the backlog file: message in the import area, nothing imported.
+
+**Build A tests (suite D68):** one fixture per rule with exact severity, code and rows named; trailing delimiter on every row → no problem; quoted delimiter and quoted line break → no problem and correct row numbers afterwards; UTF-16-decoded tab file → loads; duplicate header → both columns keep their own values; pipe file → correct columns, total = hand sum, comma decimals read per part 1; three built-in samples and clean comma / semicolon / tab files → zero problems and identical headers / rows / delimiter to the old reader (legacy copy in the test).
+
+**Build A acceptance (replaces 1–8, 12 above; 9–11 move to Build B):** each bad file refused with its message in the browser AND a previously loaded session still intact afterwards (same interval count, no reset prompt); short-row file loads with warning W1 and Run allowed; duplicate header both selectable; pipe file total = hand sum; samples 31/40, 27/34, 31/39; backlog binary file refused; mutation: remove the more-cells check, and the unterminated-quote check → D68 fails each time.
+
+**Scope lock, Build A:** `src/utils/csv-parser.ts`, `src/utils/number-cell.ts` (pipe only), `src/components/DemandFlow.tsx` (both read paths, messages under the upload box and in the backlog import area), `src/App.tsx` (pick-time check before the reset prompt; warning list stored with raw rows), `src/types/wfm.ts` (optional fields only if unavoidable), `scripts/verify-sizing-fixes.mts` (append D68), `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`, rebuilt `BoWFM.html`.
+
+---
+
+# BUILD PLAN — Input safety part 3, Build B: upload traps + unmapped column named (H6 rest: UI-38, UI-39)
+
+Owner 2026-10-07: Build A approved and merged into local `main`. Cap 45% (no new agent at 44%); meter 40%. **Tier 2** (UI behaviour, no numbers). Reviewer: `tester` (browser); `auditor` if budget allows. Plan challenge: covered by the part-3 challenger (upload-trap findings a–c, acceptance 10–11), incorporated below.
+
+**Rules:**
+- B1 Same file twice: the value of the demand file input and of the backlog file input is cleared after the picked `File` object has been captured, so picking the same file again re-reads it. The settings-import input in `Sidebar.tsx` is out of scope (H10).
+- B2 Drop outside the box: one page-level effect (with cleanup) cancels `dragover` and `drop` when the event target is NOT inside a drop box and is NOT a file input, so the browser never navigates away to the dropped file. Drops on the existing drop box(es) and native drops on file inputs keep working exactly as today.
+- B3 Latest pick wins: every file read (demand and backlog) carries a sequence number; a read that finishes after a newer pick is ignored. A new pick while the "reset all data" prompt is open supersedes the pending one: the prompt then refers to the newest file only (or is closed if the newest file is refused).
+- B4 Unmapped column named (UI-39): when a file is loaded but a required column is not mapped, the Data Quality tab says which, e.g. "Choose the column for: Volume." (all missing required columns listed), instead of "Upload and map…". With no file loaded the existing text stays.
+- No change to parsing, data-quality rules, numbers or engine.
+
+**Tests:** pure logic that can be unit-tested (e.g. a small exported helper that lists missing required mappings) gets checks in a new suite D69 before the RESULTS block of `scripts/verify-sizing-fixes.mts`; the rest is proven in the browser.
+
+**Scope lock:** `src/components/DemandFlow.tsx`, `src/App.tsx`, `src/utils/csv-parser.ts` (only for a tiny pure helper, if used), `scripts/verify-sizing-fixes.mts` (append D69), `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`, rebuilt `BoWFM.html`.
+
+**Acceptance (browser, rebuilt file):** (1) after a pick, `input.value` is empty for both inputs; picking the same path twice re-reads (edit the file between picks → new content shown). (2) A `drop` and a `dragover` dispatched on `document.body` → `defaultPrevented` true and the loaded data still there; a real file drop on the drop box still loads the file. (3) Sequence: with a sample loaded, pick file A (prompt opens), pick file B → confirming loads B, never A. (4) Clear the Volume mapping → Data Quality tab names Volume. (5) Samples 40 / 34 / 39 gross, zero console errors, `npm test` green, `check:artifact` passes. (6) Only scope-lock files changed.
+
+---
+
+# BUILD PLAN — Stale results after data edits (G6 + H9: UI-1, UI-49, UI-58)
+
+Owner 2026-10-07: Build B approved and merged into local `main`; "fix stale results then stop". Cap 45% (no new agent at 44%); meter 40%. **Tier 2** (what Results shows; no engine maths). Reviewers: `tester` (browser) + `auditor` if budget allows.
+
+**Task:** after a run, any change to the DATA the run used (demand intervals, opening backlog, column mapping) must be flagged exactly like a settings change is today — the planner must never read an old headcount beside new data without a warning.
+**End user:** the WFM planner.
+
+**Facts (audit):** the run snapshot (`src/utils/run-inputs.ts:14-41`) holds settings only (calendar, labor, SLA, categories, sim params). Results are cleared only at upload, sample load, run start, reset, cancel, error. Editing / deleting / importing backlog (`DemandFlow.tsx`), changing a mapping dropdown, or importing a settings file with a mapping (`App.tsx:~452`) neither clears results nor raises the existing "changed since run" banner. Browser-confirmed: Support run 27 / 34, mapping changed, Results still 27 / 34 with no banner.
+
+**Design (keep results, flag them — same policy as settings changes today):**
+1. The run snapshot also records the data the run used: the demand intervals and the opening backlog, captured at run start (the same objects the search receives), plus the column mapping.
+2. The existing "changed since run" comparison also compares current demand intervals, current opening backlog and current mapping with the snapshot. Comparison is by CONTENT (deterministic fingerprint or field-by-field: interval start/end/volume/category; backlog id/category/arrival/remaining minutes/priority), not by object identity, so re-deriving identical data (e.g. changing a mapping and changing it back, or a no-op re-sync) does NOT raise the banner. Cost must stay small for 100,000 rows (compute once per data change, memoised; no per-render full scan).
+3. The existing banner on Results is reused; its text names what changed in plain words: settings, demand data, opening backlog (one or more). Same marker on the header chip (UI-58) and on every other place that already shows the settings-stale state (Sensitivity / exports if they do — builder lists them).
+4. Results are NOT cleared (consistent with settings edits; the planner may want to compare). If the current data fails data quality the banner still shows.
+5. Exports made from stale results carry the same stale note the settings case carries today, if any; no new export format.
+6. No engine change, no change to when results are cleared today.
+
+**Tests (suite D70, before the RESULTS block of `scripts/verify-sizing-fixes.mts`; existing D53 covers settings):** pure comparison function: identical data → not stale; one interval volume changed → stale (demand); one interval category changed → stale; backlog case added / removed / edited (minutes, category, arrival, priority) → stale (backlog); mapping changed but resulting intervals identical → not stale; settings-only change still reported as settings; several kinds at once → all named; determinism (same inputs, same fingerprint).
+
+**Scope lock:** `src/utils/run-inputs.ts`, `src/App.tsx` (snapshot capture + stale computation + passing the flag), `src/components/ResultsFlow.tsx` (banner text only), the header/sidebar component that renders the chip (one file, named in the hand-back), `src/types/wfm.ts` (optional fields only if unavoidable), `scripts/verify-sizing-fixes.mts` (append D70), `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`, rebuilt `BoWFM.html`.
+
+**Acceptance:**
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | Backlog edit flagged | Browser: run a sample, add one backlog case → Results shows the banner naming opening backlog; header chip marked |
+| 2 | Backlog import / delete flagged | Same after importing a backlog file, and after deleting a case |
+| 3 | Mapping change flagged | Run, change the Category (and separately the Date) mapping → banner naming demand data |
+| 4 | Undo clears the flag | Change a mapping and change it back, or add then delete the same backlog case → banner gone |
+| 5 | Fresh run clears the flag | Run again → no banner; numbers describe the new data |
+| 6 | Settings behaviour unchanged | Change a setting after a run → banner as before, naming settings |
+| 7 | No false flag | Run a sample and just move between tabs → no banner |
+| 8 | No regression | Samples 31/40, 27/34, 31/39; zero console errors; `npm test` green (1,239 + new); lint clean |
+| 9 | Docs and artifact | PRD FR-9.0 as built, project_context, docs 07; `npm run check:artifact` passes |
+| 10 | Scope respected | Only scope-lock files changed |
+
+## Stale results — challenger verdict: PASS with majors (accepted). Revisions override the plan above.
+
+- The column mapping is NOT stored in the snapshot. Demand intervals come only from raw rows + mapping + delimiter (`App.tsx:135-140`), so a content fingerprint of the intervals covers every mapping effect. Design item 1 is corrected accordingly.
+- Snapshot stores only two fingerprint strings (demand, backlog), not the arrays. Computed with a purpose-written loop (start/end as `getTime()`, volume, category NAME — never category id, which contains `Date.now()`); backlog: id, category name, arrival `getTime()`, remaining minutes, priority, in array order. Captured at run START from the same closure values the search receives (same place `runSnapshot` is built, `App.tsx:~285-296`), never from live state at run end.
+- Live fingerprints memoised on `[intervals]` and `[openingWIP]`.
+- There is NO existing header chip for the settings-stale state (only `ResultsFlow.tsx:~501-503`, fed from `App.tsx:~687`). UI-58 is met by a NEW small "Outdated" marker beside the Results entry in the navigation (`src/components/Sidebar.tsx`), shown whenever results exist and settings or data changed since the run. Scope lock: the header file is `src/components/Sidebar.tsx`; `src/types/wfm.ts` removed from scope.
+- Item 5 (exports) is a no-op: no stale note exists today; none added. Recorded as open item SR-a. Sensitivity and Agent Analytics tabs: builder reports whether they read live data with old results; fixing them is out of scope unless it is a one-line pass of the same flag (open item SR-b otherwise).
+- Tests: D70 also runs the REAL mapping function on a small raw file: mapping changed so intervals change → stale; mapping changed and changed back → not stale; category re-sync that yields the same names → not stale; `remapCasesToIntervalSpelling` returning equal content → not stale.
+- Acceptance 7 widened: change a mapping and back; add then delete the same backlog case; change an SLA setting and change it back → no banner in each case. Acceptance 1: "Outdated" marker on the Results navigation entry.
+
+
+---
+
+# Plan — Agent Analytics: "Scheduled (min)" must be the agent's own shift, not the whole business day
+
+## Context
+
+The planner exported the Agent summary for `test_files/EGS_Only.csv` with the config snapshot
+(calendar 08:00–22:00, 9 productive hours, adherence 100%, shift placement ON, 47 agents:
+32 start 08:00, 15 start 13:00).
+
+- Agents 1–32 show `Scheduled (min)` = 26,340 = 31 × **840** + 300. Expected 31 × **540** + 300 = 17,040.
+- Agents 33–47 show 16,740 = 31 × 540 (correct).
+- Effect: `Utilisation %` for the 08:00 agents reads ~50% instead of ~77%; team utilisation and the
+  "late-coverage vs earlier-start utilisation" insight line are skewed the same way.
+- Reproduced by running the engine (scratchpad `repro.mts`), numbers match the export.
+
+Root cause — `src/utils/agent-analytics.ts` lines 439–441:
+
+```ts
+// Late cohorts work a capped shift (productive hours from their own start): never schedule past it.
+const tail = lateShift ? Math.max(0, Math.min(cell.pendingOff, prodMin - avail)) : cell.pendingOff;
+scheduled += avail + tail;
+```
+
+The cap at the agent's own shift length is applied only to agents labelled "late" (start later than
+the earliest cohort). The earliest cohort is never capped, so the off time between its shift end
+(17:00) and business close (22:00) is counted as scheduled.
+
+Engine facts that fix the correct definition (read from `src/utils/des-engine.ts`):
+
+- Staggered run (`shiftDistribution` passed): every agent's shift is the fixed window
+  `[dayOpen + offset, dayOpen + offset + dailyProductiveHours*60)`; `ShiftEnd` enforces it
+  (line 997, 1830–1862). This is frozen decision 11's presence window.
+- Non-staggered run: no `ShiftEnd` exists. The agent stays in queue from open until its busy
+  budget is used or the day closes. There the "rest of the business day" tail is what the engine
+  actually models, and tests AA.5 / AA.8 pin it.
+- `des.shiftDistributionUsed` is set exactly when a distribution was passed (des-engine.ts:2225).
+
+Impact: display and export only. `scheduledMin` / `utilisationPct` are consumed only by
+`agent-analytics.ts` and `AgentAnalyticsPanel.tsx`. Recommended HC, the search, Results occupancy
+and the engine are untouched. No frozen decision changes.
+
+## Task
+
+In staggered runs, cap every agent's daily Scheduled minutes at their own shift length, so
+Utilisation is busy ÷ own shift time for all cohorts, not only "late" ones.
+
+End user (already recorded in `PLAN.md`): the WFM planner who opens `BoWFM.html` from disk, offline.
+
+## Skills
+
+- `supervise` — drives this loop.
+- `wfm-engine-testing` — fail-first protocol; the change is in `src/utils/**`.
+- `wfm-domain-guide` — occupancy vs utilisation wording for the help text and PRD.
+- `browser-automation` — free gate: load `BoWFM.html` from `file:///`, no console errors.
+- Gaps: none.
+
+## Steps
+
+Owner for all build steps: `sonnet-executor` (one builder, sequential).
+
+0. **Setup (supervisor, after approval).** Git exists, tree clean. Append this plan to the project
+   `PLAN.md` as a new section; commit checkpoint `checkpoint before: agent analytics scheduled-min cap`.
+   `MAP.md` not needed (target is `src/`, not a single large HTML source).
+
+1. **Failing tests first** — `scripts/verify-agent-analytics.mts`, new assertions after AA.32.
+   New fixture "long-day staggered": calendar 08:00–22:00 Mon–Fri, `dailyProductiveHours: 9`,
+   adherence 1.0, one category, pooled, `shiftDistribution` with cohorts at offset 0 and offset 300,
+   enough demand to keep agents busy most of the day, fixed seed.
+   - **AA.33** every agent, every cohort: `scheduledMin <= onShiftDays × 540 + ε`.
+     (Fails today for the 08:00 cohort: 840/day.)
+   - **AA.34** an early-cohort agent on a full in-horizon day is scheduled exactly 540 (use a
+     single-day date filter on a mid-run day).
+   - **AA.35** adherence 1.0: for every agent `|occupancyPct − utilisationPct| < 0.5` in the
+     staggered run (no out-of-queue shift time is modelled when the budget equals the shift).
+   - **AA.36** same fixture with `adherencePct: 0.9`: scheduled per full day is still 540, and at
+     least one agent has `occupancyPct − utilisationPct > 0.5` (budget ends before the shift does —
+     the legitimate gap is kept).
+   - **AA.37** insight line: late vs earlier-start utilisation in the adherence-1.0 fixture differ
+     by less than 5 points (was ~28 points purely from the bug) — parse the two numbers from the
+     `buildAgentInsights` string.
+   - **AA.38** category filter on the pooled long-day staggered fixture (needs 2 categories): for an
+     early-cohort agent, `scheduledMin − availableMin` is ~0 on full days, same as a late-cohort
+     agent (today: +300/day for the early cohort only).
+   - **AA.39** the audit-run path: assert a run made with a `shiftDistribution` returns
+     `shiftDistributionUsed`, and a run without one does not (pins the "staggered" signal).
+   - AA.35 / AA.37 are evaluated with a date filter covering full in-horizon days only, so a
+     partial first day or drain day cannot make them flaky.
+   - Also tighten the existing 09:00–17:00 / 6h staggered fixture: early-cohort agents
+     `scheduledMin <= onShiftDays × 360 + ε` (today 480/day).
+   Run `npm run test:agents`; record that the new assertions fail and all old ones pass.
+
+2. **Fix** — `src/utils/agent-analytics.ts`, row loop around lines 436–443 only.
+   - `const staggered = !!des.shiftDistributionUsed;`
+   - `const tail = staggered ? Math.max(0, Math.min(cell.pendingOff, prodMin - avail)) : cell.pendingOff;`
+   - Replace the comment: in staggered runs every agent works a fixed shift of
+     `dailyProductiveHours` from their own start, so never schedule past it; non-staggered runs have
+     no shift end, the agent is on until close.
+   - **Category filter (challenger finding, proven by running code):** on a pooled run with a
+     category filter, other-category busy slices are skipped (line ~398), so `avail` shrinks and the
+     cap never binds — the 300 min/day phantom tail would survive (Gold: Agent-1 = avail + 9,300).
+     Fix: add `busyAll` to the `Cell` (all-category busy minutes, accumulated before the
+     `catFilter` skip) and cap with the unfiltered figure:
+     `tail = staggered ? max(0, min(cell.pendingOff, prodMin - (cell.busyAll + cell.idle))) : cell.pendingOff`.
+     The wider pre-existing filter issue (FINDINGS UI-2: idle is not split by category) stays out of scope.
+   - `lateShift` stays as is — it still drives the "late" badge, `isLateShift`, and the insight grouping.
+   - Update the file header comment (lines 7–16) definition of Scheduled to match.
+   - No new helper, no engine change, no type change. `scheduledMin: Math.max(scheduled, available)`
+     stays as the safety floor.
+
+3. **Panel wording** — `src/components/AgentAnalyticsPanel.tsx`: `DEFINITIONS` (lines 27–36), the
+   visible help line (280–284) and the `Utilisation %` header tooltip (~line 375). New meaning in
+   plain words: scheduled = the agent's own shift (productive hours from their start) when shifts
+   are placed; when shift placement is off, the agent is on until close. Occupancy and utilisation
+   are the same unless the daily budget runs out before the shift ends (e.g. adherence below 100%).
+   Text only — no layout, column or logic change.
+
+4. **Docs (as-built).**
+   - `PRD.md`: FR-9.4 lines ~622–627 (definition of scheduled/utilisation; also correct the
+     sentence about the Fairness figure being "a different, lower number" only as far as this change
+     makes it false — do not rewrite unrelated text); test inventory count at ~line 1156; add a §10
+     limitation line: in non-staggered runs Scheduled spans to business close, and a partial
+     post-horizon drain day still counts as an on-shift day; bump Version 1.20.2 → 1.20.3, keep Date
+     2026-10-07.
+   - `project_context.md`: test-count row (~line 879) and a "recently fixed" entry in §11.
+
+5. **Rebuild + gates.** `npm run lint && npm test && npm run build:standalone && npm run check:artifact`
+   (`npm test` ends with the artifact freshness check, so build before the final `npm test` run).
+   Commit: `Agent analytics: scheduled minutes capped at the agent's own shift for all cohorts`.
+
+## Scope lock — the only files the builder may edit
+
+| File | Allowed section |
+|---|---|
+| `scripts/verify-agent-analytics.mts` | new assertions + fixture after AA.32; the one added bound on the existing staggered fixture |
+| `src/utils/agent-analytics.ts` | header comment (Scheduled/Utilisation lines), `Cell` type + its accumulation (`busyAll` only), and the row loop ~436–443 |
+| `src/components/AgentAnalyticsPanel.tsx` | `DEFINITIONS`, help line, `Utilisation %` tooltip — text only |
+| `PRD.md` | FR-9.4 definition, test inventory row, one §10 line, Version |
+| `project_context.md` | test-count row, §11 entry |
+| `BoWFM.html` | rebuild output only |
+| `PLAN.md`, `FINDINGS.md` | supervisor only |
+
+Out of scope (anything else is a blocker): `des-engine.ts`, `hc-search.ts`, `calendar.ts`, types,
+the `late` badge logic, On-Shift Days counting, the post-horizon drain day, non-staggered behaviour,
+build guards, dependencies.
+
+## Risk tier
+
+**Tier 3 (numbers shown to the planner).** Reviewers: `tester` + `auditor` + `user-side` +
+`challenger` (plan now, result at the end). Hard cap 2 rework rounds.
+
+## Acceptance criteria and proof
+
+| # | Criterion | Proof |
+|---|---|---|
+| A1 | New tests fail before the fix, pass after | Builder shows `npm run test:agents` output from both runs; auditor checks the diff order/claims |
+| A2 | User's case: Agent-1 Scheduled = 17,040, Utilisation ≈ 77.3%; Agent-33 Scheduled = 16,740, ≈ 77–78% | Tester runs scratchpad `repro.mts` (config + `EGS_Only.csv`, HC 47, cohorts 32@0 / 15@300) and recomputes independently as 31 × 540 + 300 and busy ÷ scheduled |
+| A3 | Available, On-Shift Days, Occupancy, Busy, Work Share, cases unchanged for the same run. Expected to move, and only these: Scheduled + Utilisation for 08:00 agents, team Scheduled/Utilisation, utilisation CV and Jain's index, the late-vs-early insight line, the amber utilisation bars | Tester diffs repro output before (checkpoint) vs after, listing every figure that moved; anything outside this list is a blocker |
+| A3b | Category-filtered view: early and late cohorts treated alike | AA.38 passes; tester reruns the repro with a Gold filter — Agent-1 Scheduled ≈ Available (no +9,300) |
+| A4 | Non-staggered runs unchanged | AA.1–AA.28 and AW.* pass untouched; tester compares `computeAgentAnalytics` output on the default uniform fixture at checkpoint vs HEAD — byte-identical |
+| A5 | Legit gap survives: adherence 0.9 staggered → utilisation below occupancy | AA.36 passes |
+| A6 | Insight line no longer shows a fake late-vs-early gap | AA.37 passes; tester reads the line in the browser for the user's file |
+| A7 | In the real app: load config + `EGS_Only.csv`, run, open Agent Analytics, export CSV — Agent-1 `Scheduled (min)` 17040, `Utilisation %` ≈ 77.3; help text matches the new definition | Tester in browser on `BoWFM.html` via `file:///`; user-side reads the help text for clarity |
+| A8 | Page loads clean | Free gate: `browser-automation` on `BoWFM.html`, zero console errors |
+| A9 | Offline contract, lint, full suite, artifact freshness | `npm run lint && npm test && npm run build:standalone && npm run check:artifact` all exit 0 |
+| A10 | Scope lock held; no engine/search/type file touched; HC results identical | Auditor: `git diff <checkpoint>..HEAD --stat` lists only scoped files; `npm test` engine suites unchanged |
+| A11 | Docs match code | Auditor: PRD FR-9.4, §10 line, version, project_context entries present and consistent with the code |
+
+## Known limits left as they are (stated, not fixed)
+
+- Non-staggered runs: Scheduled still runs to business close, because that is how the engine keeps
+  the agent in queue there. Documented in PRD §10 by this change.
+- The 32nd "On-Shift Day" (1 Nov) is the post-horizon drain day cut short when the queue empties.
+  Not changed here; the planner already accepted it. Documented in PRD §10 by this change.
+- Rest days are not simulated per agent (PRD L14) — unchanged.
+- A partial day that ends with an off slice (horizon starting mid-shift, or a drain day ending
+  after budget exhaustion) is scheduled as a full shift. Rare; noted in PRD §10, not fixed.
+- The help text must say plainly that with shift placement off, Scheduled runs to close, so a
+  low utilisation there is not read as a defect. PRD also notes that utilisation CV / Jain figures
+  change versus 1.20.2 for staggered runs.
+
+## Challenger result on this plan
+
+Verdict: fail → amended. Strongest objection (proven by running code): the cap used the filtered
+`avail`, so the phantom tail survived under a category filter. Now handled by `busyAll` + AA.38 +
+A3b. Second major: A3 understated what moves on screen — widened. Confirmed sound: the
+`shiftDistributionUsed` signal; existing tests AA.5/6/8/29–32 and AW.* are unaffected.
+Surviving objection: non-staggered runs with a long day still show ~50% utilisation; left as a
+stated limit because the engine has no shift end in that mode.
