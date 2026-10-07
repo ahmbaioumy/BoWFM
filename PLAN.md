@@ -1038,3 +1038,194 @@ Owner 2026-10-07: Build B approved and merged into local `main`; "fix stale resu
 - Item 5 (exports) is a no-op: no stale note exists today; none added. Recorded as open item SR-a. Sensitivity and Agent Analytics tabs: builder reports whether they read live data with old results; fixing them is out of scope unless it is a one-line pass of the same flag (open item SR-b otherwise).
 - Tests: D70 also runs the REAL mapping function on a small raw file: mapping changed so intervals change → stale; mapping changed and changed back → not stale; category re-sync that yields the same names → not stale; `remapCasesToIntervalSpelling` returning equal content → not stale.
 - Acceptance 7 widened: change a mapping and back; add then delete the same backlog case; change an SLA setting and change it back → no banner in each case. Acceptance 1: "Outdated" marker on the Results navigation entry.
+
+
+---
+
+# Plan — Agent Analytics: "Scheduled (min)" must be the agent's own shift, not the whole business day
+
+## Context
+
+The planner exported the Agent summary for `test_files/EGS_Only.csv` with the config snapshot
+(calendar 08:00–22:00, 9 productive hours, adherence 100%, shift placement ON, 47 agents:
+32 start 08:00, 15 start 13:00).
+
+- Agents 1–32 show `Scheduled (min)` = 26,340 = 31 × **840** + 300. Expected 31 × **540** + 300 = 17,040.
+- Agents 33–47 show 16,740 = 31 × 540 (correct).
+- Effect: `Utilisation %` for the 08:00 agents reads ~50% instead of ~77%; team utilisation and the
+  "late-coverage vs earlier-start utilisation" insight line are skewed the same way.
+- Reproduced by running the engine (scratchpad `repro.mts`), numbers match the export.
+
+Root cause — `src/utils/agent-analytics.ts` lines 439–441:
+
+```ts
+// Late cohorts work a capped shift (productive hours from their own start): never schedule past it.
+const tail = lateShift ? Math.max(0, Math.min(cell.pendingOff, prodMin - avail)) : cell.pendingOff;
+scheduled += avail + tail;
+```
+
+The cap at the agent's own shift length is applied only to agents labelled "late" (start later than
+the earliest cohort). The earliest cohort is never capped, so the off time between its shift end
+(17:00) and business close (22:00) is counted as scheduled.
+
+Engine facts that fix the correct definition (read from `src/utils/des-engine.ts`):
+
+- Staggered run (`shiftDistribution` passed): every agent's shift is the fixed window
+  `[dayOpen + offset, dayOpen + offset + dailyProductiveHours*60)`; `ShiftEnd` enforces it
+  (line 997, 1830–1862). This is frozen decision 11's presence window.
+- Non-staggered run: no `ShiftEnd` exists. The agent stays in queue from open until its busy
+  budget is used or the day closes. There the "rest of the business day" tail is what the engine
+  actually models, and tests AA.5 / AA.8 pin it.
+- `des.shiftDistributionUsed` is set exactly when a distribution was passed (des-engine.ts:2225).
+
+Impact: display and export only. `scheduledMin` / `utilisationPct` are consumed only by
+`agent-analytics.ts` and `AgentAnalyticsPanel.tsx`. Recommended HC, the search, Results occupancy
+and the engine are untouched. No frozen decision changes.
+
+## Task
+
+In staggered runs, cap every agent's daily Scheduled minutes at their own shift length, so
+Utilisation is busy ÷ own shift time for all cohorts, not only "late" ones.
+
+End user (already recorded in `PLAN.md`): the WFM planner who opens `BoWFM.html` from disk, offline.
+
+## Skills
+
+- `supervise` — drives this loop.
+- `wfm-engine-testing` — fail-first protocol; the change is in `src/utils/**`.
+- `wfm-domain-guide` — occupancy vs utilisation wording for the help text and PRD.
+- `browser-automation` — free gate: load `BoWFM.html` from `file:///`, no console errors.
+- Gaps: none.
+
+## Steps
+
+Owner for all build steps: `sonnet-executor` (one builder, sequential).
+
+0. **Setup (supervisor, after approval).** Git exists, tree clean. Append this plan to the project
+   `PLAN.md` as a new section; commit checkpoint `checkpoint before: agent analytics scheduled-min cap`.
+   `MAP.md` not needed (target is `src/`, not a single large HTML source).
+
+1. **Failing tests first** — `scripts/verify-agent-analytics.mts`, new assertions after AA.32.
+   New fixture "long-day staggered": calendar 08:00–22:00 Mon–Fri, `dailyProductiveHours: 9`,
+   adherence 1.0, one category, pooled, `shiftDistribution` with cohorts at offset 0 and offset 300,
+   enough demand to keep agents busy most of the day, fixed seed.
+   - **AA.33** every agent, every cohort: `scheduledMin <= onShiftDays × 540 + ε`.
+     (Fails today for the 08:00 cohort: 840/day.)
+   - **AA.34** an early-cohort agent on a full in-horizon day is scheduled exactly 540 (use a
+     single-day date filter on a mid-run day).
+   - **AA.35** adherence 1.0: for every agent `|occupancyPct − utilisationPct| < 0.5` in the
+     staggered run (no out-of-queue shift time is modelled when the budget equals the shift).
+   - **AA.36** same fixture with `adherencePct: 0.9`: scheduled per full day is still 540, and at
+     least one agent has `occupancyPct − utilisationPct > 0.5` (budget ends before the shift does —
+     the legitimate gap is kept).
+   - **AA.37** insight line: late vs earlier-start utilisation in the adherence-1.0 fixture differ
+     by less than 5 points (was ~28 points purely from the bug) — parse the two numbers from the
+     `buildAgentInsights` string.
+   - **AA.38** category filter on the pooled long-day staggered fixture (needs 2 categories): for an
+     early-cohort agent, `scheduledMin − availableMin` is ~0 on full days, same as a late-cohort
+     agent (today: +300/day for the early cohort only).
+   - **AA.39** the audit-run path: assert a run made with a `shiftDistribution` returns
+     `shiftDistributionUsed`, and a run without one does not (pins the "staggered" signal).
+   - AA.35 / AA.37 are evaluated with a date filter covering full in-horizon days only, so a
+     partial first day or drain day cannot make them flaky.
+   - Also tighten the existing 09:00–17:00 / 6h staggered fixture: early-cohort agents
+     `scheduledMin <= onShiftDays × 360 + ε` (today 480/day).
+   Run `npm run test:agents`; record that the new assertions fail and all old ones pass.
+
+2. **Fix** — `src/utils/agent-analytics.ts`, row loop around lines 436–443 only.
+   - `const staggered = !!des.shiftDistributionUsed;`
+   - `const tail = staggered ? Math.max(0, Math.min(cell.pendingOff, prodMin - avail)) : cell.pendingOff;`
+   - Replace the comment: in staggered runs every agent works a fixed shift of
+     `dailyProductiveHours` from their own start, so never schedule past it; non-staggered runs have
+     no shift end, the agent is on until close.
+   - **Category filter (challenger finding, proven by running code):** on a pooled run with a
+     category filter, other-category busy slices are skipped (line ~398), so `avail` shrinks and the
+     cap never binds — the 300 min/day phantom tail would survive (Gold: Agent-1 = avail + 9,300).
+     Fix: add `busyAll` to the `Cell` (all-category busy minutes, accumulated before the
+     `catFilter` skip) and cap with the unfiltered figure:
+     `tail = staggered ? max(0, min(cell.pendingOff, prodMin - (cell.busyAll + cell.idle))) : cell.pendingOff`.
+     The wider pre-existing filter issue (FINDINGS UI-2: idle is not split by category) stays out of scope.
+   - `lateShift` stays as is — it still drives the "late" badge, `isLateShift`, and the insight grouping.
+   - Update the file header comment (lines 7–16) definition of Scheduled to match.
+   - No new helper, no engine change, no type change. `scheduledMin: Math.max(scheduled, available)`
+     stays as the safety floor.
+
+3. **Panel wording** — `src/components/AgentAnalyticsPanel.tsx`: `DEFINITIONS` (lines 27–36), the
+   visible help line (280–284) and the `Utilisation %` header tooltip (~line 375). New meaning in
+   plain words: scheduled = the agent's own shift (productive hours from their start) when shifts
+   are placed; when shift placement is off, the agent is on until close. Occupancy and utilisation
+   are the same unless the daily budget runs out before the shift ends (e.g. adherence below 100%).
+   Text only — no layout, column or logic change.
+
+4. **Docs (as-built).**
+   - `PRD.md`: FR-9.4 lines ~622–627 (definition of scheduled/utilisation; also correct the
+     sentence about the Fairness figure being "a different, lower number" only as far as this change
+     makes it false — do not rewrite unrelated text); test inventory count at ~line 1156; add a §10
+     limitation line: in non-staggered runs Scheduled spans to business close, and a partial
+     post-horizon drain day still counts as an on-shift day; bump Version 1.20.2 → 1.20.3, keep Date
+     2026-10-07.
+   - `project_context.md`: test-count row (~line 879) and a "recently fixed" entry in §11.
+
+5. **Rebuild + gates.** `npm run lint && npm test && npm run build:standalone && npm run check:artifact`
+   (`npm test` ends with the artifact freshness check, so build before the final `npm test` run).
+   Commit: `Agent analytics: scheduled minutes capped at the agent's own shift for all cohorts`.
+
+## Scope lock — the only files the builder may edit
+
+| File | Allowed section |
+|---|---|
+| `scripts/verify-agent-analytics.mts` | new assertions + fixture after AA.32; the one added bound on the existing staggered fixture |
+| `src/utils/agent-analytics.ts` | header comment (Scheduled/Utilisation lines), `Cell` type + its accumulation (`busyAll` only), and the row loop ~436–443 |
+| `src/components/AgentAnalyticsPanel.tsx` | `DEFINITIONS`, help line, `Utilisation %` tooltip — text only |
+| `PRD.md` | FR-9.4 definition, test inventory row, one §10 line, Version |
+| `project_context.md` | test-count row, §11 entry |
+| `BoWFM.html` | rebuild output only |
+| `PLAN.md`, `FINDINGS.md` | supervisor only |
+
+Out of scope (anything else is a blocker): `des-engine.ts`, `hc-search.ts`, `calendar.ts`, types,
+the `late` badge logic, On-Shift Days counting, the post-horizon drain day, non-staggered behaviour,
+build guards, dependencies.
+
+## Risk tier
+
+**Tier 3 (numbers shown to the planner).** Reviewers: `tester` + `auditor` + `user-side` +
+`challenger` (plan now, result at the end). Hard cap 2 rework rounds.
+
+## Acceptance criteria and proof
+
+| # | Criterion | Proof |
+|---|---|---|
+| A1 | New tests fail before the fix, pass after | Builder shows `npm run test:agents` output from both runs; auditor checks the diff order/claims |
+| A2 | User's case: Agent-1 Scheduled = 17,040, Utilisation ≈ 77.3%; Agent-33 Scheduled = 16,740, ≈ 77–78% | Tester runs scratchpad `repro.mts` (config + `EGS_Only.csv`, HC 47, cohorts 32@0 / 15@300) and recomputes independently as 31 × 540 + 300 and busy ÷ scheduled |
+| A3 | Available, On-Shift Days, Occupancy, Busy, Work Share, cases unchanged for the same run. Expected to move, and only these: Scheduled + Utilisation for 08:00 agents, team Scheduled/Utilisation, utilisation CV and Jain's index, the late-vs-early insight line, the amber utilisation bars | Tester diffs repro output before (checkpoint) vs after, listing every figure that moved; anything outside this list is a blocker |
+| A3b | Category-filtered view: early and late cohorts treated alike | AA.38 passes; tester reruns the repro with a Gold filter — Agent-1 Scheduled ≈ Available (no +9,300) |
+| A4 | Non-staggered runs unchanged | AA.1–AA.28 and AW.* pass untouched; tester compares `computeAgentAnalytics` output on the default uniform fixture at checkpoint vs HEAD — byte-identical |
+| A5 | Legit gap survives: adherence 0.9 staggered → utilisation below occupancy | AA.36 passes |
+| A6 | Insight line no longer shows a fake late-vs-early gap | AA.37 passes; tester reads the line in the browser for the user's file |
+| A7 | In the real app: load config + `EGS_Only.csv`, run, open Agent Analytics, export CSV — Agent-1 `Scheduled (min)` 17040, `Utilisation %` ≈ 77.3; help text matches the new definition | Tester in browser on `BoWFM.html` via `file:///`; user-side reads the help text for clarity |
+| A8 | Page loads clean | Free gate: `browser-automation` on `BoWFM.html`, zero console errors |
+| A9 | Offline contract, lint, full suite, artifact freshness | `npm run lint && npm test && npm run build:standalone && npm run check:artifact` all exit 0 |
+| A10 | Scope lock held; no engine/search/type file touched; HC results identical | Auditor: `git diff <checkpoint>..HEAD --stat` lists only scoped files; `npm test` engine suites unchanged |
+| A11 | Docs match code | Auditor: PRD FR-9.4, §10 line, version, project_context entries present and consistent with the code |
+
+## Known limits left as they are (stated, not fixed)
+
+- Non-staggered runs: Scheduled still runs to business close, because that is how the engine keeps
+  the agent in queue there. Documented in PRD §10 by this change.
+- The 32nd "On-Shift Day" (1 Nov) is the post-horizon drain day cut short when the queue empties.
+  Not changed here; the planner already accepted it. Documented in PRD §10 by this change.
+- Rest days are not simulated per agent (PRD L14) — unchanged.
+- A partial day that ends with an off slice (horizon starting mid-shift, or a drain day ending
+  after budget exhaustion) is scheduled as a full shift. Rare; noted in PRD §10, not fixed.
+- The help text must say plainly that with shift placement off, Scheduled runs to close, so a
+  low utilisation there is not read as a defect. PRD also notes that utilisation CV / Jain figures
+  change versus 1.20.2 for staggered runs.
+
+## Challenger result on this plan
+
+Verdict: fail → amended. Strongest objection (proven by running code): the cap used the filtered
+`avail`, so the phantom tail survived under a category filter. Now handled by `busyAll` + AA.38 +
+A3b. Second major: A3 understated what moves on screen — widened. Confirmed sound: the
+`shiftDistributionUsed` signal; existing tests AA.5/6/8/29–32 and AW.* are unaffected.
+Surviving objection: non-staggered runs with a long day still show ~50% utilisation; left as a
+stated limit because the engine has no shift end in that mode.
