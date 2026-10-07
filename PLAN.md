@@ -688,3 +688,56 @@ Weekly cap 40% (owner: "increase and resume", +5 step assumed). Meter at plan ti
 - `primaryPassedResult` is reassigned strictly AFTER `finalizeRosterPolish` (so `rosterPolish.currentSlaPct` stays the pre-polish median, `:2797`).
 - When `coverageIsBetter` fails or nothing is adopted the helper returns nothing and behaviour is as today.
 - Added tests: default of `labor.shiftPlacementEnabled` is OFF (pinned); placement-OFF full-result digest identical; binding label pinned on the polish fixture; sync = async compared on the full result including boundary evidence.
+
+---
+
+# BUILD PLAN — Input safety, part 1: numbers read from files (G2 + H2)
+
+Owner 2026-10-07: "go ahead" on the four input-safety recommendations (comma decimals accepted in semicolon files, unclear values blocked; timestamps read as written; category variants merged with a note; bad backlog rows imported with safe values and a counted warning). The group is split to fit the weekly cap (40%, meter 34%; no new agent at a reading of 39%): **part 1 = numbers (this plan)**; part 2 = timestamps (G3) + category variants (G5); part 3 = raw-file handling and messages (G4 + H6).
+
+**Task:** a number in an uploaded file is either read exactly as the planner meant it or the planner is told; it is never silently misread.
+**End user:** the WFM planner uploading a demand file and a backlog file.
+**Tier 3** (data handling feeding headcount). Reviewers: `tester` + `auditor`.
+
+## Facts from the audit (lines may have shifted; builder locates by content)
+
+- Demand volume cells (`csv-parser.ts`, volume parse, was `:608-621`): `12,5` in a semicolon file is read as 125; `8,25` as 825; cells such as `30 min`, `12abc`, `0x10`, `1e9` are accepted in part. Browser-confirmed: true total 31.25 shown as 1,055 with "PASSED DQ GATE" (CSV-4, CSV-8).
+- Backlog file import (`DemandFlow.tsx`, `getParsedWipCases`, was `:185-262`): unknown or blank category gets the fallback category NAME but an invented 30 minutes and priority 1 (`:195-214`); remaining minutes read with `parseFloat` (`7,5` gives 7, `2h` gives 2, `1:30` gives 1; negative or text falls back silently; `1e9` accepted) (`:215-220`); priority read with `parseInt` (`:208-211`); blank date silently defaults (`:227-238`); warning text says "mm/dd is rejected" although `03/04/2026` is read as 3 April (`:1073`) (UI-28, UI-29, UI-31, UI-35).
+
+## Rules
+
+1. **One strict number reader** (new pure helper in `src/utils/`, used by both paths): a cell is a number only if, after trimming, it is entirely digits with at most one decimal separator and an optional leading minus. No units, letters, exponents, hex, or stray symbols. Returns the number or "not a number".
+2. **Decimal comma:** accepted only when the file delimiter is NOT a comma (semicolon or tab file). There a comma is the decimal separator and a dot is accepted as a thousands separator only in the strict pattern 1.234,5. In a comma-delimited file a (quoted) cell containing a comma is "not a number". A dot is always a decimal point in comma-delimited files.
+3. **Demand file:** every volume cell that is not a number under rules 1-2 is reported through the existing blocking invalid-volume data-quality error, naming up to 5 file row numbers and the offending text. Negative and zero volumes keep today behaviour. New warning when any single interval volume exceeds 100,000 (likely a misread).
+4. **Backlog file import** (owner: import with safe values and a counted, visible warning):
+   - unknown or blank category: row goes to the fallback category with THAT category own AHT and priority (never an invented 30 / 1); counted and listed;
+   - remaining minutes not a number, negative, or above 100,000: the category AHT is used; counted and listed with the offending text; zero is kept as today;
+   - priority not a positive whole number: category priority; counted;
+   - blank date: arrival defaults as today; counted;
+   - the preview shows one summary block before Append: "N rows imported as typed; M rows adjusted" with a line per reason and up to 5 example rows each; the misleading date sentence is corrected to say day-first is assumed and only impossible dates are rejected.
+   - A matched category whose AHT is missing or 0: the row is counted under "no handling time available" and uses 30 as today, but is now listed.
+5. No engine change. No change to how valid files are read: a file that parses cleanly today must give identical intervals and identical backlog cases.
+
+## Steps (builder `sonnet-executor`, fail-first)
+
+1. Tests first (new suite before the RESULTS block of `scripts/verify-sizing-fixes.mts`): the helper (table of cells: `12`, `12.5`, `12,5` comma-file / semicolon-file, `1.234,5`, `1,234.5`, `30 min`, `12abc`, `0x10`, `1e9`, `-5`, empty, ` 7 `, `1:30`, `2h`); demand parsing of a semicolon file with `12,5; 10,5; 8,25` gives total 31.25 (today 1,055) and the same cells in a comma file give a blocking error naming rows; a clean dot-decimal comma file and each built-in sample parse to byte-identical intervals as today (digest pinned before the change); backlog import function on a fixture with each bad-row kind gives the stated values and counts. The backlog parsing logic is extracted from the component into a pure function in `src/utils/` (same behaviour for valid rows) so it can be tested; the component calls it.
+2. Implement helper, demand path, backlog path, preview summary.
+3. Verify: lint; build; `npm test`; `npm run test:audit` (24/24 identical); `check:artifact`.
+4. Docs: `PRD.md` (file-format rules, data-quality table, backlog import section, limitation L-entries touched, version bump), `project_context.md` (§4 new helper files, §11), `docs/wfm/07-known-defects-and-decisions.md` (entry).
+
+## Scope lock
+
+New `src/utils/number-cell.ts` (helper) and `src/utils/wip-import.ts` (pure backlog-row parser); `src/utils/csv-parser.ts` (volume cell parse, the invalid-volume issue text, the new large-volume warning; passing the detected delimiter through); `src/components/DemandFlow.tsx` (`getParsedWipCases` call site and the import preview summary/warning block only); `scripts/verify-sizing-fixes.mts` (append); `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`; rebuilt `BoWFM.html`. Not in scope: timestamps, category matching rules, raw CSV tokenising, manual backlog form.
+
+## Acceptance criteria and proof
+
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | Comma decimals read correctly | Browser: the audit file `a_semicolon.csv` (`12,5`, `10,5`, `8,25`): total volume 31.25, not 1,055 |
+| 2 | Unclear numbers blocked | Comma-delimited file with a quoted `12,5`, and files with `30 min`, `12abc`, `1e9`: blocking error naming rows and text; Run disabled |
+| 3 | Clean files unchanged | Three built-in samples 31/40, 27/34, 31/39; sample audit 24/24; interval digests identical |
+| 4 | Backlog rows never silently wrong | Fixture file with one row of each bad kind: stored minutes / priority / category as in rule 4; summary block shows the right counts and examples (tester counts by hand) |
+| 5 | Valid backlog file unchanged | Same cases as today (digest) |
+| 6 | Screen | Browser: backlog import preview shows the summary before Append; corrected date sentence |
+| 7 | Mutation proof | Replace the strict reader with `parseFloat` in a scratch copy: new tests fail |
+| 8 | Gates, docs, artifact, scope | lint, `npm test`, `check:artifact` green; docs updated; diff only scope-lock files |
