@@ -1000,3 +1000,36 @@ Verdict pass. All six wording points resolved. Minors left: `Available (min)` he
 - On-screen "Shift placement: on/off" note for the run shown (R1-5).
 - `Available (min)` tooltip "in queue" wording.
 - R1-6, R1-7, R1-8, R1-10.
+
+---
+
+# FINDINGS — Agent Analytics follow-ups: backlog closed (2026-10-07)
+
+Plan: `~/.claude/plans/plan-for-fixing-this-precious-thunder.md`. Base `5338acc`. PRD 1.20.4.
+
+| Backlog item | Status |
+|---|---|
+| R1-4 export legend | Closed — third CSV section "Notes - how to read this file" |
+| R1-5 mode shown on panel | Closed — pill "Shifts: fixed length" / "Shifts: open until close" + mode line (amber when open and the business day is longer than the productive hours) |
+| Non-fixed-shift runs read ~50% | Explained on screen and in export; number unchanged. Engine change logged as PRD §11 P2-9 (needs approval) |
+| `Available (min)` tooltip "in queue" | Closed |
+| R1-6 part-day after data ends | Closed — date named on the status line and in the export; minutes stay as actually worked |
+| R1-7 category filter on a shared pool | Closed — note shown only when that filter is active |
+| R1-8 unpinned figures | Closed — AA.45 group |
+| R1-10 stale test counts | Closed — 174 + 858 + 87 + 164 = 1,283 |
+
+## Verification (investigator, ran it)
+
+- No number moved: old vs new `computeAgentAnalytics`, insights and export sections 0–1 identical on the real file in six cases (fixed / open shifts × unfiltered / Gold filter / end date 31 Oct). Only the three new fields and the third export section differ.
+- Real page, real file: HC 47; Agent-1 17,040 / 77.3%; part-day sentence names 2026-11-01 and disappears with end date 31 Oct; category note appears with a filter and clears on reset; export has the Notes section; zero console errors; all Results tabs render.
+- Open-shift run (shift placement off and minimum coverage off): HC 46, amber line shown, Agent-1 occupancy 55.4% / utilisation 50.4%.
+
+## Findings raised and fixed in rework
+
+| ID | Severity | Finding | Fix |
+|---|---|---|---|
+| F-1 | major | Category note said Available is the agent's whole time on shift; it is filtered busy + all idle (Agent-1: 6,230.9 filtered vs 17,040 unfiltered). The wrong wording came from the plan, not the builder | Note rewritten; AA.44d tightened; AA.44f pins the numbers |
+| F-2 | major | Pill said "Shift placement: on" with the switch off, because minimum coverage still staggers starts (`hc-search.ts` ~2567, coverage repair is unconditional) | Label and notes now describe the run ("fixed length" / "open until close"), and say when shifts are fixed |
+| F-3 | minor | Part-day note said "some agents"; with open shifts it is all agents | Reworded |
+
+Not re-run after the rework: the full sizing run in the browser. The rework changed strings only; page load, lint and the full suite (1,283, 0 failed) were re-run and the new labels are present in `BoWFM.html`.

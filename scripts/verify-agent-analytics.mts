@@ -21,6 +21,7 @@ import { buildBreachExportRows, buildCaseExportRows, buildSliceExportRows } from
 import { runBackofficeDES } from '../src/utils/des-engine';
 import {
   buildAgentAnalyticsExport,
+  buildAgentAnalyticsNotes,
   buildAgentInsights,
   computeAgentAnalytics,
   sortRowsByCases,
@@ -174,7 +175,7 @@ console.log('\n--- Suite AA: agent analytics ---');
   assert(buildAgentInsights(computeAgentAnalytics({ des, calendar: cal, labor: lab, filter: { agentIds: [], category: 'nope' } }))[0].startsWith('No agents'), 'AA.26 empty selection yields a plain "No agents" message');
 
   // Export: two tables, dates formatted local, BOM.
-  const ex = buildAgentAnalyticsExport(a);
+  const ex = buildAgentAnalyticsExport(a, lab);
   const text = buildExcelCSV([], ex.sections);
   assert(text.startsWith('﻿"Agent summary') && text.includes('"Work share (cases) per agent per date') && text.split('\r\n').length > 2 * a.rows.length, 'AA.27 export has summary + matrix sections in one Excel-friendly file');
   assert(ex.sections[1].rows[0][a.dates[0]] !== undefined && ex.sections[1].rows.length === a.rows.length && a.dates.every((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)), 'AA.28 matrix headers are local YYYY-MM-DD dates');
@@ -253,6 +254,50 @@ console.log('\n--- Suite AA: agent analytics ---');
   const gLate = gold.rows.filter((r) => r.isLateShift);
   assert(gEarly.length === 5 && gLate.length === 3 && [...gEarly, ...gLate].every((r) => goldGap(r) < 20), 'AA.38 pooled category filter: scheduled - available per day ~0 for early and late cohorts alike', [...gEarly, ...gLate].map((r) => goldGap(r).toFixed(0)).join(' '));
   assert(!!ld.shiftDistributionUsed && !runLong(1.0, false).shiftDistributionUsed, 'AA.39 a run with a shiftDistribution reports shiftDistributionUsed; a run without does not');
+
+  // ---- Follow-ups: run facts, notes section, scheduled-minute pins ----
+  const lastDataDay = formatDate24(liv[liv.length - 1].start);
+  assert(la.staggered === true && a.staggered === false, 'AA.40 staggered flag: true for the shift-placement run, false for the uniform run');
+
+  const expectedDrain = la.allDates.filter((d) => d > lastDataDay);
+  assert(expectedDrain.length >= 1 && JSON.stringify(la.drainDates) === JSON.stringify(expectedDrain) && la.drainDates.every((d) => la.dates.includes(d)), 'AA.41 drainDates lists exactly the active dates after the last data day', `${la.drainDates} vs ${expectedDrain} (last data day ${lastDataDay})`);
+  assert(lf.drainDates.length === 0 && a.drainDates.every((d) => a.dates.includes(d)), 'AA.41b drainDates is empty when the date filter excludes the post-data dates; entries always lie inside dates', `${lf.drainDates} | ${a.drainDates}`);
+  const lastDayOnly = computeAgentAnalytics({ des: ld, calendar: LBIZ, labor: mkLab(1.0), filter: { fromDate: lastDataDay, toDate: lastDataDay } });
+  assert(lastDayOnly.drainDates.length === 0 && computeAgentAnalytics({ des: ld, calendar: LBIZ, labor: mkLab(1.0), filter: { fromDate: expectedDrain[0] } }).drainDates.join() === expectedDrain.join(), 'AA.41c the last data day itself is not a drain date; a filter starting at the first post-data date keeps it');
+
+  const goldPooled = computeAgentAnalytics({ des: ld, calendar: LBIZ, labor: mkLab(1.0), filter: { category: 'Gold' } });
+  assert(apc.pooledCategoryFilter === true && goldPooled.pooledCategoryFilter === true && ap.pooledCategoryFilter === false && la.pooledCategoryFilter === false && cf.pooledCategoryFilter === false && a.pooledCategoryFilter === false, 'AA.42 pooledCategoryFilter true only for pooled run + category filter (false: pooled unfiltered, siloed + filter, siloed unfiltered)', JSON.stringify([apc.pooledCategoryFilter, goldPooled.pooledCategoryFilter, ap.pooledCategoryFilter, la.pooledCategoryFilter, cf.pooledCategoryFilter, a.pooledCategoryFilter]));
+
+  const ex3 = buildAgentAnalyticsExport(la, mkLab(1.0));
+  const exKeysOk = (ex3.sections[2]?.rows.length ?? 0) > 0 && ex3.sections[2].rows.every((r) => Object.keys(r).join() === 'Item,Note');
+  assert(ex3.sections.length === 3 && ex3.sections[1].rows.length === la.rows.length && ex3.sections[1].rows[0][la.dates[0]] !== undefined && (ex3.sections[2]?.title ?? '').startsWith('Notes') && exKeysOk, 'AA.43 export has 3 sections: summary, matrix (index 1), Notes with Item/Note rows', ex3.sections.map((s) => s.title).join(' | '));
+  assert(JSON.stringify(ex3.sections.slice(0, 2)) === JSON.stringify(buildAgentAnalyticsExport(la, mkLab(1.0)).sections.slice(0, 2)) && ex.sections.length === 3, 'AA.43b summary and matrix sections are deterministic and the uniform export also carries the notes section');
+
+  const noteOf = (rows: Array<{ Item: string; Note: string }>, item: string) => rows.find((r) => r.Item === item)?.Note;
+  const nStag = buildAgentAnalyticsNotes(la, mkLab(1.0));
+  const nUni = buildAgentAnalyticsNotes(a, lab);
+  const nFilt = buildAgentAnalyticsNotes(lf, mkLab(1.0));
+  const nGold = buildAgentAnalyticsNotes(goldPooled, mkLab(1.0));
+  assert((noteOf(nStag, 'Scheduled (min)') ?? '').includes('fixed shift') && (noteOf(nStag, 'Scheduled (min)') ?? '').includes('540') && (noteOf(nUni, 'Scheduled (min)') ?? '').includes('business close') && !(noteOf(nUni, 'Scheduled (min)') ?? '').includes('each agent worked a fixed shift') && !/shift placement (on|off)/i.test(noteOf(nStag, 'Scheduled (min)') ?? '') && !/shift placement (on|off)/i.test(noteOf(nUni, 'Utilisation % vs Occupancy %') ?? ''), 'AA.44 Scheduled note follows what the run did (fixed shift + 540 min vs business close), not the Shift Placement switch', `${noteOf(nStag, 'Scheduled (min)')} || ${noteOf(nUni, 'Scheduled (min)')}`);
+  assert(noteOf(nStag, 'Utilisation % vs Occupancy %') !== noteOf(nUni, 'Utilisation % vs Occupancy %') && (noteOf(nUni, 'Utilisation % vs Occupancy %') ?? '').includes('not an error') && noteOf(nStag, 'On-Shift Days') !== undefined, 'AA.44b utilisation note differs by mode; off-mode note says it is not an error; On-Shift Days note present');
+  const drainNote = noteOf(nStag, 'Part-day after the data ends');
+  assert(!!drainNote && la.drainDates.every((d) => drainNote.includes(d)) && noteOf(nFilt, 'Part-day after the data ends') === undefined && (noteOf(nUni, 'Part-day after the data ends') !== undefined) === (a.drainDates.length > 0), 'AA.44c part-day note only when drainDates is non-empty, and it names the date(s)', drainNote ?? '');
+  assert(noteOf(nGold, 'Category filter') !== undefined && noteOf(nStag, 'Category filter') === undefined && noteOf(buildAgentAnalyticsNotes(cf, lab), 'Category filter') === undefined && !(noteOf(nGold, 'Category filter') ?? '').includes('whole time on shift'), 'AA.44d category note only when pooledCategoryFilter; does not claim Available is the whole time on shift');
+  const fullByAgent = new Map(la.rows.map((r) => [r.agentId, r]));
+  const goldRows = goldPooled.rows.filter((r) => fullByAgent.has(r.agentId));
+  assert(goldRows.length > 0 && goldRows.every((r) => { const f = fullByAgent.get(r.agentId)!; return r.availableMin < f.availableMin - 1e-6 && Math.abs(r.idleMin - f.idleMin) < 1e-6; }), 'AA.44f category filter on a pooled run: availableMin strictly below unfiltered, idleMin equal (pins the Category filter note)', goldRows.map((r) => `${r.agentId}: ${r.availableMin.toFixed(1)} vs ${fullByAgent.get(r.agentId)!.availableMin.toFixed(1)}, idle ${r.idleMin.toFixed(1)} vs ${fullByAgent.get(r.agentId)!.idleMin.toFixed(1)}`).join(' | '));
+  assert(![...nStag, ...nUni, ...nGold].some((r) => /budget|staggered|in queue|drain|horizon/i.test(r.Note)), 'AA.44e notes avoid internal jargon (budget, staggered, in queue, drain, horizon)');
+
+  // Pins left open by review: exact scheduled per full day at adherence 0.8, sums, export rounding, drain part-day cap.
+  const ld8 = runLong(0.8);
+  const l8day = computeAgentAnalytics({ des: ld8, calendar: LBIZ, labor: mkLab(0.8), filter: { fromDate: '2026-10-07', toDate: '2026-10-07' } });
+  assert(l8day.rows.length === 8 && l8day.rows.every((r) => approx(r.scheduledMin, 540, 1e-6)), 'AA.45 adherence 0.8 staggered: scheduled is exactly 540 per full in-horizon day', l8day.rows.map((r) => r.scheduledMin.toFixed(2)).join(' '));
+  const l8all = computeAgentAnalytics({ des: ld8, calendar: LBIZ, labor: mkLab(0.8) });
+  assert(approx(l8all.team.scheduledMin, l8all.rows.reduce((s, r) => s + r.scheduledMin, 0), 1e-6) && approx(la.team.scheduledMin, la.rows.reduce((s, r) => s + r.scheduledMin, 0), 1e-6), 'AA.45b team.scheduledMin equals the sum of the row values');
+  const exL8 = buildAgentAnalyticsExport(l8all, mkLab(0.8)).sections[0].rows;
+  assert(exL8.length === l8all.rows.length && exL8.every((er, i) => er['Scheduled (min)'] === Math.round(l8all.rows[i].scheduledMin * 10) / 10), 'AA.45c export Scheduled (min) equals the row value rounded to 1 decimal');
+  const l8drain = computeAgentAnalytics({ des: ld8, calendar: LBIZ, labor: mkLab(0.8), filter: { fromDate: expectedDrain[0], toDate: expectedDrain[0] } });
+  assert(l8drain.dates.length >= 1 && l8drain.rows.some((r) => r.onShiftDays === 1) && l8drain.rows.every((r) => r.scheduledMin <= 540 + 1e-6), 'AA.45d on a part-day after the data ends, no agent is scheduled above the daily productive hours (540 min)', l8drain.rows.map((r) => r.scheduledMin.toFixed(1)).join(' '));
 }
 
 // ------------------------------------------------------------------------------------------
