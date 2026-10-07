@@ -1028,3 +1028,13 @@ Owner 2026-10-07: Build B approved and merged into local `main`; "fix stale resu
 | 8 | No regression | Samples 31/40, 27/34, 31/39; zero console errors; `npm test` green (1,239 + new); lint clean |
 | 9 | Docs and artifact | PRD FR-9.0 as built, project_context, docs 07; `npm run check:artifact` passes |
 | 10 | Scope respected | Only scope-lock files changed |
+
+## Stale results — challenger verdict: PASS with majors (accepted). Revisions override the plan above.
+
+- The column mapping is NOT stored in the snapshot. Demand intervals come only from raw rows + mapping + delimiter (`App.tsx:135-140`), so a content fingerprint of the intervals covers every mapping effect. Design item 1 is corrected accordingly.
+- Snapshot stores only two fingerprint strings (demand, backlog), not the arrays. Computed with a purpose-written loop (start/end as `getTime()`, volume, category NAME — never category id, which contains `Date.now()`); backlog: id, category name, arrival `getTime()`, remaining minutes, priority, in array order. Captured at run START from the same closure values the search receives (same place `runSnapshot` is built, `App.tsx:~285-296`), never from live state at run end.
+- Live fingerprints memoised on `[intervals]` and `[openingWIP]`.
+- There is NO existing header chip for the settings-stale state (only `ResultsFlow.tsx:~501-503`, fed from `App.tsx:~687`). UI-58 is met by a NEW small "Outdated" marker beside the Results entry in the navigation (`src/components/Sidebar.tsx`), shown whenever results exist and settings or data changed since the run. Scope lock: the header file is `src/components/Sidebar.tsx`; `src/types/wfm.ts` removed from scope.
+- Item 5 (exports) is a no-op: no stale note exists today; none added. Recorded as open item SR-a. Sensitivity and Agent Analytics tabs: builder reports whether they read live data with old results; fixing them is out of scope unless it is a one-line pass of the same flag (open item SR-b otherwise).
+- Tests: D70 also runs the REAL mapping function on a small raw file: mapping changed so intervals change → stale; mapping changed and changed back → not stale; category re-sync that yields the same names → not stale; `remapCasesToIntervalSpelling` returning equal content → not stale.
+- Acceptance 7 widened: change a mapping and back; add then delete the same backlog case; change an SLA setting and change it back → no banner in each case. Acceptance 1: "Outdated" marker on the Results navigation entry.
