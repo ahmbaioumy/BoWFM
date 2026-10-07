@@ -625,7 +625,8 @@ and the Audit breach list.
   cohort, is scheduled for `dailyProductiveHours` from their own start (available + the shift
   time left after the daily productive-hour budget is exhausted, never past the shift end).
   With shift placement off the engine has no shift end, so Scheduled runs to business close
-  (L20). The engine models no other non-productive time in a shift, so occupancy and
+  (L20), so utilisation reads low on a business day longer than the productive hours
+  (expected; occupancy is the workload figure). With shift placement on, occupancy and
   utilisation are identical except on budget-exhausted days (e.g. adherence below 100%) —
   stated in the panel help text. The fairness panel's occupancy % is busy / on-shift
   available; with shift placement on and adherence 100% this panel's utilisation now equals
