@@ -12,8 +12,10 @@
  * Metric definitions (also shown in the UI help line):
  *   Available (on-shift)  = busy + idle minutes: time the agent was in the queue on shift.
  *   Occupancy %           = busy / available. How hard the agent worked while in the queue.
- *   Scheduled             = available + the tail of the business day after the agent's daily
- *                           productive budget ran out (agent goes out-of-queue but is still on shift).
+ *   Scheduled             = available + the on-shift time after the agent's daily productive budget ran
+ *                           out (out-of-queue but still on shift). Shift placement ON: capped at the agent's
+ *                           own shift (daily productive hours from their own start). Shift placement OFF:
+ *                           no shift end exists, so it runs to business close.
  *   Utilisation %         = busy / scheduled. Lower than occupancy whenever an agent has scheduled
  *                           time outside the queue. NOT the Fairness panel figure: that panel's
  *                           "Occupancy %" is busy / on-shift available.
@@ -165,6 +167,8 @@ const SOLO_MIN_MINUTES = 30;
 
 interface Cell {
   busy: number;
+  /** Busy minutes across ALL categories (accumulated before the category filter) — used only to cap the scheduled tail. */
+  busyAll: number;
   idle: number;
   pendingOff: number;
   hasOnShift: boolean;
@@ -378,7 +382,7 @@ export function computeAgentAnalytics(input: {
     if (!byDate) cells.set(s.agentId, (byDate = new Map()));
     let cell = byDate.get(d);
     if (!cell) {
-      cell = { busy: 0, idle: 0, pendingOff: 0, hasOnShift: false, firstOnShiftFrom: null, lateBusy: 0, resumes: 0, touched: new Set() };
+      cell = { busy: 0, busyAll: 0, idle: 0, pendingOff: 0, hasOnShift: false, firstOnShiftFrom: null, lateBusy: 0, resumes: 0, touched: new Set() };
       byDate.set(d, cell);
     }
     if (s.state === 'off') {
@@ -395,6 +399,7 @@ export function computeAgentAnalytics(input: {
     if (s.state === 'idle') {
       cell.idle += s.minutes;
     } else {
+      cell.busyAll += s.minutes;
       if (catFilter && s.category !== catFilter) continue;
       cell.busy += s.minutes;
       if (s.isResume) cell.resumes++;
@@ -409,6 +414,8 @@ export function computeAgentAnalytics(input: {
 
   // ---- Rows -------------------------------------------------------------------------------
   const prodMin = labor.dailyProductiveHours * 60;
+  // A shiftDistribution was passed: every agent works a fixed shift of prodMin from their own start.
+  const staggered = !!des.shiftDistributionUsed;
   const rows: AgentAnalyticsRow[] = [];
   const keptIds: number[] = [];
   for (let id = 0; id < hc; id++) {
@@ -436,8 +443,10 @@ export function computeAgentAnalytics(input: {
       resumes += cell.resumes;
       cell.touched.forEach((t) => touched.add(t));
       const avail = cell.busy + cell.idle;
-      // Late cohorts work a capped shift (productive hours from their own start): never schedule past it.
-      const tail = lateShift ? Math.max(0, Math.min(cell.pendingOff, prodMin - avail)) : cell.pendingOff;
+      // Staggered runs: every agent works a fixed shift (productive hours from their own start), so never
+      // schedule past it. The cap uses all-category busy + idle so a category filter cannot hide it.
+      // Non-staggered runs have no shift end: the agent is on until business close (full tail).
+      const tail = staggered ? Math.max(0, Math.min(cell.pendingOff, prodMin - (cell.busyAll + cell.idle))) : cell.pendingOff;
       scheduled += avail + tail;
     }
     // Filtered-category runs: idle is category-agnostic, so keep available/scheduled as recorded.

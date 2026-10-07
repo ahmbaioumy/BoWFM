@@ -27,8 +27,10 @@ const shortDate = (d: string) => d.slice(5); // MM-DD
 
 const DEFINITIONS =
   'Available = busy + idle minutes while on shift. Occupancy = busy / available. ' +
-  'Utilisation = busy / scheduled, where scheduled = available + the rest of the shift after the daily productive-hour budget is used up. ' +
-  'The engine models no other non-productive time inside a shift, so occupancy and utilisation are the SAME number for any agent-day where the budget is not exhausted; they only differ on days it is. ' +
+  'Utilisation = busy / scheduled. Scheduled = the agent\'s own shift (the daily productive hours, counted from the agent\'s start time) when shift placement is on; ' +
+  'it is available time plus any time left in the shift after the daily productive-hour budget is used up. ' +
+  'When shift placement is off there is no shift end, so scheduled runs to business close and utilisation reads lower than it would for a fixed shift. ' +
+  'The engine models no other non-productive time inside a shift, so occupancy and utilisation are the SAME number for any agent-day where the budget is not exhausted; they only differ on days it is (for example when adherence is below 100%). ' +
   'Work share = for each finished case, the agent\'s busy minutes on it / all agents\' busy minutes on it (a case split 30/10 min is 0.75/0.25); it sums to the number of finished cases. ' +
   'Finished = whole cases the agent closed (finisher credit; overstates agents who only resume cases others parked). Touched = cases the agent worked on, including split cases. ' +
   'Avg handle = busy minutes on finished-case work / work share. Cases/day = work share / days on shift. ' +
@@ -279,8 +281,9 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
             <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-slate-400" />
             <span title={DEFINITIONS}>
               Per-agent workload, occupancy and utilisation for the filtered range. Occupancy = busy / available (in queue, on shift);
-              utilisation = busy / scheduled shift time. They are the same number unless an agent's daily productive-hour budget runs out
-              before the shift ends. Hover for full definitions.
+              utilisation = busy / scheduled time, where scheduled is the agent's own shift (daily productive hours from their start) when shift
+              placement is on, and the whole business day when it is off. They are the same number unless an agent's daily productive-hour
+              budget runs out before the shift ends (for example adherence below 100%). Hover for full definitions.
             </span>
           </p>
         </div>
@@ -370,7 +373,7 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
               <th className={th} title="Busy + idle minutes while on shift, in queue">Available (min)</th>
               <th className={th}>Idle (min)</th>
               <th className={th} title="Busy / available">Occupancy %</th>
-              <th className={th} title="Busy / scheduled shift time (differs from occupancy only after the daily productive budget is exhausted)">Utilisation %</th>
+              <th className={th} title="Busy / scheduled time. Scheduled = the agent's own shift when shift placement is on; with shift placement off it runs to business close. Differs from occupancy only after the daily productive budget is exhausted.">Utilisation %</th>
               <th className={th} title="Busy minutes on finished-case work / work share">Avg handle (min)</th>
               <th className={th} title="Work share / days on shift">Cases/day</th>
               <th className={th} title="Busy slices that resumed a parked case">Resumes</th>
