@@ -839,3 +839,28 @@ Owner 2026-10-07: part 1 approved and merged into local `main` (zero remaining m
 | 12 | Mutation proof | Restore `Date.UTC` path → D67 fails under a non-UTC zone; remove `categoryKey` lower-casing → D67 fails |
 | 13 | Docs and artifact | PRD / project_context / docs 07 updated; `npm run check:artifact` passes |
 | 14 | Scope respected | `git diff <checkpoint>..HEAD --stat` lists only scope-lock files |
+
+## Input safety part 2 — challenger verdict: FAIL (accepted). Revised rules below override the plan above.
+
+**Challenger findings accepted:**
+- Blocker: plan item 8 (pass existing categories into `mapRawRecordsToIntervals`) would create a render loop or stale names (`App.tsx:131-143`: intervals memo + effect that always returns a new categories array).
+- Major: reading `Z` / offset stamps as written makes the common case WRONG: a UTC export opened on a PC in the operation timezone is correct today (08:00Z shows 12:00 in Dubai) and would shift 4 hours with only a reassuring warning. Same for epoch numbers.
+- Major: two existing categories with one key; stored backlog cases carrying an old spelling; the starting-values warning would fire on every fresh upload and on the samples.
+- Minors: second regex duplicating the ISO pattern; marker count misses split date/time columns; mutation proof needs a non-UTC run.
+
+**G3 revised — OWNER DECISION REOPENED (supervisor recommendation changed):**
+- Option B (recommended): keep today conversion to the PC clock (correct whenever the PC is in the operation timezone, for UTC exports AND local-offset exports). Add a WARNING naming the distinct markers found and the PC offset used: "N timestamps carried a timezone marker (Z, +04:00). They were converted to this PC timezone (UTC+4). Open the file on a PC set to the operation timezone, or remove the markers to have times read as written." Mixed markers in one file are fine under B (each instant is converted correctly). Parser unchanged; marker flag returned from the single ISO regex (no second regex); count taken where rows are mapped, including split date/time columns and epoch numbers.
+- Option A (earlier owner choice): read digits as written, warning that nothing was converted, mixed markers escalated. Same result on every PC, but wrong by the offset for UTC exports.
+- Option C: block files with markers.
+
+**G5 revised:**
+- `categoryKey(name)` = trim, collapse whitespace runs, lower-case (exported, pure).
+- `mapRawRecordsToIntervals` canonicalises from the FILE ONLY: every row takes the first spelling of its key in file order (trimmed, spaces collapsed). No dependency on existing categories, so the memo is untouched.
+- `discoverAndSyncCategories` matches existing categories by key; a matched category keeps its id and all settings and takes the spelling now used by the intervals. Two existing categories with the same key: the first in array order supplies the settings, the other is dropped and named in the merge note.
+- Stored references: the same sync step returns a rename list; `App.tsx` applies it to stored backlog cases (and any other stored per-category list the builder finds — to be listed in the hand-back). Backlog import and manual entry match by key.
+- WARNING "Category names merged" lists groups with row counts (up to 10).
+- The "categories on starting values" warning is REMOVED from this part (needs an edited/not-edited marker in Settings; recorded as backlog IS2-a).
+- Extra tests: duplicate existing keys; backlog already loaded then demand re-uploaded with another spelling → backlog cases still match; upload order `billing` then `BILLING` keeps settings.
+- Scope lock change: `App.tsx` = rename-list wiring in the existing sync effect only (no new parameter to the intervals memo).
+
+Status: waiting for owner decision on G3 (B recommended). Build not started. Meter 38% of 40% cap.
