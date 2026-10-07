@@ -915,3 +915,14 @@ Open (not F3):
 - Deviation needing owner yes (IS1-a): backlog remaining minutes of exactly 0 now fall back to the category AHT (plan said keep zero). Supervisor brief error, not builder error.
 - Open minors: IS1-b leading plus sign (`+5`) and trailing or doubled currency symbol now blocked (were read before; fails loudly). IS1-c `project_context.md:201` still says 14 data-quality rules (PRD says 24). IS1-d `PRD.md:1151` suite list stops at D64. IS1-e docs/wfm/07 entry lost a backslash in a quoted pattern. IS1-f preview label for blank remaining minutes does not match what is counted; unmatched-category fact shown twice. IS1-g fractional warning does not show an example of the rounding. IS1-h no test for `+5`, `.5`, `5.`, zero-numeric column. IS1-i tester saw 0 as typed / 10 adjusted on a file with 5 unknown categories; auditor says the count is per row and other fallbacks explain it; per-reason lines not re-read.
 - Final challenger not run (budget).
+
+---
+
+# Input safety part 2 (G3 option B + G5) — verification, 2026-10-07
+
+- Owner chose G3 option B: keep conversion to the PC timezone, add a warning.
+- Build: commit on `fix/input-safety-2`; `npm test` 1,191 green (174 + 793 + 60 + 164), lint clean, artifact fresh. New suite D67 (30 checks). PRD v1.19.0, data-quality rules 26.
+- Tester: PASS, 13 of 13 checks run. Date reader returns identical instants before and after for 9 inputs under Dubai, UTC and New York. Marker warning shows count, markers and PC offset; not blocking. `Billing` / `billing ` / `BILLING` → one category, volume equals hand sum (21); variant file and clean file give identical intervals and categories (old build: 4 categories). Re-sync keeps id, AHT 12, shrinkage 10% and renames the stored backlog case. Samples unchanged (300/1380, 280/1572, 600/2190; gross 40 / 34 / 39), zero console errors. Mutations: no lower-casing → 12+ D67 failures; marker detection off → 6 D67 failures. Scope: exactly the 10 allowed files, test file additions only.
+- Auditor and final challenger NOT run (meter 39% of 40% cap).
+- Builder deviations (accepted): backlog rename derived from interval spelling by key, not from the returned rename list (same result, avoids stale state on reset + upload); tests written after code (no red run) — covered by tester mutations; two optional fields added to `StandardInterval` in `types/wfm.ts`.
+- Open minors: IS2-a starting-values note (needs an edited marker in Settings). IS2-b two existing categories with the same key: the dropped one is reported by the function but not shown on screen. IS2-c spacing-only rename (`Bill  ing` → `Bill ing`) gets no note. IS2-d row count in the merge note counts only rows whose spelling changed. IS2-e re-upload with backlog loaded cannot be reached in the UI (second upload forces a full reset, same as before) so the rename path is proven at engine level only. IS2-f settings-file import is not remapped until the next sync.
