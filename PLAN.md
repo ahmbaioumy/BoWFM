@@ -768,3 +768,74 @@ What the challenger found in the real code: the delimiter is discarded by `parse
 | 3b | Currency and spaces as today | `$1200` and ` 7 ` read 1200 and 7 |
 | 9 | Fractional volume warning | File with 12.5: warning shown; whole-number files: none |
 | 10 | Mass fallback needs confirmation | Backlog file where 30% of rows have an unknown category: Append disabled until ticked; 5%: enabled |
+
+
+---
+
+# BUILD PLAN — Input safety, part 2: timestamps read as written (G3) + category name variants merged (G5)
+
+Owner 2026-10-07: part 1 approved and merged into local `main` (zero remaining minutes → category handling time: kept). Weekly cap 40% (hard stop), meter 37% at plan time; no new agent at a reading of 39%.
+
+**Task:** the same demand or backlog file must give the same intervals on any PC timezone, and category names that differ only by letter case or spacing must become one category, with a visible note.
+**End user:** the WFM planner opening `BoWFM.html` from disk.
+**Tier 3** (data handling that changes sizing inputs). Reviewers: `tester` + `auditor`; `user-side` folded into the tester brief; final `challenger` if budget allows.
+**Skills:** `wfm-engine-testing` (fail-first), `browser-automation` (free gate, tester).
+
+## Facts (investigator, probes in scratch `is2/`)
+
+- `parseFlexibleDate` (`csv-parser.ts:397-532`) is the single parser; callers: demand start/end (`:614`, `:637`), backlog import (`wip-import.ts:174`), manual backlog entry (`DemandFlow.tsx:235`).
+- Timezone-dependent today: ISO with `Z` (`:434-447`, `Date.UTC`), ISO with offset (`:449-454`, `new Date(str)`), and digits-only epoch (`:408-413`). Probe, `2026-01-05T08:00:00Z`: 08:00 on a UTC PC, 12:00 in Dubai, 03:00 in New York; `…+04:00` lands on the 4th at 23:00 in New York. Everything else (no zone, `dd/mm/yyyy`, date-only) is already read as written.
+- No test and no document pins the timezone-dependent behaviour.
+- Categories: cell is trimmed only (`:608-612`); `discoverAndSyncCategories` (`:675-733`) keys by exact name, so `Billing`, `billing `, `BILLING` give 3 categories, each seeded AHT 30 / shrinkage 20% (`:720-721`). Intervals carry the category NAME; every downstream match is exact (`hc-search`, `des-engine`, analytics, Results). Backlog import matches case-insensitively but does not collapse inner spaces (`wip-import.ts:119`).
+- There is no "file supplies AHT" concept: "fallback" = the seeded 30 min / 20%. No marker tells seeded values from typed ones.
+- Category id uses `Date.now()` (`:718`, DOC-44) — left alone here (J5).
+
+## Design
+
+### G3 — timestamps
+1. ISO branch: the `Z` and `±hh[:mm]` groups are recognised but IGNORED; the digits go to `validateAndCreateDate` (the existing no-zone path). Lines 434-454 are removed — one code path.
+2. Epoch numbers (9–14 digits): read as their UTC wall-clock digits (`getUTC*` components → `validateAndCreateDate`), so they too are identical on every PC. **Owner to confirm** (alternative: leave epochs timezone-dependent).
+3. New exported pure helper `hasZoneMarker(str)`; `mapRawRecordsToIntervals` counts rows whose start or end carried a marker (or was an epoch) and attaches the count to the parse result the same way part 1 attached volume issues (no type change if avoidable; otherwise one optional field in `types/wfm.ts`, listed in scope).
+4. Data quality: one WARNING "Timezone markers ignored": "N timestamps carried a timezone marker (Z or +hh:mm). Times were read exactly as written; the marker was ignored." Epoch wording: "N timestamps were numeric (epoch) and were read as UTC clock time." Never blocking.
+5. Backlog import preview: same count in the part-1 summary block.
+6. Known consequence, documented: a clock time that does not exist on the PC (daylight-saving gap) is already rejected as an invalid date; unchanged.
+
+### G5 — category variants
+7. One exported pure helper `categoryKey(name)` = trim, collapse runs of whitespace to one space, lower-case. `Bill  ing` → `bill ing` (does NOT merge with `Billing` — different words).
+8. `mapRawRecordsToIntervals`: each row's category is replaced by the canonical display name of its key. Display name = the name of an EXISTING category with the same key when one is passed in (keeps the planner's settings on re-upload), otherwise the first spelling in file order. Because intervals carry the canonical name, every downstream exact match keeps working untouched.
+   - If `mapRawRecordsToIntervals` does not receive the existing categories today, add one optional parameter (existing category names) and pass it at the three `App.tsx` call sites.
+9. `discoverAndSyncCategories`: `existingMap` keyed by `categoryKey`; two existing categories with the same key are left as they are (never auto-delete planner settings) and reported.
+10. Backlog import (`wip-import.ts`) and manual backlog entry match with `categoryKey`.
+11. Data quality: one WARNING "Category names merged": lists each merged group, e.g. `"billing ", "BILLING" → "Billing" (42 rows)`; up to 10 groups, then "+N more". Not blocking.
+12. Data quality: one WARNING "Categories on starting values": lists categories whose handling time is exactly 30 minutes AND shrinkage exactly 20% (the seeded pair), text "still on the starting values — confirm they are intended". Not blocking; no new stored marker. Must NOT appear for the three built-in samples if their categories are configured (builder checks; if a sample legitimately uses 30 / 20% the wording stays neutral).
+
+## Steps (builder `sonnet-executor`, fail-first, token-economical)
+
+1. Tests first — new suite **D67** inserted before the RESULTS block of `scripts/verify-sizing-fixes.mts`: (a) `…T08:00:00Z`, `…T08:00:00+04:00`, `…T08:00:00.500Z`, `…08:00:00-05:00`, `2026-01-05 08:00` all give local hour 8 on the 5th; (b) the same assertions hold when the suite is re-run under another timezone (tester does this with PowerShell `$env:TZ`); (c) epoch `1767600000` → hour 8 on the 5th; (d) marker count = hand count, warning issued, not blocking; (e) no-zone and `dd/mm/yyyy` inputs unchanged; (f) `Billing`, `billing `, `BILLING` → 1 category named `Billing`, intervals all `Billing`, total volume = hand sum, merge warning lists both variants with row counts; (g) `Bill  ing` stays separate as `Bill ing`; (h) re-upload with an existing `BILLING` category (AHT 12) → name `BILLING` kept, AHT 12 kept; (i) backlog row `billing` matches `Billing` (not counted as fallback); (j) starting-values warning lists a seeded category and not one edited to 25 min; (k) three built-in samples: same interval count, total volume and category list as before.
+2. `csv-parser.ts`: G3 items 1–4, G5 items 7–9, 11–12.
+3. `wip-import.ts`, `DemandFlow.tsx` (manual entry match + preview count), `App.tsx` (optional parameter only).
+4. `npm run lint`, `npm run build:standalone`, `npm test` once.
+5. Docs: `PRD.md` (date formats: zone markers ignored; DQ table +3 rules → 27; category rule; version bump), `project_context.md` (§5/§11; also fix the stale "14 data-quality rules" line and nothing else), `docs/wfm/07` entry; part-1 leftovers IS1-d (suite list in PRD) and IS1-e (lost backslash) corrected in the same pass.
+
+## Scope lock
+
+`src/utils/csv-parser.ts`, `src/utils/wip-import.ts`, `src/components/DemandFlow.tsx` (manual-entry category match + preview count only), `src/App.tsx` (optional parameter plumbing only), `src/types/wfm.ts` (one optional field, only if unavoidable), `scripts/verify-sizing-fixes.mts` (append D67 only), `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`, rebuilt `BoWFM.html`. No engine file. No `package.json`.
+
+## Acceptance criteria and proof
+
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | Same file, same intervals on any PC | Tester's own file with `Z`, offset and epoch rows parsed under UTC, Asia/Dubai, America/New_York → identical interval start hours and days (were 08 / 12 / 03) |
+| 2 | Times read as written | `…T08:00:00+04:00` → 08:00 on the 5th in all three zones |
+| 3 | Planner is told | Warning text visible in the browser with the right count; Run stays enabled |
+| 4 | Files without markers unchanged | Three samples: same interval count / total volume as `main`; browser 31/40, 27/34, 31/39 |
+| 5 | Case/space variants are one category | `Billing`, `billing `, `BILLING` → 1 category in Settings, volume = hand sum, merge note lists variants |
+| 6 | Different words stay apart | `Bill  ing` separate |
+| 7 | Planner settings survive re-upload | Existing category keeps its name, AHT and shrinkage when the new file spells it differently |
+| 8 | Headcount effect shown | Same data as 1 category vs 3 split variants: report both recommended HC values (merged must equal the clean single-name file exactly) |
+| 9 | Backlog matches variants | Backlog row `billing` lands in `Billing`, not the fallback count |
+| 10 | Starting-values note | Listed for an untouched new category, gone after AHT is edited |
+| 11 | No regression | lint clean; `npm test` green (1,161 + new); zero console errors |
+| 12 | Mutation proof | Restore `Date.UTC` path → D67 fails under a non-UTC zone; remove `categoryKey` lower-casing → D67 fails |
+| 13 | Docs and artifact | PRD / project_context / docs 07 updated; `npm run check:artifact` passes |
+| 14 | Scope respected | `git diff <checkpoint>..HEAD --stat` lists only scope-lock files |
