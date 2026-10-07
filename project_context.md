@@ -1123,7 +1123,7 @@ requirements in `PRD.md` §11. Summary:
 | Deadline lands at an impossible time | `calendar.ts` `addWorkingTime` / `subtractWorkingTime` |
 | Siloed agents distributed oddly | `des-engine.ts` `allocateAgentsToCategories` — §6.10 |
 | CSV will not import | `csv-parser.ts` `parseCSVRaw`, `parseFlexibleDate` (no US dates) |
-| Unexpected DQ block | `csv-parser.ts` `validateDataQuality` — 14 rules |
+| Unexpected DQ block | `csv-parser.ts` `validateDataQuality` — 27 rules |
 | Categories missing or wrong | `csv-parser.ts` `discoverAndSyncCategories` |
 | A UI field's default or bounds | `App.tsx` `DEFAULT_*`, then the owning component |
 | Run button disabled | `RunFlow.tsx` pre-flight checklist (6 gates) |

@@ -5553,6 +5553,13 @@ console.log('\n--- Suite D68: input safety part 3 (file reader rules + refusal) 
     const b = legacyParseCSVRaw(t);
     assert(a.problems.length === 0 && JSON.stringify(a.headers) === JSON.stringify(b.headers) && JSON.stringify(a.rows) === JSON.stringify(b.rows) && a.delimiter === b.delimiter, 'D68.13 clean hand file (comma / semicolon / tab / CRLF / blank lines / quoted cells): zero problems and identical to the legacy reader');
   }
+  // PK-prefixed headers are valid text, not a zip signature
+  {
+    const pkc = parseCSVRaw('PK,Start,Volume\nA,2026-01-05 08:00,1\nA,2026-01-05 08:30,2');
+    const pks = parseCSVRaw('PKey;Start;Volume\nA;2026-01-05 08:00;1\nA;2026-01-05 08:30;2');
+    assert(pkc.problems.length === 0 && pkc.headers.join('|') === 'PK|Start|Volume' && pkc.rows.length === 2, 'D68.14a header starting PK (comma) loads with zero problems');
+    assert(pks.problems.length === 0 && pks.delimiter === ';' && pks.headers.join('|') === 'PKey|Start|Volume' && pks.rows.length === 2, 'D68.14b header starting PKey (semicolon) loads with delimiter ;');
+  }
 }
 
 console.log('\n==================================================');

@@ -45,7 +45,7 @@ function nameRows(lines: number[]): string {
 /**
  * Pipe is chosen only when the first line that carries any delimiter (looking at up to the first 6
  * non-blank lines) has pipes and none of comma / semicolon / tab, so a file that has a comma,
- * semicolon or tab on that line keeps the delimiter it always had.
+ * semicolon or tab on that line keeps the delimiter it always had (the one exception: a first line that contains only `|` now selects pipe).
  */
 function firstDelimiterLineIsPipe(text: string): boolean {
   let inQ = false;
@@ -94,7 +94,7 @@ export function parseCSVRaw(text: string): {
   });
 
   // E1 not readable text (NUL characters, or the "PK" signature of an Excel workbook / zip file)
-  if (text && (text.includes('\u0000') || text.startsWith('PK'))) {
+  if (text && (text.includes('\u0000') || text.startsWith('PK\u0003\u0004'))) {
     return fail(
       'E1',
       'This is not a readable text file. It looks like an Excel workbook or a file saved in an unusual encoding. In Excel use Save As → CSV UTF-8, then upload that file.'

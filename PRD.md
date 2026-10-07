@@ -274,6 +274,7 @@ Acceptance criteria are written to be testable against current behaviour.
 | 24 | Very large volume | warning | An interval volume above 100,000 (likely a misread) |
 | 25 | Timezone markers converted | warning | N timestamps (start or end, also when date and time are in separate columns) carried `Z`, a `±HH:MM` offset or were numeric epoch values. They were converted to this PC's timezone; the message names the distinct markers and the PC offset (display only) and says how to have times read as written. Epoch-only files get numeric wording. Backlog import shows the same count in its preview. Never blocking (input safety part 2, 2026-10-07) |
 | 26 | Category names merged | warning | Category spellings that differ only by letter case or spacing were merged into one category; lists each group with the spellings and row count, e.g. `"BILLING", "billing" → "Billing" (42 rows)`; up to 10 groups, then "+N more". Never blocking (input safety part 2, 2026-10-07) |
+| 27 | File reading | warning | The file reader noted a non-blocking oddity (short rows padded, duplicate header renamed, replacement characters). One issue carrying the reader's message; added only when such warnings exist; never changes pass/fail (input safety part 3) |
 
 **FR-2.3 — The DQ tab must summarise the dataset**: Total Intervals, Total Case Volume,
 Working Days in Horizon, Total Workload (hours).
