@@ -972,3 +972,22 @@ Returns, besides `headers`, `rows`, `delimiter`, a list `problems: { severity: '
 **Build A acceptance (replaces 1–8, 12 above; 9–11 move to Build B):** each bad file refused with its message in the browser AND a previously loaded session still intact afterwards (same interval count, no reset prompt); short-row file loads with warning W1 and Run allowed; duplicate header both selectable; pipe file total = hand sum; samples 31/40, 27/34, 31/39; backlog binary file refused; mutation: remove the more-cells check, and the unterminated-quote check → D68 fails each time.
 
 **Scope lock, Build A:** `src/utils/csv-parser.ts`, `src/utils/number-cell.ts` (pipe only), `src/components/DemandFlow.tsx` (both read paths, messages under the upload box and in the backlog import area), `src/App.tsx` (pick-time check before the reset prompt; warning list stored with raw rows), `src/types/wfm.ts` (optional fields only if unavoidable), `scripts/verify-sizing-fixes.mts` (append D68), `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`, rebuilt `BoWFM.html`.
+
+---
+
+# BUILD PLAN — Input safety part 3, Build B: upload traps + unmapped column named (H6 rest: UI-38, UI-39)
+
+Owner 2026-10-07: Build A approved and merged into local `main`. Cap 45% (no new agent at 44%); meter 40%. **Tier 2** (UI behaviour, no numbers). Reviewer: `tester` (browser); `auditor` if budget allows. Plan challenge: covered by the part-3 challenger (upload-trap findings a–c, acceptance 10–11), incorporated below.
+
+**Rules:**
+- B1 Same file twice: the value of the demand file input and of the backlog file input is cleared after the picked `File` object has been captured, so picking the same file again re-reads it. The settings-import input in `Sidebar.tsx` is out of scope (H10).
+- B2 Drop outside the box: one page-level effect (with cleanup) cancels `dragover` and `drop` when the event target is NOT inside a drop box and is NOT a file input, so the browser never navigates away to the dropped file. Drops on the existing drop box(es) and native drops on file inputs keep working exactly as today.
+- B3 Latest pick wins: every file read (demand and backlog) carries a sequence number; a read that finishes after a newer pick is ignored. A new pick while the "reset all data" prompt is open supersedes the pending one: the prompt then refers to the newest file only (or is closed if the newest file is refused).
+- B4 Unmapped column named (UI-39): when a file is loaded but a required column is not mapped, the Data Quality tab says which, e.g. "Choose the column for: Volume." (all missing required columns listed), instead of "Upload and map…". With no file loaded the existing text stays.
+- No change to parsing, data-quality rules, numbers or engine.
+
+**Tests:** pure logic that can be unit-tested (e.g. a small exported helper that lists missing required mappings) gets checks in a new suite D69 before the RESULTS block of `scripts/verify-sizing-fixes.mts`; the rest is proven in the browser.
+
+**Scope lock:** `src/components/DemandFlow.tsx`, `src/App.tsx`, `src/utils/csv-parser.ts` (only for a tiny pure helper, if used), `scripts/verify-sizing-fixes.mts` (append D69), `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`, rebuilt `BoWFM.html`.
+
+**Acceptance (browser, rebuilt file):** (1) after a pick, `input.value` is empty for both inputs; picking the same path twice re-reads (edit the file between picks → new content shown). (2) A `drop` and a `dragover` dispatched on `document.body` → `defaultPrevented` true and the loaded data still there; a real file drop on the drop box still loads the file. (3) Sequence: with a sample loaded, pick file A (prompt opens), pick file B → confirming loads B, never A. (4) Clear the Volume mapping → Data Quality tab names Volume. (5) Samples 40 / 34 / 39 gross, zero console errors, `npm test` green, `check:artifact` passes. (6) Only scope-lock files changed.
