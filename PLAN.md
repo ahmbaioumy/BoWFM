@@ -864,3 +864,82 @@ Owner 2026-10-07: part 1 approved and merged into local `main` (zero remaining m
 - Scope lock change: `App.tsx` = rename-list wiring in the existing sync effect only (no new parameter to the intervals memo).
 
 Status: waiting for owner decision on G3 (B recommended). Build not started. Meter 38% of 40% cap.
+
+
+---
+
+# BUILD PLAN — Input safety, part 3: messy files and missing messages (G4 + H6)
+
+Owner 2026-10-07: part 2 approved and merged into local `main`; cap raised to **45%** (hard stop; no new agent at a reading of 44%). Meter at plan time: 38%.
+
+**Task:** a damaged or wrong-type file must never load silently with shifted or lost data; every bad file gets a plain message naming the file row; small upload traps are closed.
+**End user:** the WFM planner opening `BoWFM.html` from disk.
+**Tier 2** (changed behaviour in file reading; no engine maths). Reviewers: `tester` + `auditor`; `user-side` folded into the tester brief.
+**Skills:** `wfm-engine-testing` (fail-first), `browser-automation`.
+
+## Findings covered (from FINDINGS.md)
+
+CSV-2 ragged rows and duplicate headers; CSV-3 unterminated quote; CSV-5 title row above the header; CSV-6 pipe-delimited file read as one column; CSV-7 binary / Excel file; CSV-18 messages lack file row numbers; P3-T3 empty and header-only file; UI-37/UI-39 unhelpful "Upload and map…" when a required column is unmapped; UI-38 drop outside the box loses all work, same file picked twice does nothing, two quick uploads finish out of order.
+
+## Design
+
+### Raw reader (`parseCSVRaw`, `csv-parser.ts` ~28-160)
+Returns, besides `headers`, `rows`, `delimiter`, a list `problems: { severity: 'error' | 'warning'; code; message }[]`. Pure, deterministic.
+
+| # | Case | Rule | Severity |
+|---|---|---|---|
+| R1 | Not a text file (NUL bytes, `PK` zip signature, or many control characters in the first 2,000 characters) | "This is not a text CSV file (it looks like an Excel workbook or another binary file). In Excel use Save As → CSV, then upload that file." No headers/rows returned. | error |
+| R2 | Empty file / only blank lines | "The file is empty." | error |
+| R3 | Header only, no data rows | "The file has column headers but no data rows." | error |
+| R4 | Unterminated quote | "A quotation mark opened on file row N is never closed, so the rest of the file cannot be read reliably. Close or remove the quote on that row." Rows before row N are still returned for the mapping preview. | error |
+| R5 | Row with a different number of cells than the header (after ignoring fully blank lines and ignoring EXTRA cells that are all empty) | "N row(s) have a different number of columns than the header (file rows 7, 19, …; expected 4, found 3). A delimiter is missing or extra on those rows." Up to 5 rows named. Rows are still returned as today so the preview works, but the run is blocked. | error |
+| R6 | Duplicate header names (same after trim, case-insensitive) | Later duplicates renamed `Volume (2)`, `Volume (3)`; nothing overwritten; "Two columns are both named "Volume"; the second is shown as "Volume (2)". Check the column mapping." | warning |
+| R7 | Title row above the header: first non-blank line has exactly 1 non-empty cell AND the next line has 2 or more | "The first row looks like a title, not column headers. Remove the row(s) above the header and upload again." | error |
+| R8 | Pipe-delimited file | `|` added to delimiter detection; for number reading it is treated like semicolon/tab (per-column convention from part 1). | — |
+| R9 | One column only after detection, and the header contains `,` `;` tab or `|`-like separators inside quotes, or no separator at all with 2+ data rows | "Only one column was found. The file must use comma, semicolon, tab or | between columns." | error |
+
+- File row numbers in every message are 1-based physical line numbers of the file (header = row 1), counting blank lines (CSV-18). The same numbering is used by the part-1 "Unreadable volume" rows if they differ today (builder checks; align only if it is a one-line change, otherwise report).
+
+### Showing the problems (`App.tsx`, `DemandFlow.tsx`, `csv-parser.ts` `validateDataQuality`)
+- Errors R1–R5, R7, R9: shown at once under the upload box in a red message; also carried into data quality as blocking issues, so Run is disabled and the Data Quality tab names the reason. For R1–R3, R7, R9 the mapping step is not shown.
+- Warning R6: shown under the upload box and in data quality; not blocking.
+- Same reader and messages for the backlog file (`readWipFile`): errors shown in the backlog import area; Append / Replace disabled.
+- UI-39: when a file is loaded but a required column is not mapped, the Data Quality tab says which: "Choose the column for: Volume." instead of "Upload and map…".
+
+### Upload traps (`DemandFlow.tsx`, `App.tsx`)
+- File input value cleared after every pick, so picking the same file again re-reads it (demand and backlog inputs).
+- Page-level guard: `dragover` / `drop` outside the drop box are cancelled (`preventDefault`) so the browser does not navigate away and lose the session. Registered in one effect with cleanup.
+- Out-of-order reads: each read carries a sequence number; a result older than the latest pick is ignored.
+
+## Steps (builder `sonnet-executor`, fail-first, token-economical)
+
+1. Tests first — suite **D68** before the RESULTS block of `scripts/verify-sizing-fixes.mts`: one fixture per rule R1–R9 with the exact expected severity, code and the row numbers named; ragged row with only extra EMPTY cells → no problem; quoted cell containing the delimiter or a line break → no problem; duplicate headers → both columns readable, values not overwritten; pipe file → correct columns and total volume = hand sum; three built-in samples → zero problems and identical headers/rows as before; a clean comma, semicolon and tab file → zero problems; a problem of severity error makes `validateDataQuality` blocking; R6 does not.
+2. `csv-parser.ts`: reader rules and data-quality carry-through.
+3. `App.tsx` / `DemandFlow.tsx`: messages, UI-39 text, input reset, drop guard, sequence guard; backlog path.
+4. `npm run lint`, `npm run build:standalone`, `npm test` once.
+5. Docs: `PRD.md` (file-reading rules, data-quality table, delimiter list incl. `|`, version bump), `project_context.md` (§11 recently fixed; rule count), `docs/wfm/07` entry.
+
+## Scope lock
+
+`src/utils/csv-parser.ts`, `src/utils/number-cell.ts` (pipe delimiter treated like semicolon — only if needed), `src/utils/wip-import.ts` (only if needed to pass problems through), `src/components/DemandFlow.tsx` (upload box, backlog import area, Data Quality empty-state text), `src/App.tsx` (problem state, sequence guard, drop guard), `src/types/wfm.ts` (optional fields only if unavoidable), `scripts/verify-sizing-fixes.mts` (append D68 only), `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`, rebuilt `BoWFM.html`. No engine file, no `package.json`.
+
+## Acceptance criteria and proof
+
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | Excel / binary file is refused in plain words | Browser: upload a real `.xlsx` → message R1 visible, no garbage in mapping dropdowns, Run disabled |
+| 2 | Empty and header-only files | Browser: each → its message; Run disabled |
+| 3 | Missing delimiter on one row | File with one short row → error names that file row and expected/found counts; Run disabled; the same file repaired → runs |
+| 4 | Unclosed quote | Category `5" screen` unquoted mid-file → error naming the row; old behaviour (1 row loaded silently) gone |
+| 5 | Duplicate header | Two `Volume` columns → both selectable in mapping, values of the first not overwritten, warning shown, Run allowed |
+| 6 | Title row | BI-style title line above the header → message R7 |
+| 7 | Pipe file | Loads with correct columns; total volume = tester hand sum |
+| 8 | Good files unchanged | Three samples and a quoted-comma / embedded-newline file → zero problems; browser 31/40, 27/34, 31/39 |
+| 9 | Unmapped column named | Clear the Volume mapping → Data Quality tab names Volume |
+| 10 | Same file twice | Pick file, fix it on disk (or pick again) → it is re-read (change event fires) |
+| 11 | Drop outside the box | Dispatch a `drop` event on the page body → `defaultPrevented` true, page still loaded with data |
+| 12 | Backlog file | Binary and ragged backlog files → message in the import area, Append / Replace disabled |
+| 13 | No regression | lint clean; `npm test` green (1,191 + new); zero console errors |
+| 14 | Mutation proof | Remove the cell-count check and the unterminated-quote check in a scratch copy → D68 fails each time |
+| 15 | Docs and artifact | PRD / project_context / docs 07 updated; `npm run check:artifact` passes |
+| 16 | Scope respected | `git diff <checkpoint>..HEAD --stat` lists only scope-lock files |
