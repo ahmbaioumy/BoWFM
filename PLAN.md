@@ -741,3 +741,30 @@ New `src/utils/number-cell.ts` (helper) and `src/utils/wip-import.ts` (pure back
 | 6 | Screen | Browser: backlog import preview shows the summary before Append; corrected date sentence |
 | 7 | Mutation proof | Replace the strict reader with `parseFloat` in a scratch copy: new tests fail |
 | 8 | Gates, docs, artifact, scope | lint, `npm test`, `check:artifact` green; docs updated; diff only scope-lock files |
+
+## Input safety part 1 — challenger verdict: FAIL (accepted). FINAL rules below override rules 1-4, the scope lock and the criteria above where they differ.
+
+What the challenger found in the real code: the delimiter is discarded by `parseCSVRaw` (`csv-parser.ts:30-65`) and never reaches the volume parse (`:560`, called from `App.tsx:134`, `:190`, `:225`); today volume cells are cleaned with `replace(/[\s$,]/g, "")` then `parseFloat` (`:610-611`), so a quoted `"1,234"` in a comma file is correctly 1234 today — my rule 2 would have blocked it; the existing invalid-volume issue is only a WARNING naming the first row (`:863-870`); the engine rounds each interval volume (`des-engine.ts:636`).
+
+**Number rules (final; owner principle: read it when it is clear, block it when it is not):**
+- Cleaning kept from today: surrounding spaces, inner spaces and one leading currency symbol are ignored. Then the cell must be digits with optional separators and an optional leading minus. Units, letters, exponents, hex: unreadable.
+- **Comma-delimited file:** dot = decimal. A comma is accepted only as a thousands separator in the strict pattern `1,234` / `12,345,678` (optionally followed by `.dd`). Any other comma: unreadable.
+- **Semicolon or tab file:** the convention is decided per COLUMN. A cell like `12,5` or `8,25` (comma not followed by exactly 3 digits) proves comma-decimal; a cell like `12.5` proves dot-decimal; `1.234,5` proves comma-decimal; `1,234.5` proves dot-decimal. With comma-decimal, a dot is thousands only in the strict pattern. Both conventions proven in one column: blocking error "mixed number formats". Cells of the form `1.234` or `1,234` (1-3 digits, one separator, exactly 3 digits, integer part not 0) are AMBIGUOUS: they follow the proven convention of the column; if nothing in the column proves a convention: blocking error naming the rows and both possible readings.
+- **Unreadable or ambiguous volume:** new ERROR-severity data-quality issue "Unreadable volume" naming up to 5 file rows with the cell text; the stored volume for such a cell is 0 so nothing half-parsed can reach the engine. The old warning text about stripped separators is rewritten.
+- **Fractional volumes:** new warning when any volume is not a whole number: "the simulation rounds each interval to whole cases" (existing limitation L1). Criterion 1 proves the DISPLAYED total (31.25); the engine input is the rounded per-interval values, stated in the PRD.
+- Large-value warnings: interval volume above 100,000 (no real 30-minute interval is that large); backlog remaining minutes above 100,000 (about 69 days of work on one case) treated as unreadable.
+
+**Plumbing:** `parseCSVRaw` also returns the detected `delimiter`; `App.tsx` keeps it beside the raw rows and passes it to `mapRawRecordsToIntervals` (new optional parameter, default comma, so existing callers and tests behave as before); `DemandFlow.tsx` `readWipFile` keeps the backlog file delimiter the same way.
+
+**Backlog import (final):** as rule 4 above, plus: the pure function takes the default arrival as a parameter (no clock read inside; the caller passes what it uses today, so preview and apply agree); ids, row order and skipped invalid-date rows exactly as today; **when more than 20% of the rows, or more than 50 rows, were moved to the fallback category, Append stays disabled until the planner ticks "I understand these rows will be imported under <category>"**.
+
+**Scope lock — extended:** also `src/App.tsx` (keeping and passing the delimiter: the three call sites and one piece of state only).
+
+**Criteria — changed / added:**
+
+| # | Criterion | Proof |
+|---|---|---|
+| 2 | Unclear numbers blocked, clear ones kept | Comma file: quoted `1,234` reads 1234 (as today); quoted `12,5`, `30 min`, `12abc`, `1e9` block naming rows. Semicolon file: `12,5` reads 12.5; column with only `1.234` values blocks as ambiguous naming both readings; column with `1.234` and `12,5` reads 1234 and 12.5; column mixing `12,5` and `12.5` blocks as mixed |
+| 3b | Currency and spaces as today | `$1200` and ` 7 ` read 1200 and 7 |
+| 9 | Fractional volume warning | File with 12.5: warning shown; whole-number files: none |
+| 10 | Mass fallback needs confirmation | Backlog file where 30% of rows have an unknown category: Append disabled until ticked; 5%: enabled |
