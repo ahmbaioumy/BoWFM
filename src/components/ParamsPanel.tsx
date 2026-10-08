@@ -152,7 +152,7 @@ export function ParamsPanel({
               <span className="font-mono font-semibold">{Math.round(adherence * 100)}%</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-slate-400">DES Present Hours / Day:</span>
+              <span className="text-slate-400">Productive Hours Available / Day:</span>
               <span className="font-mono font-semibold text-emerald-400">
                 {presentDailyHours.toFixed(2)}h
               </span>

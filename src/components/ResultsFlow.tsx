@@ -229,6 +229,10 @@ function ResultsFlowBody({
     !Object.values(des.shiftDistributionUsed ?? {}).some((d) =>
       d.slaps.some((s) => s.startMinutesFromOpen > 0 && s.agentCount > 0)
     );
+  const singleShiftRemedy =
+    sla.minCoverageEnabled === false
+      ? 'Turn the Minimum Coverage Floor on or enable Shift Placement (Labor & Config)'
+      : 'Enable Shift Placement (Labor & Config)';
   const primaryHC = searchOutput.primaryDrivenHC || searchOutput.recommendedHC || staffing.operationalHC;
   const primaryStats = searchOutput.primaryStatistical;
   const siloed = searchOutput.queueArchitecture === 'siloed';
@@ -543,15 +547,20 @@ function ResultsFlowBody({
                   <h3 className="text-base font-black text-rose-950">
                     Could not satisfy Primary SLA within the Headcount Search Cap
                   </h3>
-                  <p className="text-xs text-rose-800 leading-relaxed">
-                    {searchOutput.infeasibleReason ||
-                      'The simulation engine tested multiple candidate headcounts up to the search cap, but constraints could not be met.'}
-                  </p>
                   {singleShiftNoLateStarts && (
                     <p className="text-xs text-rose-900 leading-relaxed font-semibold" data-testid="single-shift-infeasible-note">
-                      Raising the headcount cap will not help here: every agent starts at opening time and leaves after their daily productive hours, so work arriving later waits until the next day whatever the headcount. Turn the Minimum Coverage Floor on or enable Shift Placement (Labor &amp; Config), or lengthen the SLA window.
+                      Raising the headcount cap will not help here: every agent starts at opening time and leaves after their daily productive hours, so work arriving later waits until the next day whatever the headcount. {singleShiftRemedy}, or lengthen the SLA window.
                     </p>
                   )}
+                  <p className="text-xs text-rose-800 leading-relaxed">
+                    {(singleShiftNoLateStarts
+                      ? searchOutput.infeasibleReason?.replace(
+                          /\s*Increase userMaxHC or (?:adjust volume \/ AHT assumptions|review SLA\/labor parameters)\.\s*$/,
+                          ''
+                        )
+                      : searchOutput.infeasibleReason) ||
+                      'The simulation engine tested multiple candidate headcounts up to the search cap, but constraints could not be met.'}
+                  </p>
                 </div>
               </div>
             </div>
@@ -651,7 +660,7 @@ function ResultsFlowBody({
               className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 leading-relaxed"
               data-testid="single-shift-note"
             >
-              Every agent in this result starts at opening time and leaves after their daily productive hours, so later business hours have no one on shift. That raises the headcount needed. To staff later hours, turn the Minimum Coverage Floor on or enable Shift Placement (Labor &amp; Config). Results saved with version 1.20 or earlier assumed agents stayed until closing and will differ.
+              Every agent in this result starts at opening time and leaves after their daily productive hours, so later business hours have no one on shift. That can raise the headcount needed. To staff later hours, {sla.minCoverageEnabled === false ? 'turn the Minimum Coverage Floor on or enable' : 'enable'} Shift Placement (Labor &amp; Config). Results from version 1.20 or earlier (including exported files) assumed agents stayed until closing and will differ.
             </div>
           )}
 

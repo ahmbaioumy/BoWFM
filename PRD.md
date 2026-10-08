@@ -302,7 +302,7 @@ on the Run pre-flight screen.
 | **FR-4.1** | Scheduled Daily Productive Hours | 1–24, step 0.1 | **7.5** |
 | **FR-4.2** | Schedule Adherence % | 10–100, shown and stored to one decimal (e.g. 92.5 → 0.925) | **100%** |
 | **FR-4.3** | Working Days per Week | 1–7 | **5** (auto-sets off-days = 7 − value) |
-| **FR-4.4** | DES Present Hours / Day | read-only | `dailyProductiveHours × adherence` |
+| **FR-4.4** | Productive Hours Available / Day | read-only | `dailyProductiveHours × adherence` |
 | **FR-4.5** | Agent hours for Workload HC | `Derived (Horizon Default)` or `Manual Override` | **Derived**; override default **0** (ignored until user enters hours &gt; 0) |
 
 **FR-4.7 — Fair agent assignment (Labor tab, one button, default ON).** Decides *which idle
@@ -564,12 +564,14 @@ now 0. **Data edits are flagged too (2026-10-07, G6 + H9).** The run also keeps 
 (infeasibility banner first when present; otherwise the Dual Sizing banner leads):
 1. An **infeasibility banner** when no headcount within the search cap satisfies the
    constraints, carrying the reason. When the final run is a single shift with no later starts on
-   a business day longer than the productive hours (not 24×7), the banner adds: *"Raising the
-   headcount cap will not help here: every agent starts at opening time and leaves after their daily
-   productive hours, so work arriving later waits until the next day whatever the headcount. Turn
-   the Minimum Coverage Floor on or enable Shift Placement (Labor & Config), or lengthen the SLA
-   window."* (`singleShiftNoLateStarts`, `ResultsFlow.tsx`; the `infeasibleReason` text itself is
-   unchanged.)
+   a business day longer than the productive hours (not 24×7), the banner shows, above the reason,
+   *"Raising the headcount cap will not help here: every agent starts at opening time and leaves after
+   their daily productive hours, so work arriving later waits until the next day whatever the
+   headcount. Turn the Minimum Coverage Floor on or enable Shift Placement (Labor & Config), or
+   lengthen the SLA window."* (with the floor already on: *"Enable Shift Placement (Labor & Config),
+   or lengthen the SLA window."*). In that case only, the displayed reason has its trailing
+   "Increase userMaxHC or ..." advice sentence removed at render time (`singleShiftNoLateStarts`,
+   `ResultsFlow.tsx`; the engine's `infeasibleReason` is unchanged; other banners render as before.)
 2. A **Dual Sizing Engine Verified** headline banner with two headline figures:
    **Net Operational HC** (post-DES seats after the **extra OFF roster uplift** — see Stage 4;
    subtitle `X% OFF → +Y% roster uplift` where X is the net extra OFF display fraction and Y is
@@ -581,10 +583,10 @@ now 0. **Data edits are flagged too (2026-10-07, G6 + H9).** The run also keeps 
    (Headline Hiring FTE / M4 is temporarily hidden — see §11.) When the same
    `singleShiftNoLateStarts` condition holds on a feasible result, one amber note follows the
    banner: *"Every agent in this result starts at opening time and leaves after their daily
-   productive hours, so later business hours have no one on shift. That raises the headcount
+   productive hours, so later business hours have no one on shift. That can raise the headcount
    needed. To staff later hours, turn the Minimum Coverage Floor on or enable Shift Placement
-   (Labor & Config). Results saved with version 1.20 or earlier assumed agents stayed until closing
-   and will differ."* Condition: calendar not 24×7, business day longer than
+   (Labor & Config). Results from version 1.20 or earlier (including exported files) assumed agents
+   stayed until closing and will differ."* (with the floor already on, "enable Shift Placement" only.) Condition: calendar not 24×7, business day longer than
    `labor.dailyProductiveHours`, and the final run's `shiftDistributionUsed` absent or with every
    start at offset 0.
 3. A **Backoffice DES Sizing Engine** record card (mirrors the completed Run progress modal):
