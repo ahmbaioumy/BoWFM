@@ -161,7 +161,7 @@ export interface AgentAnalytics {
   lateWindowMin: number;
   earliestCohortStart: string | null;
   filter: Required<AgentAnalyticsFilter>;
-  /** The run used fixed shifts (Shift Placement on, or the coverage-repair stagger): every agent works a fixed shift from their own start. */
+  /** The run used fixed shifts: every agent works a shift of dailyProductiveHours from their own start and then leaves (a start distribution was passed, or the calendar is not 24x7). False only for 24x7 without a distribution, where agents stay available all day. */
   staggered: boolean;
   /** Dates in `dates` after the last day of data (leftover work cleared on a part-day). Empty when none are in range. */
   drainDates: string[];
@@ -423,8 +423,9 @@ export function computeAgentAnalytics(input: {
 
   // ---- Rows -------------------------------------------------------------------------------
   const prodMin = labor.dailyProductiveHours * 60;
-  // A shiftDistribution was passed: every agent works a fixed shift of prodMin from their own start.
-  const staggered = !!des.shiftDistributionUsed;
+  // Fixed shifts: every agent works a shift of prodMin from their own start (a distribution was passed, or the
+  // calendar is not 24x7). Falls back to the distribution echo for results built before fixedShifts existed.
+  const staggered = des.fixedShifts ?? !!des.shiftDistributionUsed;
   const rows: AgentAnalyticsRow[] = [];
   const keptIds: number[] = [];
   for (let id = 0; id < hc; id++) {

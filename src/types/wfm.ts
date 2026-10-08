@@ -478,6 +478,15 @@ export interface DESResult {
   shiftDistributionUsed?: ShiftDistributionByCategory;
 
   /**
+   * True when the run used fixed shifts: every agent is on the floor for dailyProductiveHours from
+   * their own start offset and leaves at the end of it. On whenever a shiftDistribution was passed
+   * or the calendar is not 24x7 (with no distribution every agent is at offset 0 — one shift from
+   * opening). False only for 24x7 without a distribution (agents stay available all day) and for
+   * zero headcount. Optional so results built before this field existed still type-check.
+   */
+  fixedShifts?: boolean;
+
+  /**
    * Assignments made to an agent that was still processing another case. Must always be 0 — an
    * agent works one case at a time. Tracked in every mode, gated replications included.
    */
