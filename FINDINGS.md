@@ -1063,3 +1063,23 @@ Passed with evidence: tester (all criteria; planner file 47 with coverage on, 48
 | E-6 minors | Fixed: 24x7 qualifiers, "byte-for-byte", repair-stagger clause, "DES" label (ConfigFlow and ParamsPanel), stale history pointers. Left: D71.7c is a constructed CI-gate case; boundary rationale does not name the failing category |
 
 Round 1 recheck: tester pass (8/8, zero console errors, 47 and 48 unchanged); user-side fail on one major (banner contradiction) → fixed in round 2 with floor-dependent remedy wording. Round 2 verified by gates (lint, 1,331 checks, artifact fresh) and page load; no further browser run of the infeasible banner after round 2. Rework cap (2) reached.
+
+---
+
+# FINDINGS — Search rescue ladder for Shift Placement (P1-6 / L23) (2026-10-08)
+
+Checkpoint `7ad848f`; build `23973f6` (PRD 1.22.0). Reviewers this round: tester + auditor (user-side and final challenger skipped at the planner's request to speed up; the plan itself was challenged before build).
+
+Plan challenge (before build): fail → amended. Major: a rescued headcount could be a one-seed hairline pass (support sample 27: 7 of 21 fresh seeds) → confirmation block added. Major: ~45 pins would lose their scenario → replacement suite D73 required.
+
+Tester: pass, all criteria ran. Planner's own config 47, full result identical (0 differing fields). Coverage OFF + placement ON 48 → 47, roster `0:35 300:12`, passes 20/20 fresh seeds (pre-change 48 roster: 3/20). Nothing passes at 46 on any rung on three blocks. Shift Placement OFF: 6 results identical. D33 22 → 21; support stays 27 / 28. sync ≡ async; repeat run identical. Real page: both runs clean, zero console errors.
+Auditor: pass. Only the 45 approved assertions changed; D73 covers all four polish paths; sync and async loops differ only in await/cancel/progress; acceptance always full R on both blocks with the unmodified gate; no frozen decision touched; lint, 1,493 checks, artifact fresh.
+
+| ID | Severity | Finding | Status |
+|---|---|---|---|
+| S-1 | minor | Run cost when the ladder finds nothing: support sample coverage OFF 327 → 677 simulations (+107%); planner +8% / +14% | Accepted; help text says runs can take longer |
+| S-2 | minor | No cancel-mid-ladder test (safe by inspection) | Backlog |
+| S-3 | minor | Code comments cite "PRD P1-6 / L23", now removed from the PRD (still resolvable via docs/wfm/07) | Backlog |
+| S-4 | minor | "Phase 3: Roster Coverage Polish" message static ~50 s in the page; not touched by this change, not compared with the old page | Backlog |
+| S-5 | info | Existing weaknesses logged as PRD L24 / P1-7 (polish hairline margin) and L25 / P1-8 (thin-category gate) | Open, owner decision |
+| S-6 | info | `npm run test:audit` still differs in the 4 WA cells (from P2-9); PON cells identical; baseline not regenerated | Open, owner decision |
