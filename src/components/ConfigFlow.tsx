@@ -121,7 +121,8 @@ export function ConfigFlow({
                   className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-slate-400 font-mono font-medium"
                 />
                 <span className="text-[11px] text-slate-400 block">
-                  Scheduled productive capacity (excluding offline breaks).
+                  Scheduled productive capacity (excluding offline breaks). On a business with opening
+                  hours, each agent is on shift for this many hours from their start, then leaves.
                 </span>
               </div>
 
@@ -145,7 +146,8 @@ export function ConfigFlow({
                   <span className="text-xs text-slate-500 font-mono">%</span>
                 </div>
                 <span className="text-[11px] text-slate-400 block">
-                  Default 100%. DES present hours = daily × adherence.
+                  Default 100%. Adherence reduces the work an agent can do in a day; the shift length
+                  stays the same.
                 </span>
               </div>
 
@@ -175,7 +177,7 @@ export function ConfigFlow({
               {/* DES Present Capacity Confirmation */}
               <div className="space-y-1 bg-slate-50 p-3 rounded-lg border border-slate-200">
                 <span className="text-xs font-semibold text-slate-700 block">
-                  DES Present Hours / Day
+                  Productive Hours Available / Day
                 </span>
                 <div className="text-lg font-bold font-mono text-emerald-700">
                   {presentHoursPerDay.toFixed(2)} hrs/day
@@ -199,7 +201,8 @@ export function ConfigFlow({
                   daily business window ({dailyWindow}h). On a business day longer than the daily productive
                   hours, later hours are staffed only if minimum coverage or Shift Placement gives some agents
                   later starts. A business entered as 00:00–24:00 without the 24x7 option counts as having
-                  opening hours: every agent works one shift from 00:00.
+                  opening hours: every agent works one shift from 00:00. For a business that never
+                  closes, tick 24x7.
                 </span>
               </div>
               <span
@@ -323,9 +326,9 @@ export function ConfigFlow({
                   a uniform business-open start may be rescued by a staggered shift-start distribution,
                   used only when it verifiably passes; (2) once Req HC is fixed, the roster is re-spread
                   across business hours for the best coverage and adopted only if every SLA, occupancy
-                  and coverage gate still passes at the same headcount. Headcount never changes; the SLA
-                  margin may shrink but stays at or above target. Off by default — leaves every result
-                  byte-for-byte unchanged.
+                  and coverage gate still passes at the same headcount. Off by default. Turning it on
+                  can only keep or lower the recommended headcount, never raise it; the SLA margin may
+                  shrink but stays at or above target.
                 </p>
               </div>
 
@@ -388,7 +391,8 @@ export function ConfigFlow({
               </div>
             ) : (
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-600">
-                Every agent starts one shift at business open (plus the minimal coverage-repair stagger),
+                Every agent starts one shift at business open (and, when the Minimum Coverage Floor is on,
+                a minimal number of agents start later so the business is never unattended),
                 and each agent's shift ends after the daily productive hours, counted from their start.
                 Enabling placement also re-spreads the roster across business hours after Req HC is
                 fixed — headcount is never changed by it.
@@ -1078,13 +1082,20 @@ export function ConfigFlow({
                   </label>
                 </div>
                 <span className="text-[11px] text-slate-500">
-                  The queue may never be left with fewer than this many agents on shift while the
-                  business is open. On by default at 1 — the recommendation is only ever raised if no
-                  redistribution at the current headcount can satisfy this. Off = no floor. With the
-                  floor off and no placed start times, every agent works one shift from opening time and
-                  leaves when it ends, so later hours are unstaffed. Turning the floor off does not lower
-                  headcount: it can raise it, or make a short SLA unreachable.
+                  On: the queue is never left with fewer than this many agents on shift while the
+                  business is open. On by default at 1 — the recommendation is only raised if no
+                  redistribution at the current headcount can satisfy this. Off: no floor.
                 </span>
+                {sla.minCoverageEnabled === false && (
+                  <div
+                    className="mt-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 leading-relaxed"
+                    data-testid="coverage-floor-off-note"
+                  >
+                    {calendar.is24x7
+                      ? 'Coverage floor is off: nothing checks that agents are on shift while the business is open. (This is not the Workload Floor switch.)'
+                      : 'Coverage floor is off. This does not lower headcount: with no later starts, every agent works one shift from opening time and leaves when it ends, so later hours are unstaffed. Headcount can go up, and a short SLA can become unreachable at any headcount. (This is not the Workload Floor switch.)'}
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-2">

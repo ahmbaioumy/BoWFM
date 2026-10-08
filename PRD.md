@@ -302,7 +302,7 @@ on the Run pre-flight screen.
 | **FR-4.1** | Scheduled Daily Productive Hours | 1–24, step 0.1 | **7.5** |
 | **FR-4.2** | Schedule Adherence % | 10–100, shown and stored to one decimal (e.g. 92.5 → 0.925) | **100%** |
 | **FR-4.3** | Working Days per Week | 1–7 | **5** (auto-sets off-days = 7 − value) |
-| **FR-4.4** | DES Present Hours / Day | read-only | `dailyProductiveHours × adherence` |
+| **FR-4.4** | Productive Hours Available / Day | read-only | `dailyProductiveHours × adherence` |
 | **FR-4.5** | Agent hours for Workload HC | `Derived (Horizon Default)` or `Manual Override` | **Derived**; override default **0** (ignored until user enters hours &gt; 0) |
 
 **FR-4.7 — Fair agent assignment (Labor tab, one button, default ON).** Decides *which idle
@@ -385,6 +385,15 @@ tail of the window at zero coverage regardless of headcount (Stage 3a's original
 statement) — but coverage had never been an enforced constraint until now, only a
 side-effect Stage 3a's optimizer might or might not fix. Results show a "Minimum Coverage"
 card next to the Occupancy card when enabled.
+**As-built Labor-page text (1.21.0 rework).** While the switch is OFF, a separate amber note sits
+directly under the control, visible without hovering: with no later starts every agent works one
+shift from opening time and leaves when it ends (clause omitted on a 24×7 calendar, where the note
+only says nothing checks on-shift cover), so headcount can go UP and a short SLA can become
+unreachable at any headcount; it also says this is not the Workload Floor switch. The grey help
+leads with what ON does. The Shift Placement help says placement can only keep or lower the
+recommended headcount, never raise it, and the off-state note names the coverage-repair starts as
+present only when the Minimum Coverage Floor is on. The Calendar panel carries a one-line hint next
+to the 00:00–24:00 preset: tick 24x7 for a business that never closes.
 
 **Coverage definition (as-built, 1.12.0 / C6).** An agent is *present* for coverage iff the
 sample instant lies inside its **own shift window** on a working day:
@@ -554,7 +563,15 @@ now 0. **Data edits are flagged too (2026-10-07, G6 + H9).** The run also keeps 
 **FR-9.1 — Summary tab** must present the following sections **in this top-to-bottom order**
 (infeasibility banner first when present; otherwise the Dual Sizing banner leads):
 1. An **infeasibility banner** when no headcount within the search cap satisfies the
-   constraints, carrying the reason.
+   constraints, carrying the reason. When the final run is a single shift with no later starts on
+   a business day longer than the productive hours (not 24×7), the banner shows, above the reason,
+   *"Raising the headcount cap will not help here: every agent starts at opening time and leaves after
+   their daily productive hours, so work arriving later waits until the next day whatever the
+   headcount. Turn the Minimum Coverage Floor on or enable Shift Placement (Labor & Config), or
+   lengthen the SLA window."* (with the floor already on: *"Enable Shift Placement (Labor & Config),
+   or lengthen the SLA window."*). In that case only, the displayed reason has its trailing
+   "Increase userMaxHC or ..." advice sentence removed at render time (`singleShiftNoLateStarts`,
+   `ResultsFlow.tsx`; the engine's `infeasibleReason` is unchanged; other banners render as before.)
 2. A **Dual Sizing Engine Verified** headline banner with two headline figures:
    **Net Operational HC** (post-DES seats after the **extra OFF roster uplift** — see Stage 4;
    subtitle `X% OFF → +Y% roster uplift` where X is the net extra OFF display fraction and Y is
@@ -563,7 +580,15 @@ now 0. **Data edits are flagged too (2026-10-07, G6 + H9).** The run also keeps 
    **Pooled Gross HC (M2)**; plus a
    **planner sizing strip**: Workload HC → SLA on-duty HC (simulator seats, pre-OFF, with delta
    and % vs workload) → Hire after shrinkage. Binding-constraint caption remains on this banner.
-   (Headline Hiring FTE / M4 is temporarily hidden — see §11.)
+   (Headline Hiring FTE / M4 is temporarily hidden — see §11.) When the same
+   `singleShiftNoLateStarts` condition holds on a feasible result, one amber note follows the
+   banner: *"Every agent in this result starts at opening time and leaves after their daily
+   productive hours, so later business hours have no one on shift. That can raise the headcount
+   needed. To staff later hours, turn the Minimum Coverage Floor on or enable Shift Placement
+   (Labor & Config). Results from version 1.20 or earlier (including exported files) assumed agents
+   stayed until closing and will differ."* (with the floor already on, "enable Shift Placement" only.) Condition: calendar not 24×7, business day longer than
+   `labor.dailyProductiveHours`, and the final run's `shiftDistributionUsed` absent or with every
+   start at offset 0.
 3. A **Backoffice DES Sizing Engine** record card (mirrors the completed Run progress modal):
    completion status, recommended HC, analytical lower bound (`N_min`), evaluated step count,
    and the headcount candidate evaluation feed (`searchHistory`: tested HC, Primary SLA,
@@ -858,15 +883,20 @@ Measured effects (same seeds):
   pins (12 / 9) are unchanged. Only the "one fewer agent" evidence block moves: it used to run with
   no shift end and contradicted the search (planner file: 46 agents shown passing at 83.3% while
   the search rejected 46 at 77.2%); it now shows 76.7%, a fail, in agreement with the search.
-- Minimum coverage OFF: the recommendation rises, because one shift from opening leaves the evening
-  unstaffed — planner file 46 → 48; D33 fixture (08:00–22:00, 9 h) 21 → 28; support pooled
+- Minimum coverage OFF: the recommendation rises. With Shift Placement also OFF the cause is "no later
+  starts": one shift from opening leaves the evening unstaffed — planner file 46 → 48; D33 fixture (08:00–22:00, 9 h) 21 → 28; support pooled
   23 → 28; healthcare pooled 28 → 31 and siloed 25 → 27. It can now exceed the coverage-ON figure
   (D33: 28 vs 22; support 28 vs 27; planner 48 vs 47), since coverage ON forces a late starter that
   serves the evening.
+- Minimum coverage OFF **and** Shift Placement ON is different, and that explanation does not hold
+  there. Measured on the planner file: the search recommends 48 although 47 passes every gate with
+  placed starts (32 agents at opening + 15 starting five hours later, CI lower bound 80.8%); the
+  placement builder does not try that roster before rejecting 47 (§10 L23, §11 P1-6).
 - A short SLA can become unreachable with a single shift: the D52 fixture (08:00–20:00, 8 h) plateaus
   at 95.2% attainment at every headcount up to 60, because cases arriving just before shift end
   wait until the next morning.
-- Saved results and screenshots from earlier versions will not reproduce in these cases.
+- Saved results and screenshots from earlier versions will not reproduce in these cases. Results now
+  say so on screen (FR-9.1) and the Labor page warns when the coverage floor is off (FR-5.12).
 
 **24×7 parked work resumes when capacity exists (DES-8, 1.17.0, 2026-10-06).** On a 24×7
 calendar a case parked because its agent ran out of daily productive time used to sit in the
@@ -1212,6 +1242,8 @@ comment. Nothing else.
 | `scripts/audit-compare.mts` (`npm run test:audit`, opt-in, ~30 min) | 24 cells | Re-runs all four `test_files/` samples × 6 settings and fails on any difference from `docs/audit/sample-hc-after-2026-09-30.jsonl` |
 | `scripts/check-artifact-freshness.mts` | gate | Fails if `BoWFM.html` is missing or older than shippable sources (`npm run check:artifact`) |
 
+Known difference (2026-10-08, 1.21.0, P2-9): since 1.21.0 the baseline `docs/audit/sample-hc-after-2026-09-30.jsonl` differs in the 4 infeasible Wall Clock + Arrival (WA) cells, `slaPct` only (AJM_Only 46 -> 32.6, AJM_Simu 45.4 -> 30.2, EGS_Only - With Reduction 45.3 -> 29.9, EGS_Only 45.4 -> 29.8), because the failing uniform audit run now has a shift end. The baseline has not been regenerated pending owner approval, so `npm run test:audit` exits 1 on those 4 cells; no recommended headcount differs.
+
 Run with `npm test`: four suites (`verify-fixes`, `verify-sizing-fixes`, `verify-agent-analytics`, `verify-trusted-source`) followed by the freshness gate. No test framework is used — that would breach NFR-2.1; the suites use a
 plain assert helper.
 
@@ -1280,6 +1312,7 @@ Behaviours a user must understand to interpret results correctly.
 | **L20** | **Agent Analytics "Scheduled (min)" runs to the end of each day for a 24×7 run without placed start times** (1.20.3; narrowed in 1.21.0). Every run whose business has opening and closing hours now has a shift end, so Scheduled is the agent's own shift there. Only a 24×7 run with no start distribution keeps agents on around the clock, so Scheduled runs to the end of each day and Utilisation reads low when the day is longer than the productive hours (e.g. 33% against 41-45% occupancy on a full day of the 4-agent, 8-productive-hour fixture AA.46). The panel and the export state this (amber note, Notes section); the number itself is unchanged. A part-day after the data ends keeps the minutes actually on shift (it is labelled, not scaled to a full shift). | Display only; sizing, recommended HC and Results occupancy are unaffected. Place start times (Shift Placement or minimum coverage) to get per-shift utilisation; read occupancy (busy / available) when the pill says "Shifts: around the clock". |
 | **L21** | **24×7 runs without placed start times keep agents on around the clock** (1.21.0, P2-9 left this case on the old model by decision). The simulator has no shift end there: an agent is limited only by the daily productive time and the midnight spill-over rules. With minimum coverage on, the coverage-repair stagger usually places starts, so this mostly affects 24×7 runs with the floor off or a headcount too small to stagger. | Recommended headcount for those runs can be lower than a real roster would need. Turn minimum coverage on or enable Shift Placement to get fixed shifts on a 24×7 calendar. |
 | **L22** | **A business entered as 00:00–24:00 without the 24×7 option gets one shift from 00:00** (1.21.0). It counts as having opening hours, so every agent works one shift of the daily productive hours from 00:00 and the rest of the day is unstaffed unless minimum coverage or Shift Placement gives some agents later starts. Tick the 24×7 option for a round-the-clock business. | The Capacity Basis note on the Labor page says so. Headcount for such a business can be higher than for the same business entered as 24×7. |
+| **L23** | **With Shift Placement ON and the coverage floor OFF the search can recommend one agent more than needed** (1.21.0 review E-1). Planner file (`EGS_Only.csv`): recommends 48, although 47 passes every gate with placed starts (32 agents at opening + 15 starting five hours later, CI lower bound 80.8%). The placement builder (`hc-search.ts`) never tries that roster and the walk stops at the first failure. A search weakness, not a physical limit. | Headcount can be one higher than necessary in that combination (coverage floor ON gives 47). Backlog: §11 P1-6 (a search change, needs approval). |
 
 ---
 
@@ -1305,7 +1338,9 @@ explains.*
 mandatory coverage floor, not just the L13 caveat.** A 2026-08-28 audit (prompted by a
 customer-reported zero-agent-interval symptom, since traced to the display bug fixed in
 FR-9.5 above — the underlying scheduling was not at fault in that case) found:
-(a) the DES never enforces a shift END — an agent stays available until business close no
+(a) [Resolved for non-24×7 runs in 1.21.0, 2026-10-08 (P2-9): every agent now leaves
+`dailyProductiveHours` after their start, with or without a start distribution; see Stage 3a. Text
+below is the 2026-08-28 finding as written.] the DES never enforces a shift END — an agent stays available until business close no
 matter when their shift started, so the optimizer's capacity model (`shiftCapacityWithinDay`,
 confined to `[offset, offset+shiftLength]`) does not match what the simulator actually does,
 which is the root cause of the greedy in Stage 3a routinely choosing distributions *worse*
@@ -1406,6 +1441,15 @@ a standard reporting expectation, cheap to build.*
 removed dependency. It is unreferenced and does not reach the artifact, but it advertises a
 server-side AI capability that directly contradicts the offline contract. *Rationale: a
 compliance reviewer reading the manifest would reasonably conclude the product calls out.*
+
+**P1-6 — When Shift Placement is on and coverage is off, try the coverage-repair roster before
+rejecting a headcount.** With the Minimum Coverage Floor off, the placement builder only tries its
+own distributions; the coverage-repair roster (most agents at opening, a few starting later so the
+evening is never empty) is never tried. Planner file: 48 recommended although 47 passes every gate
+with 32 at opening and 15 five hours later (§10 L23). This is a change to the search
+(`hc-search.ts`, sync and async together) and needs explicit approval. *Rationale: the planner
+is told to turn Shift Placement on to staff later hours, yet in this combination it can still
+cost one extra agent.*
 
 ### P2 — Polish and technical debt
 

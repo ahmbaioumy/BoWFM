@@ -1050,3 +1050,16 @@ Passed with evidence: tester (all criteria; planner file 47 with coverage on, 48
 | E-4 | user-side | major | Nothing on screen says results from earlier versions differ with coverage off | OPEN |
 | E-5 | user-side | major | Coverage-floor warning is last in small grey text; "floor" also names the Workload Floor | OPEN |
 | E-6 | minors | minor | ConfigFlow sentences lack a 24x7 qualifier; "byte-for-byte unchanged" line; off-state note mentions the repair stagger when coverage is off; D71.7c CI-gate test is a constructed case; stale history lines PRD:1308, project_context:1007; boundary rationale does not name the failing category | Backlog |
+
+## P2-9 rework rounds 1 and 2 (2026-10-08) — builds `c0db0d5` and the following commit
+
+| ID | Status |
+|---|---|
+| E-1 search recommends 48 where 47 passes with placed starts (coverage OFF + Shift Placement ON) | OPEN — recorded as PRD L23 and backlog P1-6; needs owner approval (search change) |
+| E-2 Results gave no reason / told the planner to raise the cap | Fixed — amber note on feasible single-shift results; on infeasible ones the "raising the cap will not help" line leads and the "Increase userMaxHC" sentence is stripped at render time. Tester ran feasible (48), infeasible (97% in 2 h, cap 80) and 24x7 cases in the browser |
+| E-3 audit baseline differs in 4 WA cells | Recorded in PRD §9.1, project_context, docs/audit/sample-hc-audit.md; baseline NOT regenerated — owner decision |
+| E-4 earlier-version results differ | Fixed — sentence in the Results amber note |
+| E-5 coverage-off warning easy to miss; two "floors" | Fixed — amber note under the switch while off, names the Workload Floor as a different switch; 24x7 variant |
+| E-6 minors | Fixed: 24x7 qualifiers, "byte-for-byte", repair-stagger clause, "DES" label (ConfigFlow and ParamsPanel), stale history pointers. Left: D71.7c is a constructed CI-gate case; boundary rationale does not name the failing category |
+
+Round 1 recheck: tester pass (8/8, zero console errors, 47 and 48 unchanged); user-side fail on one major (banner contradiction) → fixed in round 2 with floor-dependent remedy wording. Round 2 verified by gates (lint, 1,331 checks, artifact fresh) and page load; no further browser run of the infeasible banner after round 2. Rework cap (2) reached.
