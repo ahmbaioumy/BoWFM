@@ -1229,3 +1229,246 @@ A3b. Second major: A3 understated what moves on screen — widened. Confirmed so
 `shiftDistributionUsed` signal; existing tests AA.5/6/8/29–32 and AW.* are unaffected.
 Surviving objection: non-staggered runs with a long day still show ~50% utilisation; left as a
 stated limit because the engine has no shift end in that mode.
+
+
+---
+
+# Plan — Engine: every agent leaves at the end of their shift, even with no staggered starts (PRD P2-9)
+
+## Context
+
+Today the simulator has two behaviours:
+
+- **Fixed shifts** (a start-time distribution was passed — Shift Placement on, or the minimum-coverage
+  repair stagger): an agent is on from their start for `dailyProductiveHours`, then leaves.
+- **No distribution** (minimum coverage off, or a headcount too small to stagger, or the "N−1 failed"
+  evidence run): every agent starts at open and **stays available until business close**. Work is
+  still capped at `dailyProductiveHours`, but idle time does not count, so an agent with a quiet
+  morning can still take cases at 20:00 on an 08:00–22:00 day.
+
+That second behaviour is not a real roster. `docs/wfm/07-known-defects-and-decisions.md:318-327`
+already calls it wrong ("no agent stays on the floor for a 14-hour window to deliver a 9-hour
+shift"), and the coverage check (`countAgentsOnShiftNow`, frozen decision 11) already counts the
+agent as gone after their shift. Only dispatch disagrees.
+
+**Measured on the planner's file** (`EGS_Only.csv`, 08:00–22:00, 9 h, engine unchanged, 30 reps):
+
+| Setup | Recommended HC today | After this fix |
+|---|---|---|
+| Minimum coverage ON (the planner's config, and the app default) | 47 | 47 — unchanged, the search already uses fixed shifts |
+| Minimum coverage OFF | 46 | **48** (per-N pass pattern: 46 fail, 47 fail on Gold CI bound 79.5%, 48 pass) |
+
+So: **user-visible, headcount goes up, only when minimum coverage is off and the business day is
+longer than the productive hours.** The 46 was optimistic — it relied on agents covering the
+evening after their shift should have ended.
+
+Decisions already made by the planner: **24x7 calendars are excluded** (keep today's behaviour);
+build under the **full supervised loop** (Tier 3).
+
+Frozen decisions: none is changed. Decision 11 already defines presence as the agent's own shift
+window; this makes dispatch obey the same window. No change to DES-not-Erlang, EDF, occupancy
+definition, `N_min`, shrinkage, CI gate, CRN, apportionment.
+
+## The change
+
+One place, the engine. No search change, no duplication between the sync and async search.
+
+`src/utils/des-engine.ts` ~line 989:
+
+```ts
+const staggeredMode = !!shiftDistribution && operationalHC > 0;
+```
+
+becomes: fixed-shift mode is on whenever a distribution is passed **or the calendar is not 24x7**.
+With no distribution every agent keeps start offset 0 (`agentSlapStartMinutes` is already all
+zeros), which is exactly the already-supported input "one cohort, everyone at offset 0". All 18
+sites that branch on `staggeredMode` (day-open scheduling, `ShiftEnd`, work-assignment cap ~1437,
+in-flight handover ~1648, `availDayWindowMin` ~1107, dispatch eligibility ~1350, `DayClose`) then
+behave as they do today for a single-cohort distribution. Verified by exploration: that input runs
+clean today, and when the shift equals the business day the existing guard
+(`skipAsRedundantWithDayClose`, ~1183) makes it identical to today's non-staggered run.
+
+Details the builder must get right:
+
+- The non-staggered day-open branch (~1190–1201) schedules an unscoped `AgentAvailable` and a
+  `CoverageCheck` marker. For non-24x7 with no distribution it must take the staggered scheduling
+  path with one synthetic cohort (offset 0, all agents). Build that cohort once from the same
+  per-offset map the staggered path uses — do not add a second scheduling routine.
+- Siloed runs: every category block at offset 0. Pooled given no `__POOLED__` key: offset 0.
+- 24x7 with no distribution: untouched, byte-identical (keeps the midnight spill-over logic ~1718).
+- Result: add `fixedShifts: boolean` to `DESResult` (`src/types/wfm.ts`) = the new mode flag.
+  `shiftDistributionUsed` keeps its meaning (echo of the input; stays undefined when none passed) so
+  D21.6 / AA.39 hold.
+- `src/utils/agent-analytics.ts:427`: `staggered = des.fixedShifts ?? !!des.shiftDistributionUsed`.
+  The "Shifts: open until close" pill, the amber note and the "until business close" notes then
+  apply only to 24x7 runs without a distribution — still correct there, so no text is deleted;
+  the sentence "Shifts are fixed when…" is updated to "…or whenever the business has opening hours".
+- Rename the local to `fixedShiftMode` only if it stays a pure rename inside the function; update the
+  comment at ~993–996 ("Not staggered ⇒ unbounded presence").
+
+No change to `hc-search.ts`. Side effect, intended: the audit run at a failing N and the N−1
+evidence run (which today run with no distribution even when the judged run was staggered) now also
+have a shift end.
+
+## Steps (supervised loop, Tier 3)
+
+0. **Setup.** Checkpoint commit; append this plan to `PLAN.md`.
+
+1. **Fail-first tests** — `scripts/verify-sizing-fixes.mts`, new suite at the next free D-number,
+   appended (never edit an existing assertion in this step):
+   - **Equivalence (the core proof):** on a long-day non-24x7 fixture (08:00–22:00, 9 h), a run with
+     no distribution equals a run with an explicit single cohort at offset 0 — same completed cases,
+     SLA %, per-agent busy minutes, timeline digest — at several N, pooled and siloed.
+   - No agent has a busy or idle slice after `open + dailyProductiveHours`; per-agent available
+     minutes per full day ≤ 540.
+   - A case in progress at shift end is handed back to the queue and finished next day; a case
+     arriving after shift end waits for next open.
+   - Adherence 0.9: shift end still at `open + 540` (not shortened by adherence — decision 11).
+   - **Controls that must pass before and after:** shift equal to the day (09:00–17:00, 8 h) is
+     byte-identical to before; 24x7 with no distribution is byte-identical to before (existing
+     digests D43.14 `c247`, D64.12a-style); a run with an explicit distribution is byte-identical.
+   - Seed determinism: same seed twice → identical result, every field.
+   - Monotonicity sweep (pattern D3.1): `passesAllConstraints(N)` monotone over a swept N range on
+     the long-day fixture with coverage off.
+   - CI gate: at the N whose mean clears the SLA target but whose lower bound does not, the
+     candidate is rejected (the measured 47 case is the model).
+   - `fixedShifts` true for non-24x7 with or without a distribution; false for 24x7 without one.
+   Record the failing output before touching `src/`.
+
+2. **Engine change** as above (`des-engine.ts`, `wfm.ts`, `agent-analytics.ts`).
+
+3. **Run the whole suite and STOP.** List every pre-existing assertion that now fails, with old
+   value, new value, and the reason. The builder must **not** edit any existing assertion yet.
+   Expected from exploration (to be confirmed by the run, not assumed):
+   - likely to move: D33.6/.7 (coverage-on = coverage-off + 1), D46.4c (coverage-off recommends 1),
+     D25.2, D36.4 control, D62 ASA/completion, D64.12a digest (uniform default calendar),
+     `verify-fixes` Suite 25 (9–17, 7 h), AA.5, AA.8, AA.40, AA.44/44b;
+   - must NOT move: all 164 trusted-source checks, every 9–17 / 8 h suite, every 24x7 suite
+     (D43, D44, D45.1e, D64 hand traces, Suite 35), D45.2 sample pins, D49, D50–D52, D65.
+   Anything in the "must not move" list that moves is a blocker — the change is wrong, not the test.
+   **The supervisor shows the planner the list; existing pins are updated only after approval**,
+   each with a comment stating the new derivation. `verify-fixes.mts` stays append-only: a changed
+   legacy expectation gets a new assertion beside a dated note, per the `wfm-engine-testing` skill.
+
+4. **Agent Analytics tests** — update the uniform-run expectations (AA.5, AA.8, AA.40, AA.44) to
+   the new model; move the "open until close" assertions onto a 24x7 fixture so that text stays
+   covered.
+
+5. **UI text** — `src/components/ConfigFlow.tsx`: Minimum Coverage Floor help ("Off = no floor
+   (pre-2026 behavior)") and the Shift Placement off-state note gain one plain sentence: with no
+   staggering every agent works one shift from opening time and leaves when it ends, so later hours
+   are unstaffed. `AgentAnalyticsPanel.tsx` `DEFINITIONS` / tooltip: the "when are shifts fixed"
+   sentence. Text only.
+
+6. **Docs.** `PRD.md`: remove P2-9 from §11; L20 reduced to the 24x7 case; Stage 3a / coverage
+   sections and FR-9.4 state the new rule; new §10 limitation "24x7 without staggered starts keeps
+   agents on all day"; changelog entry with the measured 46 → 48; Version 1.21.0 (behaviour change).
+   `project_context.md` §5, §6.11, §11. `docs/wfm/07-known-defects-and-decisions.md:318-327` marked
+   resolved for non-24x7; `05-scheduling.md:8`, `06-simulation-des.md`. `CLAUDE.md` decision 11:
+   one added sentence — "dispatch obeys the same window on every non-24x7 run, with or without a
+   start distribution" (the planner approves this wording by approving the plan). Test counts from
+   the real run.
+
+7. **Rebuild + gates**: `npm run lint`, `npm run build:standalone`, `npm test`,
+   `npm run check:artifact`; then `npm run test:audit` (~30 min, 24 cells) — report every cell that
+   moves. Expected: the 4 infeasible "WA" rows move (they report a failing uniform run); the other
+   20 do not. Regenerate the audit baseline file only with the planner's approval.
+
+## Files
+
+| File | Change |
+|---|---|
+| `src/utils/des-engine.ts` | mode flag ~989, day-open scheduling ~1166–1201, comment ~993; result field |
+| `src/types/wfm.ts` | `DESResult.fixedShifts` |
+| `src/utils/agent-analytics.ts` | one line (~427) + the "when are shifts fixed" sentence |
+| `src/components/ConfigFlow.tsx`, `AgentAnalyticsPanel.tsx` | text only |
+| `scripts/verify-sizing-fixes.mts` | new suite; approved pin updates only |
+| `scripts/verify-fixes.mts` | append-only additions, if Suite 25 moves |
+| `scripts/verify-agent-analytics.mts` | uniform-run expectations, 24x7 fixture for the open case |
+| `PRD.md`, `project_context.md`, `docs/wfm/05,06,07`, `CLAUDE.md` (decision 11 sentence) | as above |
+| `BoWFM.html` | rebuild |
+
+Not touched: `hc-search.ts`, `calendar.ts`, `csv-parser.ts`, build scripts, `package.json`,
+`trusted-source-validation.json`.
+
+## Acceptance criteria and proof
+
+| # | Criterion | Proof |
+|---|---|---|
+| A1 | New tests fail before, pass after | Builder shows both runs |
+| A2 | No-distribution run ≡ explicit single-cohort run (non-24x7) | Equivalence suite; tester recomputes with an independent script on `EGS_Only.csv` at HC 46, 47, 48, 55 |
+| A3 | Planner's file, minimum coverage OFF: recommended HC 48 (was 46); coverage ON: still 47 | Tester runs both full searches headless and in the real page |
+| A4 | Equal-length day, 24x7, and explicit-distribution runs byte-identical to checkpoint | Tester diffs old vs new engine output (old source via `git show <checkpoint>:…` in the scratchpad) |
+| A5 | Every moved pre-existing assertion is on the approved list; nothing on the "must not move" list moved | Auditor, from the step-3 list and the diff |
+| A6 | Determinism, monotonicity sweep, CI-gate rejection | New suite |
+| A7 | Agent Analytics on a coverage-off run: pill "Shifts: fixed length", no amber note, Available ≤ 540/day, Utilisation ≈ Occupancy | Tester in browser; user-side reads the new ConfigFlow sentences |
+| A8 | `npm run lint && npm test && npm run check:artifact` exit 0; page loads with zero console errors | Free gate + tester |
+| A9 | `npm run test:audit`: only the 4 WA cells move | Tester reports the diff |
+| A10 | Docs match code; scope lock held; `hc-search.ts` untouched | Auditor |
+
+Reviewers: `tester`, `auditor`, `user-side`, `challenger` (plan and result). Hard cap 2 rework rounds.
+
+## Measured on a scratch prototype (2026-10-08) — supersedes the "expected" lists above
+
+Prototype = the two-line engine edit only (flag at ~989; `shiftDistribution?.[key]` at ~1014, which
+the plan had missed — without it every non-24x7 run throws). 42 full searches, no crash, no
+infeasible, pass/fail monotone in N (44–52 on the planner's file).
+
+**Recommended headcount**
+
+| Case | Today | Prototype |
+|---|---|---|
+| Coverage ON — planner's config, app defaults on EGS, D65.6, all six built-in samples | 47 / 92 / 9 / pins | identical |
+| Coverage OFF — planner's file | 46 (gross 74) | 48 (gross 78) |
+| Coverage OFF — D33 fixture (08–22, 9 h) | 21 | 28 (coverage ON = 22) |
+| Coverage OFF — support pooled / healthcare pooled / healthcare siloed | 23 / 28 / 25 | 28 / 31 / 27 (ON = 27 / 31 / 27) |
+
+- With coverage OFF the result can now be **higher than with coverage ON** (D33 28 vs 22, support
+  28 vs 27, planner 48 vs 47). Reason: coverage ON forces at least one late starter, which serves
+  evening work; coverage OFF with one shift from opening leaves the evening empty.
+- Coverage ON: the only fields that move are the "one fewer agent" evidence block
+  (`boundaryEvidence`). Today that evidence run has no shift end and **contradicts the search**
+  (planner's file: evidence shows 46 agents passing at 83.3% while the search rejected 46 at 77.2%).
+  With the fix it shows 76.7%, a fail, consistent with the search. This is a second defect the
+  change repairs.
+
+**Pre-existing assertions that fail on the prototype (9) — the real approval list for step 3**
+
+| Assertion | Why it moves |
+|---|---|
+| D33.7 | pins "coverage costs exactly one extra head"; now OFF = 28, ON = 22 |
+| D52.3 | its swept range no longer contains a passing headcount; range must widen |
+| D62.27, D62.28 | "identical to pre-change engine" controls on the default 08–18 / 7.5 h calendar |
+| D64.12a | digest of a uniform default-calendar run |
+| D65.5b, D65.6 | whole-result digests; only the `boundaryEvidence` block differs |
+| AA.5 | uniform-run utilisation vs engine figure (fixed by the planned analytics line) |
+| AA.22 | bar-chart sort on the uniform fixture (to be re-checked after the analytics line) |
+
+`verify-fixes` 174/174 and trusted-source 164/164 pass untouched. D25.2, D36.4, D46.4c, AA.8,
+AA.40, AA.44 did **not** move on the prototype (AA.* to be re-checked once `fixedShifts` is wired).
+The earlier "must NOT move" entry for D50–D52 and D65 was wrong; corrected here.
+
+**Additional items from the challenge**
+
+- The app default calendar (08:00–18:00, 7.5 h) is a "day longer than shift" case — the change
+  applies to it, not only to very long days.
+- `verifyAgentTimelineInvariants` check #8 is gated on `shiftDistributionUsed`; gate it on
+  `fixedShifts` so shift-end is checked in the new mode, and add a shift-end invariant.
+- A calendar entered as 00:00–24:00 without the 24x7 flag is treated as non-24x7 (one 9 h shift,
+  15 h unstaffed). Add a test and a Labor-page sentence; do not special-case silently.
+- Alternative considered and rejected: having the search pass an explicit one-cohort distribution.
+  It would spare direct-engine tests but needs the same edit at ~10 call sites across the
+  duplicated sync/async search (the D11 drift hazard) and leaves the engine default wrong.
+- ConfigFlow Minimum Coverage help must say plainly: turning the floor off does not lower
+  headcount; with one shift from opening, later hours are unstaffed and the result can be higher.
+
+## Risks stated up front
+
+- **Pinned tests will change.** The project rule is "the change is wrong, not the test"; here the
+  model itself changes by decision, so each moved pin is listed and approved individually (step 3).
+- **Headcount rises for coverage-off users** on long business days. That is the point of the fix,
+  but saved results from before will not reproduce; the changelog says so.
+- **A one-shift roster on a long day cannot meet short SLAs in the evening.** With coverage off and
+  a tight SLA the search may climb or report infeasible, where it used to pass. The ConfigFlow text
+  (step 5) tells the planner to turn on minimum coverage or Shift Placement.
+- 24x7 remains on the old model by decision; documented as a limitation.
