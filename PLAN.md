@@ -1472,3 +1472,176 @@ The earlier "must NOT move" entry for D50–D52 and D65 was wrong; corrected her
   a tight SLA the search may climb or report infeasible, where it used to pass. The ConfigFlow text
   (step 5) tells the planner to turn on minimum coverage or Shift Placement.
 - 24x7 remains on the old model by decision; documented as a limitation.
+
+
+---
+
+# Plan — Search: try more start-time rosters before rejecting a headcount (PRD P1-6 / L23)
+
+## Context
+
+With **Shift Placement ON**, when a headcount N fails with everyone starting at opening, the search
+tries exactly one alternative roster (the analytic builder, `computeCandidatePlacementDistribution`,
+`hc-search.ts` ~556–612) and, if that fails too, rejects N and stops. That one roster is often bad:
+on the planner's file it puts nobody at opening and scores 78.2% at N=47, while simple rosters pass.
+
+Measured (engine at `d902483`, 30 reps, same CI gate the search uses):
+
+| Input | Shift Placement ON, coverage | Search says | Lowest N that really passes | Roster that passes |
+|---|---|---|---|---|
+| Planner's file | OFF | 48 | **47** | 46 at opening + 1 five hours later |
+| Planner's file | ON (planner's own config) | 47 | 47 — no roster found at 46 or 45 | — |
+| Support sample | OFF | 28 | **27** | 26 at opening + 1 later |
+| D33 test file (08–22, 9 h) | ON | 22 | **21** | 16 at opening + 5 later |
+| Suite fixtures D50 / D51 / D52 | ON | 9 / 17 / 19 | **7 / 14 / 18** | — |
+| Claims, healthcare samples | ON / OFF | 31 | 31 | — |
+
+Why the analytic builder misses: it treats a next-day deadline as due the same evening, so it
+over-values late shifts and ignores backlog carried overnight.
+
+**Scope of impact:** only runs with Shift Placement ON (off by default, labelled experimental).
+With it OFF nothing changes. The planner's own configuration stays at 47. Direction is always
+"same or lower headcount": a roster is accepted only if it passes the unchanged full CI gate.
+
+Frozen decisions: none changed. Acceptance stays CI-gated at full R (8) on the shared random
+arrivals (9); N_min floor, occupancy, EDF, apportionment untouched. No engine change.
+
+## The change ("ladder with pre-screen")
+
+At a headcount that has just failed, **and only when Shift Placement is ON**, try a short fixed
+list of simple rosters before rejecting it; accept the first that passes every gate at full R:
+
+1. the minimal coverage-repair shape (one late starter per needed late start) — this alone fixes
+   the planner's coverage-OFF case and the support sample;
+2. a ladder of late shares — 25, 30, 35, 20, 40, 15, 10 % of seats starting at the minimal-cover
+   late start(s), the rest at opening — this is what the D33 case needs.
+
+**Pre-screen (cost control):** each ladder roster is first run on the first `min(R, 5)`
+replications against SLA targets relaxed by 1.5 points; only a roster that clears that screen gets
+the full-R run. The screen can only skip a roster, never accept one, so it cannot produce a wrong
+pass — its only failure mode is missing a rescue (headcount stays as today).
+
+**Where it lives (so sync and async cannot drift — the D11 hazard):**
+- `buildRescueLadder(...)` — pure roster generator, beside `buildCoverageRepairDistribution`
+  (~660), reusing `getValidSlapStarts` (`calendar.ts`) and the repair builder; deterministic order.
+- `createRescueSearch(...)` — pure state machine with `next()` / `record()` / `result()`, the same
+  pattern as the existing shared `createRosterKSearch`.
+- `rescueScreenInputs(...)` — builds the relaxed-target, first-5-sets inputs for the screen.
+- Each `evaluateN` copy (sync ~2564–2655, async ~3262–3391) gains only the same ~12-line loop:
+  evaluate what `next()` returns, `record()` it, take `result().winner`; set
+  `winningDistributionByN` exactly as the existing placement branch does (`pickPlacementOrUniform`).
+- The pre-screen margin (1.5) and screen size (5) are named constants, not config.
+
+Not done here: unifying the whole of `evaluateN` (D11) — separate task; rejected options: polish
+from the failing roster (works by luck of its probes, costs more) and "probe one more N" (fixes
+none of the measured cases and breaks the N−1 evidence).
+
+## Steps (supervised loop, Tier 3)
+
+0. Checkpoint commit; append this plan to `PLAN.md`.
+1. **Fail-first tests**, new suite at the next free D-number in `scripts/verify-sizing-fixes.mts`:
+   - a fixture where N−1 fails uniform and analytic but passes with the minimal repair shape
+     (coverage OFF) → search returns N−1 (fails today);
+   - a fixture needing a share-ladder roster (the D33 shape, coverage ON) → returns 21 (fails today);
+   - **never-worse sweep:** over the suite's placement fixtures and the samples, Shift Placement ON
+     recommends ≤ Shift Placement OFF, and ≤ the pre-change value recorded now;
+   - **never a false accept:** every accepted roster passes `evaluateCandidateStatistical` at full R
+     with the unmodified SLA (re-evaluated independently in the test);
+   - the pre-screen never accepts: a roster that passes the screen but fails full R is rejected;
+   - Shift Placement OFF: recommendation, roster and full result digest identical to before
+     (controls recorded from the unchanged code);
+   - monotonicity sweep of pass/fail in N with the ladder on; determinism (same seed twice);
+     sync ≡ async on every fixture (full result digest);
+   - `buildRescueLadder` unit checks: seat counts sum to N, offsets are valid starts, order fixed,
+     siloed gets per-category blocks, 24x7 and shift ≥ window return an empty ladder.
+2. **Implement** the three shared helpers and the two identical call loops.
+3. **Run the whole suite and STOP.** List every pre-existing assertion that moves (expected from the
+   prototype: about 45, all in D50, D51, D52 and D65 — recommended HC 9→7, 17→14, 19→18, polish
+   statuses becoming `no_improvement`, digests). Must NOT move: D25.3/D25.4 (never-worse proof),
+   D49 (AJM_Only 16, `0:15 150:1`), D33/D34 other than the placement-ON line, every Shift
+   Placement OFF pin, `verify-fixes` 174, trusted-source 164, D71. Pins are edited only after the
+   planner approves the list.
+4. **UI text** (`ConfigFlow.tsx` Shift Placement help): say that with it on, the search also tries a
+   few simple start-time patterns before rejecting a headcount. Results roster sentence unchanged.
+5. **Docs:** PRD — remove L23 and P1-6, Stage 3a text, changelog with the measured moves, test
+   totals, version 1.22.0; `project_context.md` §5 / §11; `docs/wfm/05-scheduling.md`.
+6. **Gates:** lint, build, `npm test`, `check:artifact`; `npm run test:audit` and report cells that
+   move (the PON cells are Shift Placement ON and may move; baseline regenerated only on approval).
+
+## Files
+
+`src/utils/hc-search.ts` (helpers + two call loops), `scripts/verify-sizing-fixes.mts`,
+`src/components/ConfigFlow.tsx` (text), `PRD.md`, `project_context.md`, `docs/wfm/05-scheduling.md`,
+`BoWFM.html`. Not touched: `des-engine.ts`, `calendar.ts`, types, `agent-analytics.ts`,
+`verify-fixes.mts`, trusted-source files.
+
+## Acceptance criteria and proof
+
+| # | Criterion | Proof |
+|---|---|---|
+| A1 | New tests fail before, pass after | Builder shows both runs |
+| A2 | Planner's file: coverage OFF + placement ON → 47 (was 48); coverage ON + placement ON → 47; placement OFF, both coverage settings → unchanged (47 / 48) | Tester, full searches, engine and real page |
+| A3 | Every accepted roster passes the unmodified full-R gate | New suite + tester re-evaluates the winning roster independently |
+| A4 | Shift Placement OFF results byte-identical to checkpoint | Tester diffs old vs new on planner file, D33, samples |
+| A5 | Placement ON never recommends more than before on any measured input | Never-worse sweep + tester table |
+| A6 | sync ≡ async; determinism; monotone pass/fail | New suite; tester on the planner's file |
+| A7 | Run-time cost reported: DES runs before vs after per input (expected −12% to +75%) | Tester |
+| A8 | Moved pins = approved list only | Auditor |
+| A9 | lint, `npm test`, artifact fresh; page loads clean | Gates |
+| A10 | Docs match code; scope lock held | Auditor |
+
+## Amendments after the plan challenge (2026-10-08) — these override the text above
+
+Challenger verdict: fail → amended. Measured by the challenger on the prototype.
+
+1. **A rescued headcount must reproduce, not just pass once (major).** Support sample, coverage OFF:
+   the rescued N=27 (26 at opening + 1 later) passes the search seed by ~0.1 point but only **7 of
+   21** fresh seeds; today's 28 passes 21 of 21. Other rescued cases reproduce (planner 47: 5/6;
+   D50 N=7: 30/30; D52 N=18: 30/30).
+   **Rule added:** a ladder roster that passes the full-R gate is accepted only if it also passes
+   the same unmodified gate on a **second, disjoint block of R replications** (arrival sets
+   generated from a seed derived deterministically from the run seed; the same confirmation block
+   is reused for every candidate, so Common Random Numbers holds within it). Fail the confirmation
+   → the roster is rejected and the next rung is tried. Applies to ladder rosters only; uniform,
+   coverage-repair and analytic-placement acceptance are unchanged. Cost: one extra R per accepted
+   rescue. Expected effect (to be measured in step 1): support stays at 28, planner goes to 47,
+   D33 / D50 / D52 keep their lower numbers. New acceptance criterion **A11:** each rescued
+   recommendation passes on ≥ 80% of 20 fresh seeds, and no worse than the pre-change
+   recommendation's own fresh-seed pass rate (tester).
+2. **Pinned tests must keep testing something (major).** Re-pinning ~45 checks in D50 / D51 / D52 /
+   D65 would leave the polish paths "adopted", "adopted_partial" (siloed) and
+   "kept_current_failed_gate" with no live fixture. Step 3 additionally requires: for every polish
+   path whose fixture stops reaching it, a replacement fixture that does (found by search in the
+   test, not hand-tuned to a digest), added in the same change. Checks that pinned "HC equals
+   placement OFF" become "HC ≤ placement OFF" plus the exact new number.
+3. **Pre-screen described exactly as built:** first `min(R, 5)` replications; SLA targets (overall
+   and per-category where set) relaxed by 1.5 points; confidence level 50% for the screen only;
+   occupancy and ASA caps not relaxed. Named constants; documented in the PRD. Sensitivity
+   measured: margins 1.0–4.0 give the same recommendations; 0 misses a rescue.
+4. **Siloed ladder:** a category with too few seats for a late starter is left out of the roster
+   and stays at opening (engine default). The unit check is "each listed block sums to its own
+   seats", not "sums to N".
+5. **Async progress:** the ladder loop passes `onRepProgress` like the neighbouring uniform call.
+6. **Not ported from the prototype:** its `process.env` / `globalThis` switch (offline contract, D9.2).
+7. **Unchanged, confirmed by measurement:** the planner's own config — headcount 47, roster
+   `0:32 300:15`, polish status and search history identical; pass/fail monotone in N on every
+   sweep; leap probes do not use the ladder; cost +8% (planner) to +72% (support) before the
+   confirmation block is added.
+
+Noted, not in scope: roster polish can leave a hairline margin too (planner coverage OFF, today's
+48 with the polished roster passes 3 of 6 fresh seeds), and the per-category gate on low-volume
+categories is hairline at today's coverage-ON support result. Logged for the backlog.
+
+## Risks stated up front
+
+- **Headcount goes down** with Shift Placement ON on some inputs (D33 22→21; suite fixtures by up to
+  3). Each lower number passes the same gate as before, but saved placement-ON results will not
+  reproduce.
+- **About 45 pinned checks change** (all placement-ON suites). Listed and approved before editing.
+- **Longer runs** on some inputs with placement ON (support sample 325 → 560 simulations).
+- The 1.5-point pre-screen margin is a tuning value: too tight and a rescue is missed (measured:
+  a margin of 0 missed the support sample); it can never cause a wrong pass.
+- The ladder gives every category the same late share in siloed runs — a simplification; it can
+  miss a rescue, never accept a failing roster.
+- "No roster passes at 46 on the planner's own config" is evidence from search (grid, local
+  search, polish), not a proof.
