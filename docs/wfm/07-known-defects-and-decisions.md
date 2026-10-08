@@ -993,6 +993,12 @@ Settings edits after a run raised a banner; data edits did not. Editing, deletin
 **Open item SR-a:** exports from stale results carry no stale note (none exists for settings either).
 **SR-b (checked, no change):** Sensitivity builds its own scenarios from live settings and data and shows no run results, so it cannot mix old results with new data. The Results tabs (incl. Agent Browser) render the run output only; the banner sits above every Results tab.
 
+### P1-6 / L23 - With Shift Placement ON a failing headcount got only one alternative roster *(fixed 2026-10-08, PRD 1.22.0)*
+The per-N decision was `uniformPasses OR coverageRepairPasses OR placementPasses`; the placement leg offered exactly one roster (the analytic builder) and N was rejected when it failed. That roster treats a next-day deadline as due the same evening, so it over-values late shifts and ignores backlog carried overnight: on the planner file (`EGS_Only`, 08:00-22:00, 9 h) it puts nobody at opening and scores 78.2% at 47 while 46 at opening + 1 five hours later passes (coverage OFF recommended 48).
+**After:** a fourth leg, shared by `searchOptimalHC` and `searchOptimalHCAsync` (`buildRescueLadder`, `createRescueSearch`, `resolveRescueEvaluation`, `createConfirmationBlock`; D11 itself is still open): a fixed ladder of simple rosters (minimal later-start shape, then 25/30/35/20/40/15/10 % late), each screened on 5 replications at targets relaxed by 1.5 points (skip only, never accept), then accepted only if it passes the unchanged gate at full R on the primary block AND on a disjoint confirmation block derived from the run seed. Never inside the 5-replication leap probes; Shift Placement OFF never enters it. Measured: planner coverage OFF 48 -> 47, D33 coverage ON 22 -> 21, suite fixtures 9 -> 7 / 17 -> 14 / 19 -> 18 / 29 -> 18 / 12 -> 9, planner's own config and support coverage OFF unchanged (47 / 28; the support 27 fails confirmation).
+**Why the confirmation block:** without it the support-sample 27 was accepted at ~0.1 point of margin and held on only 7 of 21 fresh seeds.
+**Open (backlog):** roster-polish and thin-category hairline margins (PRD L24 / L25, P1-7 / P1-8); one late share for all siloed queues (L26). Tests: D72, D73.
+
 ---
 
 ## C. Retracted after measurement

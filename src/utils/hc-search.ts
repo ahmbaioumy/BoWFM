@@ -700,6 +700,269 @@ export function buildCoverageRepairDistribution(params: {
   return any ? result : null;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Rescue ladder (PRD P1-6 / L23) - only when labor.shiftPlacementEnabled. When a headcount N has
+// failed with everyone at opening, with the coverage-repair roster and with the analytic placement
+// roster, a short FIXED list of simple "some agents start later" rosters is tried before N is
+// rejected. A roster is accepted only if it passes the unmodified full-R gate on the primary case
+// sets AND the same gate on a second, disjoint block of R case sets (the confirmation block).
+// The pre-screen (min(R, 5) reps, targets relaxed) only decides whether a roster earns the full-R
+// run; it can skip a roster, never accept one. ONE implementation shared by searchOptimalHC and
+// searchOptimalHCAsync (D11: the two searches must not drift) - they differ only in await/progress.
+// ---------------------------------------------------------------------------------------------
+
+/** Late-start shares of a block's seats tried after the minimal shape, in this fixed order. */
+export const RESCUE_LATE_SHARES: readonly number[] = [0.25, 0.30, 0.35, 0.20, 0.40, 0.15, 0.10];
+/** Pre-screen only: every SLA target (overall and per category) is lowered by this many points. */
+export const RESCUE_SCREEN_MARGIN_PP = 1.5;
+/** Pre-screen only: replications run (min of this and R); also uses confidence level 50. */
+export const RESCUE_SCREEN_REPLICATIONS = 5;
+/**
+ * Confirmation block seed stream. Primary replication r uses seed (seed + r*1013 + 7) % 2147483647
+ * (generatePrecomputedReplications / evaluateCandidateStatistical). Confirmation replication r uses
+ * the SAME formula at replication index r + RESCUE_CONFIRM_STREAM_OFFSET, i.e. base seed
+ * (seed + 1013*RESCUE_CONFIRM_STREAM_OFFSET) % 2147483647. Since 2147483647 is prime and 1013 is not
+ * a multiple of it, distinct replication indices give distinct seeds, so the two blocks can never
+ * share a replication while R < RESCUE_CONFIRM_STREAM_OFFSET. Pure arithmetic on the run seed: no
+ * random source, no clock.
+ */
+export const RESCUE_CONFIRM_STREAM_OFFSET = 1_000_003;
+
+export function deriveConfirmationBaseSeed(seed: number): number {
+  return (seed + 1013 * RESCUE_CONFIRM_STREAM_OFFSET) % 2147483647;
+}
+
+/**
+ * The confirmation block: R case sets from the derived seed, built ONCE per search (lazily, the first
+ * time a rung clears the primary block) and reused for every candidate N and rung, so Common Random
+ * Numbers holds inside the block. The single constructor both searches use.
+ */
+export function createConfirmationBlock(params: {
+  intervals: StandardInterval[];
+  openingWIP: OpeningWIPCase[];
+  categories: CategoryConfig[];
+  calendar: CalendarConfig;
+  sla: SLAPolicyConfig;
+  seed: number;
+  replications: number;
+}): { baseSeed: number; sets: () => PrecomputedCaseSet[] } {
+  const baseSeed = deriveConfirmationBaseSeed(params.seed);
+  let built: PrecomputedCaseSet[] | null = null;
+  return {
+    baseSeed,
+    sets: () => {
+      if (!built) {
+        built = generatePrecomputedReplications({
+          intervals: params.intervals,
+          openingWIP: params.openingWIP,
+          categories: params.categories,
+          calendar: params.calendar,
+          sla: params.sla,
+          baseSeed,
+          replications: params.replications,
+        });
+      }
+      return built;
+    },
+  };
+}
+
+/** Canonical identity of a roster (category keys sorted, slaps sorted by offset, zero blocks dropped). */
+function rosterKey(d: ShiftDistributionByCategory): string {
+  return Object.keys(d)
+    .sort()
+    .map((k) => {
+      const slaps = [...d[k].slaps].filter((s) => s.agentCount > 0).sort((a, b) => a.startMinutesFromOpen - b.startMinutesFromOpen);
+      return `${k}@${d[k].slapMinutes}=${slaps.map((s) => `${s.startMinutesFromOpen}x${s.agentCount}`).join(',')}`;
+    })
+    .join(';');
+}
+
+/**
+ * The fixed, deterministic list of rescue rosters for headcount n (empty when the calendar leaves no room
+ * for a later start: 24x7, or the shift is not shorter than the business window).
+ * Rung 0 is the minimal later-start shape - the coverage-repair roster with a minimum of ONE agent per
+ * late start even when the coverage floor is off (buildCoverageRepairDistribution, not a copy of it).
+ * Then late shares RESCUE_LATE_SHARES of a block's seats start at the minimal-cover late start(s), the
+ * rest at opening. Siloed: one block per category from the DES's own seat split; a category with too few
+ * seats for a late starter is left out of the roster and stays at opening (engine default), so each listed
+ * block sums to its own seats, not to n. Rosters equal to an earlier rung are dropped.
+ */
+export function buildRescueLadder(params: {
+  n: number;
+  cases: CaseEntity[];
+  calendar: CalendarConfig;
+  labor: LaborConfig;
+  queueArchitecture: 'pooled' | 'siloed';
+  shares?: readonly number[];
+}): ShiftDistributionByCategory[] {
+  const { n, cases, calendar, labor, queueArchitecture } = params;
+  const shares = params.shares ?? RESCUE_LATE_SHARES;
+  if (n <= 1 || calendar.is24x7) return [];
+  const shiftLengthMinutes = labor.dailyProductiveHours * 60;
+  const windowLengthMinutes = getDailyWindowLengthHours(calendar) * 60;
+  if (shiftLengthMinutes >= windowLengthMinutes - 1e-9) return [];
+  const slapMinutes = resolveShiftSlapMinutes(labor);
+  const validStarts = getValidSlapStarts(calendar, shiftLengthMinutes, slapMinutes);
+  const late = computeMinimalCoverStarts(validStarts, shiftLengthMinutes, windowLengthMinutes).filter((o) => o > 0);
+  if (late.length === 0) return [];
+
+  let catWorkloadMinutes: Map<string, number> | undefined;
+  if (queueArchitecture === 'siloed') {
+    catWorkloadMinutes = new Map<string, number>();
+    for (const c of cases) catWorkloadMinutes.set(c.category, (catWorkloadMinutes.get(c.category) || 0) + c.totalAhtMinutes);
+  }
+
+  const out: ShiftDistributionByCategory[] = [];
+  const seen = new Set<string>();
+  const add = (d: ShiftDistributionByCategory | null) => {
+    if (!d || Object.keys(d).length === 0) return;
+    const key = rosterKey(d);
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(d);
+  };
+
+  add(buildCoverageRepairDistribution({ n, calendar, labor, minAgentsPerInterval: 1, queueArchitecture, categoryWorkloadMinutes: catWorkloadMinutes }));
+
+  // One block of `seats` agents: k of them split as evenly as possible over the late starts, the rest at opening.
+  const blockForSeats = (seats: number, share: number): ShiftSlapDistribution | null => {
+    const k = Math.min(seats - 1, Math.max(late.length, Math.round(share * seats)));
+    if (k < late.length) return null; // too few seats for a late starter in every late start
+    const slaps: ShiftSlap[] = [];
+    let left = k;
+    late.forEach((offset, i) => {
+      const count = Math.floor(left / (late.length - i));
+      slaps.push({ startMinutesFromOpen: offset, agentCount: count });
+      left -= count;
+    });
+    slaps.push({ startMinutesFromOpen: 0, agentCount: seats - k });
+    return { slapMinutes, slaps: slaps.filter((s) => s.agentCount > 0).sort((a, b) => a.startMinutesFromOpen - b.startMinutesFromOpen) };
+  };
+
+  const seatsByCategory = catWorkloadMinutes ? allocateAgentsToCategories(catWorkloadMinutes, n) : null;
+  for (const share of shares) {
+    if (!seatsByCategory) {
+      const block = blockForSeats(n, share);
+      add(block ? { __POOLED__: block } : null);
+      continue;
+    }
+    const roster: ShiftDistributionByCategory = {};
+    for (const [category, seats] of Array.from(seatsByCategory.entries()).sort((a, b) => a[0].localeCompare(b[0]))) {
+      if (seats <= 0) continue;
+      const block = blockForSeats(seats, share);
+      if (block) roster[category] = block;
+    }
+    add(roster);
+  }
+  return out;
+}
+
+/**
+ * Pre-screen inputs: every SLA target (overall and per category where set) lowered by RESCUE_SCREEN_MARGIN_PP
+ * and the confidence level set to 50 (the CI bound collapses to about the mean). Occupancy and ASA caps are
+ * NOT relaxed. Used only to decide whether a roster earns the full-R run; its verdict never accepts anything.
+ */
+export function rescueScreenInputs(sla: SLAPolicyConfig, categories: CategoryConfig[]): { sla: SLAPolicyConfig; categories: CategoryConfig[] } {
+  return {
+    sla: { ...sla, confidenceLevelPct: 50, primaryPct: Math.max(0, sla.primaryPct - RESCUE_SCREEN_MARGIN_PP) },
+    categories: categories.map((c) => (c.primaryPct !== undefined ? { ...c, primaryPct: Math.max(0, c.primaryPct - RESCUE_SCREEN_MARGIN_PP) } : c)),
+  };
+}
+
+export type RescueStage = 'screen' | 'primary' | 'confirm';
+
+/**
+ * Evaluator inputs for one rescue step, shared by the sync and async loops so the stage rules live in one
+ * place: screen = first min(R, 5) primary sets with relaxed targets; primary = full R on the primary sets,
+ * unmodified SLA; confirm = full R on the confirmation block (its derived base seed), unmodified SLA.
+ */
+export function resolveRescueEvaluation(
+  stage: RescueStage,
+  ctx: {
+    sla: SLAPolicyConfig;
+    categories: CategoryConfig[];
+    replications: number;
+    baseSeed: number;
+    precomputedCaseSets: PrecomputedCaseSet[];
+    confirmation: { baseSeed: number; sets: () => PrecomputedCaseSet[] };
+  }
+): { sla: SLAPolicyConfig; categories: CategoryConfig[]; replications: number; baseSeed: number; precomputedCaseSets: PrecomputedCaseSet[] } {
+  if (stage === 'screen') {
+    const screen = rescueScreenInputs(ctx.sla, ctx.categories);
+    return {
+      sla: screen.sla,
+      categories: screen.categories,
+      replications: Math.min(ctx.replications, RESCUE_SCREEN_REPLICATIONS),
+      baseSeed: ctx.baseSeed,
+      precomputedCaseSets: ctx.precomputedCaseSets,
+    };
+  }
+  if (stage === 'confirm') {
+    return { sla: ctx.sla, categories: ctx.categories, replications: ctx.replications, baseSeed: ctx.confirmation.baseSeed, precomputedCaseSets: ctx.confirmation.sets() };
+  }
+  return { sla: ctx.sla, categories: ctx.categories, replications: ctx.replications, baseSeed: ctx.baseSeed, precomputedCaseSets: ctx.precomputedCaseSets };
+}
+
+/**
+ * Acceptance state machine for the rescue ladder (same pattern as createRosterKSearch: the caller evaluates
+ * whatever next() returns and record()s the result; sync and async drive the SAME machine). Per rung:
+ * screen -> (pass) primary full-R -> (pass) confirmation full-R -> accept. Any failing stage moves on to the
+ * next rung. The winner carries the PRIMARY-block evaluation, so reported figures stay comparable with every
+ * other N. `alreadyTried` rosters (uniform is undefined/null and ignored) are removed from the ladder.
+ */
+export function createRescueSearch<T extends { passesAllConstraints: boolean }>(params: {
+  ladder: ShiftDistributionByCategory[];
+  alreadyTried?: Array<ShiftDistributionByCategory | null | undefined>;
+}) {
+  const tried = new Set<string>();
+  for (const d of params.alreadyTried ?? []) if (d) tried.add(rosterKey(d));
+  const ladder = params.ladder.filter((d) => !tried.has(rosterKey(d)));
+  let rung = 0;
+  let stage: RescueStage = 'screen';
+  let primaryEv: T | null = null;
+  let winner: { roster: ShiftDistributionByCategory; ev: T; rung: number } | null = null;
+  const rejectedAtConfirmation: number[] = [];
+  let evaluations = 0;
+  return {
+    /** The next roster + stage to evaluate, or null when finished (a winner was found or the ladder is exhausted). */
+    next(): { roster: ShiftDistributionByCategory; stage: RescueStage; rung: number } | null {
+      if (winner || rung >= ladder.length) return null;
+      return { roster: ladder[rung], stage, rung };
+    },
+    record(ev: T): void {
+      evaluations++;
+      if (winner || rung >= ladder.length) return;
+      if (stage === 'screen') {
+        if (ev.passesAllConstraints) stage = 'primary';
+        else rung++;
+        return;
+      }
+      if (stage === 'primary') {
+        if (ev.passesAllConstraints) {
+          primaryEv = ev;
+          stage = 'confirm';
+        } else {
+          rung++;
+          stage = 'screen';
+        }
+        return;
+      }
+      if (ev.passesAllConstraints) {
+        winner = { roster: ladder[rung], ev: primaryEv as T, rung };
+        return;
+      }
+      rejectedAtConfirmation.push(rung);
+      primaryEv = null;
+      rung++;
+      stage = 'screen';
+    },
+    result(): { winner: { roster: ShiftDistributionByCategory; ev: T; rung: number } | null; rejectedAtConfirmation: number[]; evaluations: number; ladderLength: number } {
+      return { winner, rejectedAtConfirmation: [...rejectedAtConfirmation], evaluations, ladderLength: ladder.length };
+    },
+  };
+}
+
 /**
  * Shared coverage-repair planning for searchOptimalHC and searchOptimalHCAsync (they must never
  * drift). `attempt`: repair is applicable at all (coverage floor on, a representative case set
@@ -2561,6 +2824,9 @@ export function searchOptimalHC(params: {
   // gate actually verified, and surfaced as HCSearchOutput.shiftPlacement.winningDistribution.
   const winningDistributionByN = new Map<number, ShiftDistributionByCategory>();
 
+  // Rescue ladder confirmation block (PRD P1-6): built lazily, once per search, shared by every N and rung.
+  const rescueConfirmation = createConfirmationBlock({ intervals, openingWIP, categories, calendar, sla, seed, replications: R });
+
   function evaluateN(n: number, overrideR?: number) {
     const rToUse = overrideR ?? R;
     if (rToUse === R && evalCache.has(n)) return evalCache.get(n)!;
@@ -2611,6 +2877,8 @@ export function searchOptimalHC(params: {
     }
     const repairReasons = coverageRepairReasons(covPlan, finalRes, coverageRes);
 
+    // Rosters already tried at this N, so the rescue ladder below never repeats one.
+    const triedRosters: Array<ShiftDistributionByCategory | null | undefined> = [covPlan.dist];
     if (labor.shiftPlacementEnabled && !finalRes.passesAllConstraints && representativeCases) {
       const placementDist = computeCandidatePlacementDistribution({
         n,
@@ -2619,6 +2887,7 @@ export function searchOptimalHC(params: {
         labor,
         queueArchitecture,
       });
+      triedRosters.push(placementDist);
       if (placementDist) {
         const placedRes = evaluateCandidateStatistical({
           operationalHC: n,
@@ -2638,6 +2907,27 @@ export function searchOptimalHC(params: {
         const picked = pickPlacementOrUniform(finalRes, placedRes, placementDist);
         finalRes = picked.result;
         if (picked.distributionUsed) winningDist = picked.distributionUsed;
+      }
+    }
+
+    // Rescue ladder (PRD P1-6 / L23): Shift Placement ON, N still failing after uniform / repair / analytic placement,
+    // full-R evaluations only (never the 5-rep leap probes). Same shared builder, stage rules and acceptance machine as the async twin.
+    if (labor.shiftPlacementEnabled && !finalRes.passesAllConstraints && rToUse === R && representativeCases) {
+      const rescue = createRescueSearch<typeof finalRes>({
+        ladder: buildRescueLadder({ n, cases: representativeCases, calendar, labor, queueArchitecture }),
+        alreadyTried: triedRosters,
+      });
+      const rescueCtx = { sla, categories, replications: R, baseSeed: seed, precomputedCaseSets, confirmation: rescueConfirmation };
+      for (let c = rescue.next(); c !== null; c = rescue.next()) {
+        rescue.record(evaluateCandidateStatistical({
+          operationalHC: n, intervals, openingWIP, calendar, labor, queueArchitecture, shiftDistribution: c.roster, dispatchFairness,
+          ...resolveRescueEvaluation(c.stage, rescueCtx),
+        }));
+      }
+      const rescued = rescue.result().winner;
+      if (rescued) {
+        finalRes = rescued.ev;
+        winningDist = rescued.roster;
       }
     }
 
@@ -3241,6 +3531,9 @@ export async function searchOptimalHCAsync(params: {
 
   const winningDistributionByN = new Map<number, ShiftDistributionByCategory>();
 
+  // Rescue ladder confirmation block (PRD P1-6): built lazily, once per search, shared by every N and rung.
+  const rescueConfirmation = createConfirmationBlock({ intervals, openingWIP, categories, calendar, sla, seed, replications: R });
+
   function buildHistorySnapshot(): SearchProgressState['evaluatedHistory'] {
     const list: SearchProgressState['evaluatedHistory'] = [];
     const keys = Array.from(evalCache.keys()).sort((a, b) => a - b);
@@ -3335,6 +3628,8 @@ export async function searchOptimalHCAsync(params: {
     // Same shared computeCandidatePlacementDistribution / pickPlacementOrUniform as
     // searchOptimalHC's evaluateN — see that function's comment for the guarantees this
     // preserves (never-worse, monotone-safe gate).
+    // Rosters already tried at this N, so the rescue ladder below never repeats one.
+    const triedRosters: Array<ShiftDistributionByCategory | null | undefined> = [covPlan.dist];
     if (labor.shiftPlacementEnabled && !finalRes.passesAllConstraints && representativeCases) {
       if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
       const placementDist = computeCandidatePlacementDistribution({
@@ -3344,6 +3639,7 @@ export async function searchOptimalHCAsync(params: {
         labor,
         queueArchitecture,
       });
+      triedRosters.push(placementDist);
       if (placementDist) {
         onProgress?.({
           status: 'searching',
@@ -3374,6 +3670,41 @@ export async function searchOptimalHCAsync(params: {
         const picked = pickPlacementOrUniform(finalRes, placedRes, placementDist);
         finalRes = picked.result;
         if (picked.distributionUsed) winningDist = picked.distributionUsed;
+      }
+    }
+
+    // Rescue ladder (PRD P1-6 / L23) - the sync twin's loop, plus cancel checks and replication progress.
+    // A cancel mid-ladder throws before evalCache / winningDistributionByN are touched below.
+    if (labor.shiftPlacementEnabled && !finalRes.passesAllConstraints && rToUse === R && representativeCases) {
+      const rescue = createRescueSearch<typeof finalRes>({
+        ladder: buildRescueLadder({ n, cases: representativeCases, calendar, labor, queueArchitecture }),
+        alreadyTried: triedRosters,
+      });
+      const rescueCtx = { sla, categories, replications: R, baseSeed: seed, precomputedCaseSets, confirmation: rescueConfirmation };
+      for (let c = rescue.next(); c !== null; c = rescue.next()) {
+        if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
+        rescue.record(await evaluateCandidateStatisticalAsync({
+          operationalHC: n, intervals, openingWIP, calendar, labor, queueArchitecture, shiftDistribution: c.roster, dispatchFairness,
+          shouldCancel,
+          onRepProgress: (completedReps, totalReps) => {
+            onProgress?.({
+              status: 'searching',
+              phase: `Phase 2: Statistical Primary SLA Search (Testing N = ${n})`,
+              currentN: n,
+              nMin: nMinAnalytical,
+              maxN: searchCap,
+              percent: progressPct,
+              evaluatedHistory: buildHistorySnapshot(),
+              currentMessage: `${msg} (trying a start-time pattern, ${completedReps}/${totalReps} replications)`,
+            });
+          },
+          ...resolveRescueEvaluation(c.stage, rescueCtx),
+        }));
+      }
+      const rescued = rescue.result().winner;
+      if (rescued) {
+        finalRes = rescued.ev;
+        winningDist = rescued.roster;
       }
     }
 

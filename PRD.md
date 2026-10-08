@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Status** | Draft — as-built specification |
-| **Version** | 1.21.0 |
+| **Version** | 1.22.0 |
 | **Date** | 2026-10-08 |
 | **Owner** | _(unassigned)_ |
 | **Product** | Backoffice WFM Sizing Engine |
-| **Artifact** | `BoWFM.html` — single self-contained offline HTML file (~641 KB) |
+| **Artifact** | `BoWFM.html` — single self-contained offline HTML file (~648 KB) |
 
 > **Scope of this document.** This is an **as-built** PRD: §1–§10 specify the product as it
 > actually behaves today, verified against source. §11 carries known defects and unbuilt
@@ -390,8 +390,11 @@ directly under the control, visible without hovering: with no later starts every
 shift from opening time and leaves when it ends (clause omitted on a 24×7 calendar, where the note
 only says nothing checks on-shift cover), so headcount can go UP and a short SLA can become
 unreachable at any headcount; it also says this is not the Workload Floor switch. The grey help
-leads with what ON does. The Shift Placement help says placement can only keep or lower the
-recommended headcount, never raise it, and the off-state note names the coverage-repair starts as
+leads with what ON does. The Shift Placement help (`ConfigFlow.tsx`) says placement can only keep or lower the
+recommended headcount, never raise it, and (1.22.0) that when a headcount fails with everyone
+starting at opening time the search also tries a few simple start-time patterns before rejecting it,
+accepting one only if it passes the full check twice on independent sets of simulated arrivals, which
+can make the run take longer; the off-state note names the coverage-repair starts as
 present only when the Minimum Coverage Floor is on. The Calendar panel carries a one-line hint next
 to the 00:00–24:00 preset: tick 24x7 for a business that never closes.
 
@@ -834,7 +837,8 @@ under the uniform-start model. A valid shift start is only offered where the age
 daily-productive-hours budget fits entirely inside the business window with no truncation
 (`getValidSlapStarts`, `src/utils/calendar.ts`).
 
-**How a distribution is chosen.** Deterministic and analytic, **zero extra DES runs**: every
+**How a distribution is chosen.** Deterministic and analytic, **zero extra DES runs** for building
+it (the rescue ladder below tries further rosters, and those do cost evaluations): every
 case's release (`clockStart`) and deadline (`primaryDeadline`) are known before simulation
 runs, so a release-gated deadline-coverage condition (a Hall/Horn-style feasibility check,
 bucketed to the same grid as shift starts) can be evaluated directly. A house-monotone greedy
@@ -855,6 +859,74 @@ leaving it off. Fixed by removing N_sla from the starting-point calculation enti
 remains reported as `shiftPlacement.placementFeasibleFloor` for diagnostics only, never used
 to seed or gate the search. This is the property the feature actually
 guarantees: enabling it never makes the recommendation worse.
+
+**Rescue ladder: more start-time rosters are tried before a headcount is rejected (1.22.0,
+2026-10-08; P1-6, closes L23).** Until 1.21.0 a headcount N that failed with everyone starting at
+opening got at most the coverage-repair roster (when the floor is on) and the one roster the analytic
+builder produced, and was then rejected, although a simple roster often passes. Planner file
+(`EGS_Only.csv`), coverage OFF: the analytic roster puts nobody at opening and scores 78.2% at 47,
+while 46 agents at opening + 1 five hours later passes. Now, **with Shift Placement ON only**, when N
+has failed uniform, coverage repair and the analytic roster, the search tries a short fixed list of
+rosters before rejecting it (`buildRescueLadder`, `hc-search.ts`; the first roster that is accepted
+wins):
+- **Rung 0** is the minimal later-start shape: the coverage-repair roster built with a minimum of one
+  agent per late start even when the coverage floor is off (most agents at opening, one agent at each
+  start the minimal cover needs).
+- **Rungs 1-7** put a share of the seats at the minimal-cover late start(s) (split evenly when there
+  are several) and the rest at opening. The shares, in this order: **25, 30, 35, 20, 40, 15, 10 %**
+  (rounded to whole agents, at least one agent per late start and at least one left at opening). A roster
+  equal to an earlier rung, or to one already tried at this N, is dropped. Offsets are always valid
+  starts (`getValidSlapStarts`). The list is empty on a 24×7 calendar and when the shift is not shorter
+  than the business window.
+- **Pre-screen (cost control).** Each rung is first run on the first `min(R, 5)` replications with the
+  SLA targets (overall and per-category where set) lowered by **1.5 points** and the confidence level
+  set to **50%** for the screen only; occupancy and ASA caps are not relaxed. Only a rung that clears
+  the screen earns the full run. The screen can skip a rung, never accept one: its only failure mode is
+  a missed rescue (the headcount then stays rejected, as before 1.22.0). The margin (1.5), the screen
+  size (5) and the late shares are named constants, not settings. Measured: margins 1.0-4.0 give the
+  same recommendations; 0 misses a rescue.
+- **Acceptance.** A rung is accepted only if it passes the **unchanged** CI gate at the full R on the
+  primary replication block **and** the same unchanged gate at the full R on a second, disjoint
+  **confirmation block** of R replications. The confirmation block's arrival sets come from a seed
+  derived deterministically from the run seed (`deriveConfirmationBaseSeed`: the same per-replication
+  formula at replication index r + 1,000,003, so no confirmation replication can equal a primary
+  one); it is built once per search and reused for every N and rung, so Common Random Numbers holds
+  inside it. A rung that fails confirmation is rejected and the next rung is tried. The evaluation
+  that is reported and cached for N is the primary-block one.
+- **Where it runs.** Only on full-R evaluations: never inside the 5-replication leap probes, and
+  never with Shift Placement OFF (the code path is not entered). Siloed runs get one block per
+  category from the DES's own seat split, with the same late share for every category; a category with
+  too few seats for a late starter is left out of the roster and stays at opening. The decision logic
+  (ladder, screen inputs, stage rules, acceptance state machine, confirmation block) is one shared
+  implementation used by both `searchOptimalHC` and `searchOptimalHCAsync`; each call site only adds
+  the loop that evaluates what the machine asks for (the async twin adds cancel checks and
+  replication progress).
+
+*Never-worse statement (unchanged).* A rung replaces "N rejected" only when it passes the same
+CI-gated check as every other roster, on two independent blocks, so enabling Shift Placement still
+never recommends a higher headcount than leaving it off, and never one that fails the gate. N_min
+remains the frozen hard floor. Changed: the recommendation with Shift Placement ON can now be
+**lower** than it was in 1.21.0 (it never rises).
+
+*Measured moves (same seeds, engine at 1.21.0 vs 1.22.0).*
+- Planner's own configuration (Shift Placement ON, coverage ON): **47, unchanged**, identical roster
+  (`0:32 300:15`), polish status and search history; run cost +8%.
+- Planner file, coverage OFF, Shift Placement ON: **48 → 47** (46 at opening + 1 later).
+- D33 fixture (08:00-22:00, 9 h, SLA 80% / 4 h), coverage ON: **22 → 21**.
+- Support sample, coverage OFF: **stays 28**: the rescued 27 (26 at opening + 1 later) passes the search
+  seed by about 0.1 point but only 7 of 21 fresh seeds, and it fails the confirmation block (today's 28
+  passes 21 of 21).
+- Test-suite fixtures (coverage ON): D50 and D65.1-.3 **9 → 7**, D51 **17 → 14**, D52 and D65.4
+  **19 → 18**, the D50.4 spike fixture (97% / 2 h) **29 → 18**, the D65.5 no_improvement fixture
+  **12 → 9**. Each of these suite-fixture numbers passes the unchanged gate on 20 of 20 fresh seeds.
+- Shift Placement OFF: unchanged everywhere measured (digest-identical on the planner file, D33 and the
+  built-in samples). The healthcare and claims samples stay at 31.
+- Run cost (simulations run, Shift Placement ON): +8% on the planner's configuration, up to about
+  double on the support sample with coverage OFF (each failing N now pays for the rungs that reach
+  the full run, plus one confirmation run for a rung that passes). Progress text shows "trying a
+  start-time pattern" during the ladder.
+- Saved results from earlier versions with Shift Placement ON may not reproduce: the same data can now
+  give a lower headcount and a different roster.
 
 **Shift-end is now enforced (non-24×7, 2026-08-28).** An agent's presence is now bounded by
 their own shift length, not just the daily-minute budget and business close — previously an
@@ -889,9 +961,10 @@ Measured effects (same seeds):
   (D33: 28 vs 22; support 28 vs 27; planner 48 vs 47), since coverage ON forces a late starter that
   serves the evening.
 - Minimum coverage OFF **and** Shift Placement ON is different, and that explanation does not hold
-  there. Measured on the planner file: the search recommends 48 although 47 passes every gate with
-  placed starts (32 agents at opening + 15 starting five hours later, CI lower bound 80.8%); the
-  placement builder does not try that roster before rejecting 47 (§10 L23, §11 P1-6).
+  there. Measured on the planner file at 1.21.0: the search recommended 48 although 47 passes every
+  gate with placed starts (32 agents at opening + 15 starting five hours later, CI lower bound 80.8%);
+  the placement builder did not try that roster before rejecting 47. Closed in 1.22.0 by the rescue
+  ladder below (that combination now recommends 47; P1-6, L23 removed).
 - A short SLA can become unreachable with a single shift: the D52 fixture (08:00–20:00, 8 h) plateaus
   at 95.2% attainment at every headcount up to 60, because cases arriving just before shift end
   wait until the next morning.
@@ -1231,18 +1304,18 @@ comment. Nothing else.
 
 ## 9. Validation and quality
 
-### 9.1 Automated test suites — 1,331 checks (174 + 901 + 92 + 164 trusted-source)
+### 9.1 Automated test suites — 1,493 checks (174 + 1,063 + 92 + 164 trusted-source)
 
 | Suite | Tests | Covers |
 |---|---|---|
 | `scripts/verify-fixes.mts` | 174 | Legacy regression: CSV parsing, date handling, calendar arithmetic, CRN consistency, occupancy semantics, standalone artifact integrity, analytical infeasibility diagnosis, 24x7 midnight budget accounting |
-| `scripts/verify-sizing-fixes.mts` | 901 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement, fair agent assignment (D43: spread bounds, determinism, EDF order pinned to the pre-change engine, OFF = original HC, HC pins on pooled/siloed/staggered/24x7; D44: no double-booking in gated 24x7 runs; D45: availability accrual and pinned HC of the three built-in samples; D47: Workload Floor toggle; D48: clock-start derivation; D49: pinned HC of `test_files/AJM_Only.csv`; D50/D51/D52: roster polish at fixed HC — pooled, siloed guard, per-queue search; D53: Results use run-time settings; D54: number fields keep what is typed; D55-D61 (G12): the frozen sizing decisions are guarded by tests — dispatch order incl. the priority tie-break, business-calendar `latestSafeStart`, CI-gated acceptance (primary / per-category / occupancy cap / ASA each use the confidence bound, not the mean), Common Random Numbers, unfinished cases in the SLA denominator, Gross HC and harmonic shrinkage, volume rounding; each proven red against its own mutation; D62 (G1) + D63 (G1-a: stray date blocks from 8 empty days): horizon from demand only, backlog injection clamp, rule D4 overdue-at-start scoring, search N_min/N_occ/recommendation with old and Friday backlog (sync = async), and the three new data-quality rules), `D64` (F2: 24x7 budget-exhausted parks hand back at once - zero avoidable waits, legitimate waits kept, SLA monotone in headcount, business-hours digest pinned, stress + determinism), `D65` (F3: statistics describe the adopted roster), `D66` (G2 + H2: numbers read from files), `D67` (input safety part 2: absolute-instant timezone checks, marker count and warning, category spelling merge, rename list, backlog match by key, samples unchanged), `D68` (input safety part 3: reader errors E1-E7 and warnings W1-W3 with exact rows, pipe delimiter, quoted delimiter/line-break row numbers, UTF-16-style tab file, duplicate headers, file warnings in data quality, identical to the legacy reader on clean files and the built-in samples; D69: unmapped required columns are named; D70: stale-results fingerprints for demand data and opening backlog, incl. the real mapping function; `D71` (P2-9): fixed shifts on every non-24x7 run — no-distribution run equals an explicit single cohort at offset 0, nobody works past their own shift end, adherence does not shorten it, 24x7-without-distribution and equal-length-day controls unchanged, determinism, monotone pass/fail sweep, CI-gate rejection, `fixedShifts` flag; D33.7 / D52.3b pin the new coverage-off numbers) |
+| `scripts/verify-sizing-fixes.mts` | 1,063 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement, fair agent assignment (D43: spread bounds, determinism, EDF order pinned to the pre-change engine, OFF = original HC, HC pins on pooled/siloed/staggered/24x7; D44: no double-booking in gated 24x7 runs; D45: availability accrual and pinned HC of the three built-in samples; D47: Workload Floor toggle; D48: clock-start derivation; D49: pinned HC of `test_files/AJM_Only.csv`; D50/D51/D52: roster polish at fixed HC — pooled, siloed guard, per-queue search; D53: Results use run-time settings; D54: number fields keep what is typed; D55-D61 (G12): the frozen sizing decisions are guarded by tests — dispatch order incl. the priority tie-break, business-calendar `latestSafeStart`, CI-gated acceptance (primary / per-category / occupancy cap / ASA each use the confidence bound, not the mean), Common Random Numbers, unfinished cases in the SLA denominator, Gross HC and harmonic shrinkage, volume rounding; each proven red against its own mutation; D62 (G1) + D63 (G1-a: stray date blocks from 8 empty days): horizon from demand only, backlog injection clamp, rule D4 overdue-at-start scoring, search N_min/N_occ/recommendation with old and Friday backlog (sync = async), and the three new data-quality rules), `D64` (F2: 24x7 budget-exhausted parks hand back at once - zero avoidable waits, legitimate waits kept, SLA monotone in headcount, business-hours digest pinned, stress + determinism), `D65` (F3: statistics describe the adopted roster), `D66` (G2 + H2: numbers read from files), `D67` (input safety part 2: absolute-instant timezone checks, marker count and warning, category spelling merge, rename list, backlog match by key, samples unchanged), `D68` (input safety part 3: reader errors E1-E7 and warnings W1-W3 with exact rows, pipe delimiter, quoted delimiter/line-break row numbers, UTF-16-style tab file, duplicate headers, file warnings in data quality, identical to the legacy reader on clean files and the built-in samples; D69: unmapped required columns are named; D70: stale-results fingerprints for demand data and opening backlog, incl. the real mapping function; `D71` (P2-9): fixed shifts on every non-24x7 run — no-distribution run equals an explicit single cohort at offset 0, nobody works past their own shift end, adherence does not shorten it, 24x7-without-distribution and equal-length-day controls unchanged, determinism, monotone pass/fail sweep, CI-gate rejection, `fixedShifts` flag; D33.7 / D52.3b pin the new coverage-off numbers), `D72` (P1-6, 119 checks: the rescue ladder - ladder generator unit checks incl. siloed blocks, 24x7 and shift >= window, pre-screen inputs, stage rules, the acceptance state machine incl. a real DES case where the screen passes and full R fails, the confirmation block (closed-form derived seed, disjoint from the primary block, built once), measured rescues, never-a-false-accept re-evaluation, never-worse sweep over fixtures and samples, Shift Placement OFF digest controls, determinism, sync = async, monotone pass/fail with the ladder active), `D73` (P1-6, 42 checks: the roster-polish paths `adopted` pooled and siloed, `kept_current_failed_gate` at N >= 8 and siloed `adopted_partial` with one queue saturating while another improves, each on a fixture FOUND AT RUN TIME by a deterministic ordered scan - a scan that finds nothing fails; plus the F3 statistics on the adopted rosters). 45 pins in D50 / D51 / D52 / D65 were re-pinned on 2026-10-08 (P1-6) with dated notes: HC pins "equals Shift Placement OFF" became "<= OFF" plus the exact new number (D50 7 / gross 8, D51 14 / 16, D52 18 / 20), polish-status pins on the fixtures whose rescued roster leaves nothing to improve became `no_improvement`, and D65 digests, statistics and the binding label moved with the headcount (D65.5b: the recommendation itself moved 12 -> 9, asserted in D65.5c) |
 | `scripts/verify-agent-analytics.mts` | 92 | Export timestamps equal the on-screen formatter; agent analytics reconcile to `completedCases` / `totalHandlingMinutes` / `agentFairness`; work-share case credit; scheduled minutes capped at the agent's own shift; run facts (`staggered`, `drainDates`, `pooledCategoryFilter`); the three-section export and the Notes wording (AA.40-AA.45); a 24×7 no-distribution fixture for the "around the clock" case (AA.46-AA.46e) |
 | `scripts/verify-trusted-source.mts` (`npm run test:trusted-source`) | 164 | Hand-derived ground truth in `trusted-source-validation.json` (T0 invariants 35, T1 domain algebra 71, T2 hand-traced DES 31, T3 characterization 27). Authored under `Asia/Dubai`; on any other host timezone it prints a warning and continues (verified: all 164 pass under UTC, America/New_York, Asia/Tokyo, Pacific/Auckland, Europe/London) |
 | `scripts/audit-compare.mts` (`npm run test:audit`, opt-in, ~30 min) | 24 cells | Re-runs all four `test_files/` samples × 6 settings and fails on any difference from `docs/audit/sample-hc-after-2026-09-30.jsonl` |
 | `scripts/check-artifact-freshness.mts` | gate | Fails if `BoWFM.html` is missing or older than shippable sources (`npm run check:artifact`) |
 
-Known difference (2026-10-08, 1.21.0, P2-9): since 1.21.0 the baseline `docs/audit/sample-hc-after-2026-09-30.jsonl` differs in the 4 infeasible Wall Clock + Arrival (WA) cells, `slaPct` only (AJM_Only 46 -> 32.6, AJM_Simu 45.4 -> 30.2, EGS_Only - With Reduction 45.3 -> 29.9, EGS_Only 45.4 -> 29.8), because the failing uniform audit run now has a shift end. The baseline has not been regenerated pending owner approval, so `npm run test:audit` exits 1 on those 4 cells; no recommended headcount differs.
+Known difference (2026-10-08, 1.21.0, P2-9): since 1.21.0 the baseline `docs/audit/sample-hc-after-2026-09-30.jsonl` differs in the 4 infeasible Wall Clock + Arrival (WA) cells, `slaPct` only (AJM_Only 46 -> 32.6, AJM_Simu 45.4 -> 30.2, EGS_Only - With Reduction 45.3 -> 29.9, EGS_Only 45.4 -> 29.8), because the failing uniform audit run now has a shift end. The baseline has not been regenerated pending owner approval, so `npm run test:audit` exits 1 on those 4 cells; no recommended headcount differs. Re-run 2026-10-08 after 1.22.0 (P1-6, rescue ladder): the same 4 WA cells differ by the same `slaPct` values and nothing else; all 4 Shift-Placement-ON (PON) cells are identical to the baseline (AJM_Only 16 kept_current_failed_gate, AJM_Simu 123 / EGS_Only - With Reduction 80 / EGS_Only 100 adopted_partial, same SLA and tail), i.e. the ladder moved no audit cell (20/24 identical, exit 1 from the 4 WA cells only; ~1 h with 6 parallel jobs).
 
 Run with `npm test`: four suites (`verify-fixes`, `verify-sizing-fixes`, `verify-agent-analytics`, `verify-trusted-source`) followed by the freshness gate. No test framework is used — that would breach NFR-2.1; the suites use a
 plain assert helper.
@@ -1312,7 +1385,9 @@ Behaviours a user must understand to interpret results correctly.
 | **L20** | **Agent Analytics "Scheduled (min)" runs to the end of each day for a 24×7 run without placed start times** (1.20.3; narrowed in 1.21.0). Every run whose business has opening and closing hours now has a shift end, so Scheduled is the agent's own shift there. Only a 24×7 run with no start distribution keeps agents on around the clock, so Scheduled runs to the end of each day and Utilisation reads low when the day is longer than the productive hours (e.g. 33% against 41-45% occupancy on a full day of the 4-agent, 8-productive-hour fixture AA.46). The panel and the export state this (amber note, Notes section); the number itself is unchanged. A part-day after the data ends keeps the minutes actually on shift (it is labelled, not scaled to a full shift). | Display only; sizing, recommended HC and Results occupancy are unaffected. Place start times (Shift Placement or minimum coverage) to get per-shift utilisation; read occupancy (busy / available) when the pill says "Shifts: around the clock". |
 | **L21** | **24×7 runs without placed start times keep agents on around the clock** (1.21.0, P2-9 left this case on the old model by decision). The simulator has no shift end there: an agent is limited only by the daily productive time and the midnight spill-over rules. With minimum coverage on, the coverage-repair stagger usually places starts, so this mostly affects 24×7 runs with the floor off or a headcount too small to stagger. | Recommended headcount for those runs can be lower than a real roster would need. Turn minimum coverage on or enable Shift Placement to get fixed shifts on a 24×7 calendar. |
 | **L22** | **A business entered as 00:00–24:00 without the 24×7 option gets one shift from 00:00** (1.21.0). It counts as having opening hours, so every agent works one shift of the daily productive hours from 00:00 and the rest of the day is unstaffed unless minimum coverage or Shift Placement gives some agents later starts. Tick the 24×7 option for a round-the-clock business. | The Capacity Basis note on the Labor page says so. Headcount for such a business can be higher than for the same business entered as 24×7. |
-| **L23** | **With Shift Placement ON and the coverage floor OFF the search can recommend one agent more than needed** (1.21.0 review E-1). Planner file (`EGS_Only.csv`): recommends 48, although 47 passes every gate with placed starts (32 agents at opening + 15 starting five hours later, CI lower bound 80.8%). The placement builder (`hc-search.ts`) never tries that roster and the walk stops at the first failure. A search weakness, not a physical limit. | Headcount can be one higher than necessary in that combination (coverage floor ON gives 47). Backlog: §11 P1-6 (a search change, needs approval). |
+| **L24** | **Roster polish can leave a hairline SLA margin that does not always reproduce on fresh arrivals** (1.22.0, found while reviewing P1-6). The Stage 3b polish adopts a re-spread roster as long as the CI gate passes on the search's own arrival sets, so the adopted roster can sit within a fraction of a point of the target. Measured: planner file, coverage OFF, Shift Placement ON, headcount 48 (the 1.21.0 answer with its polished roster) passes the unchanged gate on 3 of 6 fresh seeds. The ladder's confirmation block (Stage 3a) protects rescued rosters only; the polish does not use it. | The headcount is still the lowest one the search's gate accepted, but a re-run with another seed can differ by one agent on these hairline cases. Treat a polished roster's SLA margin as indicative. Backlog: §11 P1-7. |
+| **L25** | **The per-category gate on low-volume categories can be hairline with the coverage floor ON** (1.22.0, unchanged by this release). Support sample, coverage ON, headcount 27: the unchanged gate (including each category's own target) passes on only 7 of 20 fresh seeds. A category with few cases per replication has a wide confidence interval, so its verdict flips with the arrival seed. | The recommendation is reproducible for a given seed and settings, but one agent more or fewer is within the noise of a low-volume category. Backlog: §11 P1-8. |
+| **L26** | **The ladder applies one late share to every queue in a siloed run** (1.22.0). Each category gets the same share (25, 30, ... %) of its own seats starting late; a category with too few seats for a late starter stays at opening. A better split between queues (for example more late starters in the queue with the evening work) is not tried. | A siloed run can miss a rescue that a per-queue split would find and then keeps the higher headcount it had before 1.22.0; it can never accept a roster that fails the gate. |
 
 ---
 
@@ -1442,14 +1517,22 @@ removed dependency. It is unreferenced and does not reach the artifact, but it a
 server-side AI capability that directly contradicts the offline contract. *Rationale: a
 compliance reviewer reading the manifest would reasonably conclude the product calls out.*
 
-**P1-6 — When Shift Placement is on and coverage is off, try the coverage-repair roster before
-rejecting a headcount.** With the Minimum Coverage Floor off, the placement builder only tries its
-own distributions; the coverage-repair roster (most agents at opening, a few starting later so the
-evening is never empty) is never tried. Planner file: 48 recommended although 47 passes every gate
-with 32 at opening and 15 five hours later (§10 L23). This is a change to the search
-(`hc-search.ts`, sync and async together) and needs explicit approval. *Rationale: the planner
-is told to turn Shift Placement on to staff later hours, yet in this combination it can still
-cost one extra agent.*
+**P1-7 — Give the roster polish the same two-block confirmation the rescue ladder has.** The Stage 3b
+polish adopts a re-spread roster once the CI gate passes on the search's own arrival sets, so the
+adopted roster can sit on a hairline margin that does not reproduce on fresh arrivals (§10 L24: planner
+file, coverage OFF, headcount 48 with its polished roster passes 3 of 6 fresh seeds). Candidate
+approach: require a polished step to pass the unchanged gate on the confirmation block too (the
+block already exists per search), keeping the previous step when it does not. This changes which
+roster is shown, not the headcount; needs approval because it touches the polish in `hc-search.ts` (sync
+and async together). *Rationale: a planner who re-runs with another seed should not see a roster whose
+SLA margin was a coin flip.*
+
+**P1-8 — Decide how a low-volume category's own target should be gated.** The per-category gate uses the
+same CI rule as the overall gate, but a category with few cases per replication has a wide interval, so
+its verdict flips with the seed (§10 L25: support sample, coverage ON, headcount 27 passes the unchanged
+gate on 7 of 20 fresh seeds). Options: a minimum case count below which the category is reported but
+not gated, or a wider R for such categories. Either changes recommendations and needs approval.
+*Rationale: the headline number should not depend on the arrival seed for the sake of one thin queue.*
 
 ### P2 — Polish and technical debt
 

@@ -326,9 +326,12 @@ export function ConfigFlow({
                   a uniform business-open start may be rescued by a staggered shift-start distribution,
                   used only when it verifiably passes; (2) once Req HC is fixed, the roster is re-spread
                   across business hours for the best coverage and adopted only if every SLA, occupancy
-                  and coverage gate still passes at the same headcount. Off by default. Turning it on
-                  can only keep or lower the recommended headcount, never raise it; the SLA margin may
-                  shrink but stays at or above target.
+                  and coverage gate still passes at the same headcount. When a headcount fails with
+                  everyone starting at opening time, the search also tries a few simple start-time
+                  patterns before rejecting it, and accepts one only if it passes the full check twice
+                  on independent sets of simulated arrivals; this can make the run take longer. Off by
+                  default. Turning it on can only keep or lower the recommended headcount, never raise
+                  it; the SLA margin may shrink but stays at or above target.
                 </p>
               </div>
 

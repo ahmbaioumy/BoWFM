@@ -13,8 +13,14 @@ has no shift end) — leaving the tail of the window with **zero available agent
 *regardless of headcount*. No amount of "how many" fixes a "when" problem. The opt-in
 **deadline-coverage shift placement** (`labor.shiftPlacementEnabled`, off by default — see
 PRD §6 Stage 3a and `project_context.md` §5) exists specifically to close that gap: it lets
-the search also try staggered shift-start times, analytically (zero extra simulation runs),
-before concluding a candidate headcount fails. It is a targeted fix for one structural
+the search also try staggered shift-start times before concluding a candidate headcount fails:
+first the analytic placement roster (zero extra simulation runs), and since 2026-10-08 (PRD 1.22.0)
+a short fixed ladder of simple rosters as well — a minimal "a few agents start later" shape, then
+25, 30, 35, 20, 40, 15 and 10 % of the seats starting late. A ladder roster is accepted only if it
+passes the full check on two independent sets of simulated arrivals (a quick relaxed screen on
+five replications only decides whether a roster is worth the full run, it never accepts one), so
+the headcount can only stay or go down, never up, and each lower number passes the same gate as
+any other. It is a targeted fix for one structural
 failure mode, not a rostering engine — everything below about shift structures, contractual
 limits, skills, fairness, and statutory rules remains genuinely unmodelled.
 

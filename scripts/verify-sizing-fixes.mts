@@ -3663,14 +3663,22 @@ console.log('\n--- Suite D50: roster polish at fixed HC ---');
   const rp = (on50 as any).rosterPolish;
 
   // D50.1
-  assert(rp !== undefined && rp.status === 'adopted', 'D50.1a placement ON, uniform/repair passes: polish adopted', `status=${rp?.status} reason=${rp?.reason}`);
-  assert(!!rp?.polished && (rp.polished.minOnShift > rp.current.minOnShift || (rp.polished.minOnShift === rp.current.minOnShift && rp.polished.gapAgentHours < rp.current.gapAgentHours - 1e-9)), 'D50.1b adopted roster improves coverage (higher minOnShift, tie -> lower gap)', `cur=${JSON.stringify(rp?.current)} pol=${JSON.stringify(rp?.polished)}`);
+  // Re-pinned 2026-10-08 (P1-6): with Shift Placement ON the search now tries a ladder of simple start-time rosters, each confirmed on a second
+  // independent replication block, before rejecting a headcount. On this fixture that moves the recommendation 9 -> 7 with a rescued roster that
+  // leaves nothing to re-spread. D50.1a: status was 'adopted' -> now 'no_improvement' (the original adopted-path intent moved to D73.1, scan-found fixture).
+  // D50.1b: was "the adopted roster improves coverage" -> now "the best reachable re-spread does NOT beat the current roster"
+  // (current minOnShift 3, 66.7% of buckets meet need; best reachable re-spread minOnShift 1, 62.5%).
+  assert(rp !== undefined && rp.status === 'no_improvement', 'D50.1a placement ON, rescued N=7 roster: polish finds nothing to improve (no_improvement; was adopted before P1-6)', `status=${rp?.status} reason=${rp?.reason}`);
+  assert(!!rp?.polished && !(rp.polished.minOnShift > rp.current.minOnShift || (rp.polished.minOnShift === rp.current.minOnShift && rp.polished.gapAgentHours < rp.current.gapAgentHours - 1e-9)), 'D50.1b no_improvement: the best reachable re-spread does not beat the current roster (was: adopted roster improves coverage)', `cur=${JSON.stringify(rp?.current)} pol=${JSON.stringify(rp?.polished)}`);
   assert(!!rp?.polished && rp.polished.minOnShift >= 1, 'D50.1c polished roster keeps at least one agent on shift in every bucket', `min=${rp?.polished?.minOnShift}`);
 
   // D50.2
-  assert(on50.recommendedHC === off50.recommendedHC && on50.staffing?.grossHCTotal === off50.staffing?.grossHCTotal, 'D50.2a recommendedHC and grossHCTotal equal the placement-OFF run (sync)', `off=${off50.recommendedHC}/${off50.staffing?.grossHCTotal} on=${on50.recommendedHC}/${on50.staffing?.grossHCTotal}`);
+  // Re-pinned 2026-10-08 (P1-6): was "equals the placement-OFF run" (9 / gross 10). With the rescue ladder the placement-ON search rejects fewer
+  // headcounts: it now recommends 7 (gross 8), which is <= the placement-OFF 9 / 10 (a rescued roster passes the unchanged gate on two independent blocks).
+  assert(on50.recommendedHC !== null && off50.recommendedHC !== null && on50.recommendedHC <= off50.recommendedHC && on50.recommendedHC === 7 && on50.staffing?.grossHCTotal === 8, 'D50.2a recommendedHC <= the placement-OFF run and pinned at 7 / gross 8 (sync; was equal to OFF = 9 / 10)', `off=${off50.recommendedHC}/${off50.staffing?.grossHCTotal} on=${on50.recommendedHC}/${on50.staffing?.grossHCTotal}`);
   const on50Async = await searchOptimalHCAsync(run50(labor50On, iv50, sla50));
-  assert(on50Async.recommendedHC === off50.recommendedHC && on50Async.staffing?.grossHCTotal === off50.staffing?.grossHCTotal, 'D50.2b recommendedHC and grossHCTotal equal the placement-OFF run (async)', `async=${on50Async.recommendedHC}`);
+  // Re-pinned 2026-10-08 (P1-6): same as D50.2a (was equal to OFF = 9 / 10; now 7 / 8).
+  assert(on50Async.recommendedHC !== null && off50.recommendedHC !== null && on50Async.recommendedHC <= off50.recommendedHC && on50Async.recommendedHC === 7 && on50Async.staffing?.grossHCTotal === 8, 'D50.2b recommendedHC <= the placement-OFF run and pinned at 7 / gross 8 (async; was equal to OFF = 9 / 10)', `async=${on50Async.recommendedHC}/${on50Async.staffing?.grossHCTotal}`);
 
   // D50.3
   const rpA = (on50Async as any).rosterPolish;
@@ -3678,7 +3686,9 @@ console.log('\n--- Suite D50: roster polish at fixed HC ---');
 
   // D50.5
   const minCov = on50.finalDESResult?.minCoverageObserved ?? -1;
-  assert(rp?.status === 'adopted' && minCov >= 1, 'D50.5 adopted roster satisfies the coverage floor in the audit DES', `status=${rp?.status} minCoverageObserved=${minCov}`);
+  // Re-pinned 2026-10-08 (P1-6): the precondition changed from status 'adopted' to the roster the search keeps ('no_improvement', asserted in D50.1a, so not
+  // repeated here); the floor check itself still holds (minCoverageObserved 3, floor 1). The adopted-roster version of this check lives in D73.1k.
+  assert(minCov >= 1, 'D50.5 the roster the search keeps (status no_improvement, D50.1a; was adopted) satisfies the coverage floor in the audit DES', `status=${rp?.status} minCoverageObserved=${minCov}`);
 
   // D50.6
   const on50b = searchOptimalHC(run50(labor50On, iv50, sla50));
@@ -3695,7 +3705,10 @@ console.log('\n--- Suite D50: roster polish at fixed HC ---');
     const onC = searchOptimalHC(run50(labor50On, ivC, slaC));
     const rpC = (onC as any).rosterPolish;
     const offC = searchOptimalHC(run50(labor50Off, ivC, slaC));
-    assert(rpC !== undefined && rpC.status === 'kept_current_failed_gate' && typeof rpC.reason === 'string' && rpC.reason.length > 0 && rpC.movesApplied === 0, 'D50.4a first move fails the gate: status kept_current_failed_gate with reason', `status=${rpC?.status} reason=${rpC?.reason}`);
+    // Re-pinned 2026-10-08 (P1-6): status was 'kept_current_failed_gate' with movesApplied 0 -> now 'no_improvement' (no movesApplied field): the
+    // rescue ladder finds a roster at a lower headcount whose coverage no re-spread can beat, so the polish never gets as far as a first move.
+    // The original path (reason text, 0 moves, final roster = pre-polish roster) is asserted on a scan-found fixture in D73.3.
+    assert(rpC !== undefined && rpC.status === 'no_improvement' && typeof rpC.reason === 'string' && rpC.reason.length > 0 && rpC.movesApplied === undefined, 'D50.4a rescued roster leaves nothing to re-spread: status no_improvement with reason, no moves applied (was kept_current_failed_gate, 0 moves)', `status=${rpC?.status} reason=${rpC?.reason}`);
     // Here the current roster is a placement RESCUE (uniform/repair cannot pass at all: OFF is infeasible),
     // so HC is compared against that existing behaviour by construction, not against OFF.
     assert(offC.recommendedHC === null && onC.recommendedHC !== null, 'D50.4b control: HC still comes from the unchanged search (placement rescue), polish only re-spreads', `off=${offC.recommendedHC} on=${onC.recommendedHC}`);
@@ -3860,16 +3873,26 @@ console.log('\n--- Suite D51: roster polish, siloed ---');
     return keys.every((k) => rp.byCategory[k].polished && rp.byCategory[k].polished.minOnShift >= rp.byCategory[k].current.minOnShift);
   };
 
-  const checkScenario = async (tag: string, ivs: StandardInterval[], sla: SLAPolicyConfig, wantStatus: 'adopted' | 'adopted_partial') => {
+  // Re-pinned 2026-10-08 (P1-6): D51.1 no longer reaches 'adopted' - the rescue ladder lowers the placement-ON headcount from 17 to 14 (OFF stays 17)
+  // and the rescued roster leaves nothing to re-spread ('no_improvement'). `lower` carries the new pinned HC / gross HC for that case; the adopted-path
+  // version of every D51.1 check lives in D73.2 (scan-found siloed fixture). D51.2 (adopted_partial) is unchanged.
+  const checkScenario = async (tag: string, ivs: StandardInterval[], sla: SLAPolicyConfig, wantStatus: 'adopted' | 'adopted_partial' | 'no_improvement', lower?: { hc: number; gross: number }) => {
     const off = searchOptimalHC(run51(labor51Off, ivs, sla));
     const on = searchOptimalHC(run51(labor51On, ivs, sla));
     const rp = (on as any).rosterPolish;
     assert(rp?.status === wantStatus, `${tag}a siloed placement ON: polish ${wantStatus}`, `status=${rp?.status} reason=${rp?.reason}`);
-    assert(!!rp?.polished && (rp.polished.minOnShift > rp.current.minOnShift || (rp.polished.minOnShift === rp.current.minOnShift && rp.polished.gapAgentHours < rp.current.gapAgentHours - 1e-9)), `${tag}b org-wide coverage improves`, `cur=${JSON.stringify(rp?.current)} pol=${JSON.stringify(rp?.polished)}`);
-    assert(catGuardOk(rp), `${tag}c both categories reported and no category's minOnShift decreases`, JSON.stringify(rp?.byCategory));
-    assert(on.recommendedHC === off.recommendedHC && on.staffing?.grossHCTotal === off.staffing?.grossHCTotal && on.recommendedHC !== null, `${tag}d HC and gross HC equal placement OFF (sync)`, `off=${off.recommendedHC}/${off.staffing?.grossHCTotal} on=${on.recommendedHC}/${on.staffing?.grossHCTotal}`);
+    const improvesOrg = !!rp?.polished && (rp.polished.minOnShift > rp.current.minOnShift || (rp.polished.minOnShift === rp.current.minOnShift && rp.polished.gapAgentHours < rp.current.gapAgentHours - 1e-9));
+    if (wantStatus === 'no_improvement') {
+      assert(!!rp?.polished && !improvesOrg, `${tag}b org-wide: the best reachable re-spread does not beat the current roster (no_improvement; was: coverage improves)`, `cur=${JSON.stringify(rp?.current)} pol=${JSON.stringify(rp?.polished)}`);
+      assert(JSON.stringify(Object.keys(rp?.byCategory ?? {}).sort()) === JSON.stringify(['A', 'B']) && Object.values<any>(rp?.byCategory ?? {}).every((v) => v.current && v.polished && v.movesApplied === undefined), `${tag}c both categories reported with current and best-reachable profiles and no moves applied (no_improvement; was: no category's minOnShift decreases)`, JSON.stringify(rp?.byCategory));
+    } else {
+      assert(improvesOrg, `${tag}b org-wide coverage improves`, `cur=${JSON.stringify(rp?.current)} pol=${JSON.stringify(rp?.polished)}`);
+      assert(catGuardOk(rp), `${tag}c both categories reported and no category's minOnShift decreases`, JSON.stringify(rp?.byCategory));
+    }
+    const eqOff = (h: number | null, g: number | undefined) => (lower ? h !== null && off.recommendedHC !== null && h <= off.recommendedHC && h === lower.hc && g === lower.gross : h === off.recommendedHC && g === off.staffing?.grossHCTotal && h !== null);
+    assert(eqOff(on.recommendedHC, on.staffing?.grossHCTotal), lower ? `${tag}d HC <= placement OFF and pinned at ${lower.hc} / gross ${lower.gross} (sync; was equal to OFF)` : `${tag}d HC and gross HC equal placement OFF (sync)`, `off=${off.recommendedHC}/${off.staffing?.grossHCTotal} on=${on.recommendedHC}/${on.staffing?.grossHCTotal}`);
     const onA = await searchOptimalHCAsync(run51(labor51On, ivs, sla));
-    assert(onA.recommendedHC === off.recommendedHC && onA.staffing?.grossHCTotal === off.staffing?.grossHCTotal, `${tag}e HC and gross HC equal placement OFF (async)`, `async=${onA.recommendedHC}`);
+    assert(eqOff(onA.recommendedHC, onA.staffing?.grossHCTotal), lower ? `${tag}e HC <= placement OFF and pinned at ${lower.hc} / gross ${lower.gross} (async; was equal to OFF)` : `${tag}e HC and gross HC equal placement OFF (async)`, `async=${onA.recommendedHC}/${onA.staffing?.grossHCTotal}`);
     assert(JSON.stringify((onA as any).rosterPolish) === JSON.stringify(rp) && distStr(onA.shiftPlacement?.winningDistribution) === distStr(on.shiftPlacement?.winningDistribution), `${tag}f sync === async (rosterPolish incl. byCategory + adopted roster)`, '');
     const on2 = searchOptimalHC(run51(labor51On, ivs, sla));
     assert(JSON.stringify((on2 as any).rosterPolish) === JSON.stringify(rp) && distStr(on2.shiftPlacement?.winningDistribution) === distStr(on.shiftPlacement?.winningDistribution), `${tag}g deterministic across runs`, '');
@@ -3879,7 +3902,7 @@ console.log('\n--- Suite D51: roster polish, siloed ---');
     return { on, rp };
   };
 
-  await checkScenario('D51.1', mkIv51((h) => (h >= 12 && h < 16 ? 14 : 3), (h) => (h >= 12 && h < 16 ? 10 : 2)), mkSla51(85, 3), 'adopted');
+  await checkScenario('D51.1', mkIv51((h) => (h >= 12 && h < 16 ? 14 : 3), (h) => (h >= 12 && h < 16 ? 10 : 2)), mkSla51(85, 3), 'no_improvement', { hc: 14, gross: 16 });
   const part = await checkScenario('D51.2', mkIv51((h) => (h === 8 ? 60 : 4), (h) => (h === 8 ? 40 : 3)), mkSla51(95, 4), 'adopted_partial');
   assert(part.rp?.movesApplied > 0 && part.rp?.movesApplied < part.rp?.movesTotal, 'D51.2i partial: 0 < k* < K', `${part.rp?.movesApplied}/${part.rp?.movesTotal}`);
 
@@ -3974,18 +3997,29 @@ console.log('\n--- Suite D52: roster polish, siloed per-queue parallel search --
   const bc = rp52?.byCategory ?? {};
 
   // D52.1 — the later category spreads further than the first one allows.
-  assert(rp52?.status === 'adopted_partial', 'D52.1a siloed placement ON: adopted_partial (A saturates)', `status=${rp52?.status} reason=${rp52?.reason}`);
-  assert(bc.A?.polished?.minOnShift > bc.A?.current?.minOnShift, 'D52.1b first-by-name category A still improves its own minOnShift', JSON.stringify(bc.A));
-  assert(bc.B?.polished?.minOnShift > bc.B?.current?.minOnShift, 'D52.1c later category B ALSO improves its minOnShift (pre-fix: stuck at current)', JSON.stringify(bc.B));
-  assert(Object.keys(bc).length === 2 && Object.keys(bc).every((k) => bc[k].polished && bc[k].polished.minOnShift >= bc[k].current.minOnShift), 'D52.1d no category minOnShift drops', JSON.stringify(bc));
-  const sumApplied = Object.values<any>(bc).reduce((a, v) => a + (v.movesApplied ?? NaN), 0);
+  // Re-pinned 2026-10-08 (P1-6): with Shift Placement ON the search now tries a ladder of simple start-time rosters, each confirmed on a second
+  // independent replication block, before rejecting a headcount. On this fixture that moves the recommendation 19 -> 18 and the rescued roster
+  // leaves nothing to re-spread, so D52.1a-e no longer see 'adopted_partial' (A saturates, B keeps improving). Per assertion, old -> new:
+  //   a: status adopted_partial -> no_improvement;
+  //   b: A's adopted roster improves its own minOnShift -> A's best reachable re-spread does NOT beat the current roster (current 3, best reachable 2);
+  //   c: B ALSO improves its minOnShift -> B's best reachable re-spread does NOT beat the current roster either (the original per-queue property
+  //      "A saturates while B keeps improving" moved to D73.4, scan-found fixture);
+  //   d: no category minOnShift drops (adopted) -> both categories reported with current and best-reachable profiles;
+  //   e: per-key movesApplied/movesTotal sum to the top-level counts -> per-key movesTotal sums to the top-level movesTotal and nothing was applied.
+  assert(rp52?.status === 'no_improvement', 'D52.1a siloed placement ON: no_improvement (rescued N=18 roster; was adopted_partial, A saturates)', `status=${rp52?.status} reason=${rp52?.reason}`);
+  const noBeat = (v: any) => !!v?.polished && !!v?.current && !(v.polished.minOnShift > v.current.minOnShift || (v.polished.minOnShift === v.current.minOnShift && v.polished.gapAgentHours < v.current.gapAgentHours - 1e-9));
+  assert(noBeat(bc.A), 'D52.1b first-by-name category A: its best reachable re-spread does not beat the current roster (was: A still improves its own minOnShift)', JSON.stringify(bc.A));
+  assert(noBeat(bc.B), 'D52.1c later category B: its best reachable re-spread does not beat the current roster either (was: B ALSO improves its minOnShift)', JSON.stringify(bc.B));
+  assert(JSON.stringify(Object.keys(bc).sort()) === JSON.stringify(['A', 'B']) && Object.keys(bc).every((k) => bc[k].polished && bc[k].current), 'D52.1d both categories reported with current and best-reachable profiles (was: no category minOnShift drops)', JSON.stringify(bc));
   const sumTotal = Object.values<any>(bc).reduce((a, v) => a + (v.movesTotal ?? NaN), 0);
-  assert(sumApplied === rp52?.movesApplied && sumTotal === rp52?.movesTotal && bc.A?.movesApplied < bc.A?.movesTotal, 'D52.1e byCategory movesApplied/movesTotal are per key and sum to the top-level counts', `${JSON.stringify(bc)} top=${rp52?.movesApplied}/${rp52?.movesTotal}`);
+  assert(sumTotal === rp52?.movesTotal && rp52?.movesApplied === undefined && Object.values<any>(bc).every((v) => v.movesApplied === undefined), 'D52.1e byCategory movesTotal is per key and sums to the top-level count; nothing applied (was: movesApplied/movesTotal per key summing to the top-level counts)', `${JSON.stringify(bc)} top=${rp52?.movesApplied}/${rp52?.movesTotal}`);
 
   // D52.2 — HC never moves; sync === async; deterministic.
-  assert(on52.recommendedHC !== null && on52.recommendedHC === off52.recommendedHC && on52.staffing?.grossHCTotal === off52.staffing?.grossHCTotal, 'D52.2a HC and gross HC equal placement OFF (sync)', `off=${off52.recommendedHC}/${off52.staffing?.grossHCTotal} on=${on52.recommendedHC}/${on52.staffing?.grossHCTotal}`);
+  // Re-pinned 2026-10-08 (P1-6): was "equal to placement OFF" (19 / gross 21); the rescue ladder now gives 18 / gross 20, which is <= OFF.
+  assert(on52.recommendedHC !== null && off52.recommendedHC !== null && on52.recommendedHC <= off52.recommendedHC && on52.recommendedHC === 18 && on52.staffing?.grossHCTotal === 20, 'D52.2a HC <= placement OFF and pinned at 18 / gross 20 (sync; was equal to OFF = 19 / 21)', `off=${off52.recommendedHC}/${off52.staffing?.grossHCTotal} on=${on52.recommendedHC}/${on52.staffing?.grossHCTotal}`);
   const on52A = await searchOptimalHCAsync(run52(labor52On));
-  assert(on52A.recommendedHC === off52.recommendedHC && on52A.staffing?.grossHCTotal === off52.staffing?.grossHCTotal, 'D52.2b HC and gross HC equal placement OFF (async)', `async=${on52A.recommendedHC}`);
+  // Re-pinned 2026-10-08 (P1-6): same as D52.2a (was equal to OFF = 19 / 21; now 18 / 20).
+  assert(on52A.recommendedHC !== null && off52.recommendedHC !== null && on52A.recommendedHC <= off52.recommendedHC && on52A.recommendedHC === 18 && on52A.staffing?.grossHCTotal === 20, 'D52.2b HC <= placement OFF and pinned at 18 / gross 20 (async; was equal to OFF = 19 / 21)', `async=${on52A.recommendedHC}/${on52A.staffing?.grossHCTotal}`);
   assert(JSON.stringify((on52A as any).rosterPolish) === JSON.stringify(rp52) && distStr52(on52A.shiftPlacement?.winningDistribution) === distStr52(on52.shiftPlacement?.winningDistribution), 'D52.2c sync === async (rosterPolish incl. per-key moves + adopted roster)', '');
   const on52b = searchOptimalHC(run52(labor52On));
   assert(JSON.stringify((on52b as any).rosterPolish) === JSON.stringify(rp52) && distStr52(on52b.shiftPlacement?.winningDistribution) === distStr52(on52.shiftPlacement?.winningDistribution), 'D52.2d deterministic across runs', '');
@@ -5068,13 +5102,18 @@ console.log('\n--- Suite D65: F3 statistics describe the adopted roster ---');
   const baseOf = (s: Scn) => ({ intervals: s.intervals, openingWIP: [] as any[], categories: s.categories, calendar: cal65, labor: s.labor, sla: s.sla, seed: s.seed, userMaxHC: s.userMaxHC, replications: 6, ...(s.arch ? { queueArchitecture: s.arch } : {}) });
   const distOf = (d: any) => JSON.stringify(d ? Object.keys(d).sort().map((k) => [k, d[k].slaps]) : null);
 
-  // Polish-adopted scenarios: (a) (b) (c) (d) (e) (h) (j).
-  const polishCase = async (tag: string, s: Scn, pin: { N: number; mean: number; rp: string; others: string; dist: string; bind: string }) => {
+  // Polish scenarios: (a) (b) (c) (d) (e) (h) (j).
+  // Re-pinned 2026-10-08 (P1-6): with Shift Placement ON the search now tries a ladder of simple start-time rosters, each confirmed on a second
+  // independent replication block, before rejecting a headcount. The four fixtures below therefore no longer end in an ADOPTED polish; they end in
+  // the status in `pin.status` ('no_improvement': the rescued roster leaves nothing to re-spread), and every literal moved with the new headcount.
+  // `pin.ci` (median, CI low, CI high) replaces the old "CI [100, 100]" literal when the mean is no longer 100. The F3 property itself -- "the
+  // statistics describe the ADOPTED roster" -- is kept alive on scan-found adopted fixtures in D73.1 / D73.2.
+  const polishCase = async (tag: string, s: Scn, pin: { N: number; mean: number; rp: string; others: string; dist: string; bind: string; status: 'adopted' | 'adopted_partial' | 'no_improvement'; ci?: [number, number, number] }) => {
     const syn: any = searchOptimalHC(baseOf(s));
     const asy: any = await searchOptimalHCAsync(baseOf(s));
     const N: number = syn.recommendedHC;
     const rp = syn.rosterPolish;
-    assert(rp?.status === 'adopted' || rp?.status === 'adopted_partial', `${tag}.0 scenario adopts a polished roster`, `status=${rp?.status}`);
+    assert(rp?.status === pin.status, `${tag}.0 scenario polish status is ${pin.status}${pin.status === 'no_improvement' ? ' (was: adopts a polished roster)' : ''}`, `status=${rp?.status}`);
     const sets = hcNs.generatePrecomputedReplications({ intervals: s.intervals, openingWIP: [], categories: s.categories, calendar: cal65, sla: s.sla, baseSeed: s.seed, replications: 6 });
     const ind: any = evaluateCandidateStatistical({
       operationalHC: N, intervals: s.intervals, openingWIP: [], categories: s.categories, calendar: cal65, labor: s.labor, sla: s.sla,
@@ -5087,6 +5126,7 @@ console.log('\n--- Suite D65: F3 statistics describe the adopted roster ---');
     assert(JSON.stringify(ps) === JSON.stringify(ind.primaryStats), `${tag}.a1 primaryStatistical equals an independent evaluation of the adopted roster`, `reported ${brief(ps)} | independent ${brief(ind.primaryStats)}`);
     assert(ps?.achievedPctMean === pin.mean && ps?.replications === 6, `${tag}.a2 primaryStatistical mean/R literal`, `got ${brief(ps)}`);
     if (pin.mean === 100) assert(ps?.ci95Low === 100 && ps?.ci95High === 100 && ps?.achievedPctMedian === 100, `${tag}.a3 primaryStatistical CI [100, 100], median 100`, brief(ps));
+    else if (pin.ci) assert(ps?.achievedPctMedian === pin.ci[0] && ps?.ci95Low === pin.ci[1] && ps?.ci95High === pin.ci[2], `${tag}.a3 primaryStatistical median ${pin.ci[0]}, CI [${pin.ci[1]}, ${pin.ci[2]}] (was CI [100, 100], median 100)`, brief(ps));
     // (b) history row for N carries those numbers; other rows pinned
     const row = syn.searchHistory.find((r: any) => r.hc === N);
     const rowOk = !!row && row.primaryPct === ind.primaryStats.achievedPctMedian && row.primaryCiLow === ind.primaryStats.ci95Low && row.primaryCiHigh === ind.primaryStats.ci95High
@@ -5107,11 +5147,21 @@ console.log('\n--- Suite D65: F3 statistics describe the adopted roster ---');
   };
 
   const sla65 = mkSla65(85, 3);
-  await polishCase('D65.1 pooled seed 42', { intervals: iv1, categories: cat1, labor: laborOn65, sla: sla65, seed: 42, userMaxHC: 40 }, { N: 9, mean: 100, rp: '5ca7f75aac8b4e42', others: 'b98412b976e5b850', dist: 'eea4224868125973', bind: 'statistical_primary_sla|Primary SLA 85% Target (Statistical DES, 90% CI)' });
-  await polishCase('D65.2 pooled seed 7', { intervals: iv1, categories: cat1, labor: laborOn65, sla: sla65, seed: 7, userMaxHC: 40 }, { N: 9, mean: 100, rp: '343796a0ef1aa6d1', others: '029a912afc357141', dist: 'eea4224868125973', bind: 'statistical_primary_sla|Primary SLA 85% Target (Statistical DES, 90% CI)' });
-  await polishCase('D65.3 pooled seed 99', { intervals: iv1, categories: cat1, labor: laborOn65, sla: sla65, seed: 99, userMaxHC: 40 }, { N: 9, mean: 100, rp: '5ca7f75aac8b4e42', others: '311f6baea3e00365', dist: 'eea4224868125973', bind: 'statistical_primary_sla|Primary SLA 85% Target (Statistical DES, 90% CI)' });
-  // (g) siloed adopted_partial (D52 fixture): a vector is adopted
-  await polishCase('D65.4 siloed (D52 fixture)', { intervals: iv2, categories: cat2, labor: laborOn65, sla: mkSla65(95, 4), seed: 42, userMaxHC: 60, arch: 'siloed' }, { N: 19, mean: 99.5, rp: '574fd697c0fc5960', others: '51ae9df0b3740505', dist: 'ef0e7a02e1a93f74', bind: 'statistical_primary_sla|Primary SLA 95% Target (Statistical DES, 90% CI)' });
+  // Re-pinned 2026-10-08 (P1-6), old -> new per pin (the rescue ladder lowers the placement-ON headcount; the old pins described the pre-rescue ADOPTED result):
+  //   D65.1 seed 42: N 9 -> 7; polish status adopted -> no_improvement; mean 100 -> 89.5 (median 100 -> 89.5, CI [100, 100] -> [88.9, 90.2]);
+  //     rp 5ca7f75aac8b4e42 -> 6311a533d2a41339; others b98412b976e5b850 -> 97d170e1550eee4a; roster digest eea4224868125973 -> 2be0d6ecae2ea49e;
+  //     binding label statistical_primary_sla (Primary SLA 85% Target) -> analytical_baseline (Occupancy-Feasible Capacity Floor, N_occ = 7: the search now lands on the floor).
+  //   D65.2 seed 7: N 9 -> 7; adopted -> no_improvement; mean 100 -> 89.5 (median 100 -> 89.7, CI [100, 100] -> [88.8, 90.1]);
+  //     rp 343796a0ef1aa6d1 -> 0c61504ef37096e4; others 029a912afc357141 -> 97d170e1550eee4a; roster digest eea4224868125973 -> 2be0d6ecae2ea49e; binding label as D65.1.
+  //   D65.3 seed 99: N 9 -> 7; adopted -> no_improvement; mean 100 -> 89.7 (median 100 -> 89.5, CI [100, 100] -> [89.2, 90.2]);
+  //     rp 5ca7f75aac8b4e42 -> 6311a533d2a41339; others 311f6baea3e00365 -> 97d170e1550eee4a; roster digest eea4224868125973 -> 2be0d6ecae2ea49e; binding label as D65.1.
+  await polishCase('D65.1 pooled seed 42', { intervals: iv1, categories: cat1, labor: laborOn65, sla: sla65, seed: 42, userMaxHC: 40 }, { N: 7, mean: 89.5, rp: '6311a533d2a41339', others: '97d170e1550eee4a', dist: '2be0d6ecae2ea49e', bind: 'analytical_baseline|Occupancy-Feasible Capacity Floor (N_occ = 7 at ≤ 100% occupancy)', status: 'no_improvement', ci: [89.5, 88.9, 90.2] });
+  await polishCase('D65.2 pooled seed 7', { intervals: iv1, categories: cat1, labor: laborOn65, sla: sla65, seed: 7, userMaxHC: 40 }, { N: 7, mean: 89.5, rp: '0c61504ef37096e4', others: '97d170e1550eee4a', dist: '2be0d6ecae2ea49e', bind: 'analytical_baseline|Occupancy-Feasible Capacity Floor (N_occ = 7 at ≤ 100% occupancy)', status: 'no_improvement', ci: [89.7, 88.8, 90.1] });
+  await polishCase('D65.3 pooled seed 99', { intervals: iv1, categories: cat1, labor: laborOn65, sla: sla65, seed: 99, userMaxHC: 40 }, { N: 7, mean: 89.7, rp: '6311a533d2a41339', others: '97d170e1550eee4a', dist: '2be0d6ecae2ea49e', bind: 'analytical_baseline|Occupancy-Feasible Capacity Floor (N_occ = 7 at ≤ 100% occupancy)', status: 'no_improvement', ci: [89.5, 89.2, 90.2] });
+  // (g) siloed (D52 fixture). Re-pinned 2026-10-08 (P1-6): N 19 -> 18; adopted_partial -> no_improvement; mean 99.5 -> 99.3 (CI [99.2, 99.3]);
+  //   rp 574fd697c0fc5960 -> f10ac0c20fe7cf73; others 51ae9df0b3740505 -> 9db7e75aa8ce963c; roster digest ef0e7a02e1a93f74 -> 7ccb9a8cd5d81ac2; binding label unchanged.
+  //   The adopted-vector property of this slot (a vector is adopted for each queue) lives on in D73.2 / D73.4.
+  await polishCase('D65.4 siloed (D52 fixture)', { intervals: iv2, categories: cat2, labor: laborOn65, sla: mkSla65(95, 4), seed: 42, userMaxHC: 60, arch: 'siloed' }, { N: 18, mean: 99.3, rp: 'f10ac0c20fe7cf73', others: '9db7e75aa8ce963c', dist: '7ccb9a8cd5d81ac2', bind: 'statistical_primary_sla|Primary SLA 95% Target (Statistical DES, 90% CI)', status: 'no_improvement' });
 
   // (f) nothing adopted: the full result must be byte-identical to today
   {
@@ -5122,7 +5172,11 @@ console.log('\n--- Suite D65: F3 statistics describe the adopted roster ---');
     // Re-pinned 2026-10-08 (P2-9): digest 733df309dc766f59 -> 4f9350ef4421701d. The recommended HC is unchanged (12); only the
     // `boundaryEvidence` block (the "one fewer agent" run, which used to have no shift end) and the new `fixedShifts` field on the
     // result differ.
-    assert(dg(a) === '4f9350ef4421701d' && dg(aa) === dg(a), 'D65.5b no_improvement: full result pinned (P2-9: only boundaryEvidence + fixedShifts differ from the pre-change digest 733df309dc766f59) and sync = async', `sync ${dg(a)} async ${dg(aa)}`);
+    // Re-pinned 2026-10-08 (P1-6): digest 4f9350ef4421701d -> 21068fd81ff08d7a. Not only the digest moved: the RECOMMENDATION itself moved 12 -> 9 (with Shift Placement ON
+    // the search now tries a ladder of simple start-time rosters, each confirmed on a second independent replication block, before rejecting a headcount;
+    // the status is still no_improvement). The new headcount is asserted explicitly in D65.5c.
+    assert(dg(a) === '21068fd81ff08d7a' && dg(aa) === dg(a), 'D65.5b no_improvement: full result pinned (P1-6: digest 4f9350ef4421701d -> 21068fd81ff08d7a because the recommendation moved 12 -> 9) and sync = async', `sync ${dg(a)} async ${dg(aa)}`);
+    assert(a.recommendedHC === 9 && aa.recommendedHC === 9, 'D65.5c no_improvement scenario: recommended HC is 9 in sync and async (P1-6: was 12)', `sync ${a.recommendedHC} async ${aa.recommendedHC}`);
     const off: Scn = { intervals: iv1, categories: cat1, labor: laborOff65, sla: sla65, seed: 42, userMaxHC: 40 };
     const o: any = searchOptimalHC(baseOf(off));
     const oa: any = await searchOptimalHCAsync(baseOf(off));
@@ -5953,6 +6007,734 @@ console.log('\n--- Suite D71: P2-9 shift end without a start distribution ---');
     const c0 = fullDigest71(runLong71(14, 'pooled', two));
     assert(c0 === CTRL_C_DIGEST, 'D71.C-c CONTROL explicit two-cohort distribution (08:00 x9, 13:00 x5): digest equals the one recorded on the unchanged engine', `digest=${c0}`);
   }
+}
+
+// =================================================================
+// Suite D72 - PRD P1-6 / L23: with Shift Placement ON, a headcount that failed with everyone at opening,
+// with the coverage-repair roster and with the analytic placement roster is no longer rejected until a
+// short FIXED ladder of simple "some agents start later" rosters has been tried. A ladder roster is accepted
+// only if it passes the unmodified full-R gate on the primary case sets AND on a second, disjoint block of R
+// case sets (the confirmation block, amendment 1). The min(R,5)-rep pre-screen can only skip a roster.
+//
+// Fixtures (all values below measured 2026-10-08 on checkpoint 7ad848f = the code BEFORE this change):
+//  - "min": single category, Mon-Fri 08:00-20:00, 8 h shift, 08:00 spike (36 cases per half-hour, 5 otherwise,
+//    AHT 20), SLA 85% / 3 h, 6 reps, seed 42. Found by a throwaway scan (4 calendars x 2 shift lengths x 4 volume
+//    shapes x 4 SLA pairs x 3 volume levels, 384 fixtures): the first of 9 where, one head below the pre-change
+//    recommendation, uniform and the analytic placement roster fail but the minimal later-start shape (8 at opening
+//    + 1 at +240 min) passes on the primary block and on the confirmation block. Measured CI lower bounds at N=9
+//    (target 85): uniform 77.2, analytic placement 69.2, minimal shape 88.6 (primary) / 87.9 (confirmation).
+//  - "d33": the D33 file (08:00-22:00, 9 h shift, flat volume 20, SLA 80% / 4 h, 5 reps, seed 42).
+//  - "d50", "d50c", "d50p", "d51a", "d51b", "d52": the D50 / D51 / D52 placement fixtures.
+//  - the three built-in samples at the app defaults (pooled).
+// The PRE_ON / OFF_CTRL tables are the values recorded from the UNCHANGED code; they are hard-coded on purpose.
+// =================================================================
+console.log('\n--- Suite D72: P1-6 / L23 rescue ladder with a confirmation block ---');
+{
+  const M72 = 2147483647;
+  const sortKeys72 = (_k: string, v: any) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v);
+  // Digest over the WHOLE search result. Dates are written as minutes from the first interval so the pinned digests do not depend on the machine's time zone.
+  const dig72 = (x: unknown, base: number): string => {
+    const rep = function (this: any, k: string, v: any) {
+      const raw = this[k];
+      return raw instanceof Date ? (raw.getTime() - base) / 60000 : sortKeys72(k, v);
+    };
+    return createHash('sha1').update(JSON.stringify(x, rep)).digest('hex').slice(0, 16);
+  };
+  const sla72 = (pct: number, windowH: number): SLAPolicyConfig => ({
+    primaryPct: pct, primaryWindow: windowH, primaryUnit: 'hours', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes',
+    asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'next_open',
+    occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 90,
+  });
+  type Fx72 = {
+    name: string; intervals: StandardInterval[]; categories: CategoryConfig[]; calendar: CalendarConfig; labor: LaborConfig;
+    sla: SLAPolicyConfig; seed: number; reps: number; arch: 'pooled' | 'siloed'; maxHC: number;
+  };
+  const cal72: CalendarConfig = { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 20 };
+  const lab72: LaborConfig = { ...LABOR, dailyProductiveHours: 8 };
+  const mkIv72 = (open: number, close: number, cats: Array<[string, (h: number) => number]>): StandardInterval[] => {
+    const out: StandardInterval[] = [];
+    for (let day = 0; day < 5; day++) {
+      for (let h = open; h < close; h++) {
+        for (let m = 0; m < 60; m += 30) {
+          for (const [category, vf] of cats) {
+            out.push({ intervalIndex: out.length, start: new Date(2026, 2, 2 + day, h, m), end: new Date(2026, 2, 2 + day, h, m + 30), volume: vf(h), category });
+          }
+        }
+      }
+    }
+    return out;
+  };
+  const cat1x: CategoryConfig[] = [{ id: 'c1', name: 'General', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 }];
+  const cat2x: CategoryConfig[] = [
+    { id: 'A', name: 'A', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 },
+    { id: 'B', name: 'B', ahtMinutes: 25, shrinkagePct: 0.1, priority: 2 },
+  ];
+  const FX: Record<string, Fx72> = {};
+  const addFx = (f: Fx72) => { FX[f.name] = f; };
+  addFx({ name: 'min', intervals: mkIv72(8, 20, [['General', (h) => (h === 8 ? 36 : 5)]]), categories: cat1x, calendar: cal72, labor: lab72, sla: sla72(85, 3), seed: 42, reps: 6, arch: 'pooled', maxHC: 60 });
+  addFx({ name: 'd33', intervals: mkIv72(8, 22, [['General', () => 20]]), categories: cat1x, calendar: { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 22 }, labor: { ...LABOR, dailyProductiveHours: 9 }, sla: sla72(80, 4), seed: 42, reps: 5, arch: 'pooled', maxHC: 60 });
+  addFx({ name: 'd50', intervals: mkIv72(8, 20, [['General', (h) => (h >= 12 && h < 16 ? 14 : 3)]]), categories: cat1x, calendar: cal72, labor: lab72, sla: sla72(85, 3), seed: 42, reps: 6, arch: 'pooled', maxHC: 40 });
+  addFx({ name: 'd50c', intervals: mkIv72(8, 20, [['General', (h) => (h === 8 ? 60 : 5)]]), categories: cat1x, calendar: cal72, labor: lab72, sla: sla72(97, 2), seed: 42, reps: 6, arch: 'pooled', maxHC: 40 });
+  addFx({ name: 'd50p', intervals: mkIv72(8, 20, [['General', (h) => (h === 8 ? 60 : 4)]]), categories: cat1x, calendar: cal72, labor: lab72, sla: sla72(95, 4), seed: 42, reps: 6, arch: 'pooled', maxHC: 40 });
+  addFx({ name: 'd51a', intervals: mkIv72(8, 20, [['A', (h) => (h >= 12 && h < 16 ? 14 : 3)], ['B', (h) => (h >= 12 && h < 16 ? 10 : 2)]]), categories: cat2x, calendar: cal72, labor: lab72, sla: sla72(85, 3), seed: 42, reps: 6, arch: 'siloed', maxHC: 60 });
+  addFx({ name: 'd51b', intervals: mkIv72(8, 20, [['A', (h) => (h === 8 ? 60 : 4)], ['B', (h) => (h === 8 ? 40 : 3)]]), categories: cat2x, calendar: cal72, labor: lab72, sla: sla72(95, 4), seed: 42, reps: 6, arch: 'siloed', maxHC: 60 });
+  addFx({ name: 'd52', intervals: mkIv72(8, 20, [['A', (h) => (h === 8 ? 60 : 4)], ['B', (h) => (h >= 12 && h < 16 ? 10 : 2)]]), categories: cat2x, calendar: cal72, labor: lab72, sla: sla72(95, 4), seed: 42, reps: 6, arch: 'siloed', maxHC: 60 });
+  for (const type of ['support', 'healthcare', 'claims'] as const) {
+    const { rows } = buildSampleDataset(type, new Date(2026, 9, 5, 8, 0, 0, 0));
+    const ivs = mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+    const cats = discoverAndSyncCategories(ivs, DEFAULT_CATEGORIES, DEFAULT_SLA);
+    addFx({ name: `smp-${type}`, intervals: ivs, categories: cats, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, seed: DEFAULT_SIM_PARAMS.seed, reps: DEFAULT_SIM_PARAMS.replications, arch: 'pooled', maxHC: DEFAULT_SIM_PARAMS.maxHCSearch });
+  }
+  const NAMES72 = Object.keys(FX);
+  const laborFor = (fx: Fx72, place: boolean): LaborConfig => ({ ...fx.labor, shiftPlacementEnabled: place, ...(place ? { shiftSlapMinutes: fx.labor.shiftSlapMinutes ?? 30 } : {}) });
+  const slaFor = (fx: Fx72, cov: boolean): SLAPolicyConfig => ({ ...fx.sla, minCoverageEnabled: cov });
+  const paramsFor = (fx: Fx72, place: boolean, cov: boolean) => ({
+    intervals: fx.intervals, openingWIP: [] as OpeningWIPCase[], categories: fx.categories, calendar: fx.calendar, labor: laborFor(fx, place), sla: slaFor(fx, cov),
+    seed: fx.seed, userMaxHC: fx.maxHC, replications: fx.reps, queueArchitecture: fx.arch,
+  });
+  const summarize = (fx: Fx72, r: any) => ({
+    rec: r.recommendedHC as number | null, gross: r.staffing?.grossHCTotal as number | undefined, dig: dig72(r, fx.intervals[0].start.getTime()),
+    win: r.shiftPlacement?.winningDistribution as ShiftDistributionByCategory | undefined, polish: r.rosterPolish?.status as string | undefined,
+  });
+  const syncCache = new Map<string, ReturnType<typeof summarize>>();
+  const S72 = (name: string, place: boolean, cov: boolean) => {
+    const key = `${name}|${place}|${cov}`;
+    if (!syncCache.has(key)) syncCache.set(key, summarize(FX[name], searchOptimalHC(paramsFor(FX[name], place, cov))));
+    return syncCache.get(key)!;
+  };
+  const A72 = async (name: string, place: boolean, cov: boolean) => summarize(FX[name], await searchOptimalHCAsync(paramsFor(FX[name], place, cov)));
+  const rosterStr72 = (d: ShiftDistributionByCategory | undefined) => (d ? Object.keys(d).sort().map((k) => `${k === '__POOLED__' ? '' : k + '='}${d[k].slaps.map((s) => `${s.startMinutesFromOpen}:${s.agentCount}`).join(' ')}`).join(' | ') : 'uniform');
+
+  // ---- API presence (everything below that needs the new helpers is guarded so this suite RUNS on the unchanged code and fails, not crashes) ----
+  const brl = (hcNs as any).buildRescueLadder as ((p: any) => ShiftDistributionByCategory[]) | undefined;
+  const crs = (hcNs as any).createRescueSearch as ((p: any) => { next: () => any; record: (e: any) => void; result: () => any }) | undefined;
+  const rsi = (hcNs as any).rescueScreenInputs as ((sla: SLAPolicyConfig, cats: CategoryConfig[]) => { sla: SLAPolicyConfig; categories: CategoryConfig[] }) | undefined;
+  const rre = (hcNs as any).resolveRescueEvaluation as ((stage: string, ctx: any) => any) | undefined;
+  const ccb = (hcNs as any).createConfirmationBlock as ((p: any) => { baseSeed: number; sets: () => any[] }) | undefined;
+  const dcs = (hcNs as any).deriveConfirmationBaseSeed as ((seed: number) => number) | undefined;
+  const haveApi = [brl, crs, rsi, rre, ccb, dcs].every((f) => typeof f === 'function');
+  assert(haveApi, 'D72.0 rescue API exported: buildRescueLadder, createRescueSearch, rescueScreenInputs, resolveRescueEvaluation, createConfirmationBlock, deriveConfirmationBaseSeed', `present=${[brl, crs, rsi, rre, ccb, dcs].map((f) => typeof f === 'function').join(',')}`);
+  assert(
+    (hcNs as any).RESCUE_SCREEN_MARGIN_PP === 1.5 && (hcNs as any).RESCUE_SCREEN_REPLICATIONS === 5 &&
+      JSON.stringify((hcNs as any).RESCUE_LATE_SHARES) === JSON.stringify([0.25, 0.30, 0.35, 0.20, 0.40, 0.15, 0.10]),
+    'D72.0b named constants: screen margin 1.5 pp, screen size 5 replications, late shares 25/30/35/20/40/15/10 %',
+    `margin=${(hcNs as any).RESCUE_SCREEN_MARGIN_PP} reps=${(hcNs as any).RESCUE_SCREEN_REPLICATIONS} shares=${JSON.stringify((hcNs as any).RESCUE_LATE_SHARES)}`
+  );
+
+  const primarySets = (fx: Fx72) => hcNs.generatePrecomputedReplications({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: fx.calendar, sla: fx.sla, baseSeed: fx.seed, replications: fx.reps });
+  const confirmSets = (fx: Fx72) => hcNs.generatePrecomputedReplications({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: fx.calendar, sla: fx.sla, baseSeed: (dcs ? dcs(fx.seed) : -1), replications: fx.reps });
+  const evalAt = (fx: Fx72, cov: boolean, n: number, roster: ShiftDistributionByCategory | undefined, sets: any[], baseSeed: number) =>
+    evaluateCandidateStatistical({
+      operationalHC: n, intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: fx.calendar, labor: laborFor(fx, true), sla: slaFor(fx, cov),
+      baseSeed, replications: fx.reps, queueArchitecture: fx.arch, precomputedCaseSets: sets, shiftDistribution: roster,
+    });
+
+  // ---- Recorded from the UNCHANGED code (checkpoint 7ad848f, 2026-10-08): recommended HC with Shift Placement ON, [coverage ON, coverage OFF] ----
+  const PRE_ON: Record<string, [number | null, number | null]> = {
+    min: [9, 10], d33: [22, 21], d50: [9, 7], d50c: [29, 29], d50p: [11, 11], d51a: [17, 13], d51b: [20, 21], d52: [19, 21],
+    'smp-support': [27, 28], 'smp-healthcare': [31, 31], 'smp-claims': [31, 31],
+  };
+  // ---- Shift Placement OFF controls: full-result digests recorded from the UNCHANGED code, [coverage ON, coverage OFF] ----
+  const OFF_CTRL: Record<string, [string, string]> = {
+    d33: ['9bfa6b712030ca31', 'e7648280481a50de'],
+    d50: ['7e51ccbdd49beee7', '99118c71f91661d0'],
+    d51a: ['5a50233e9e8ebe81', 'b039820a28ec7405'],
+    min: ['9fbac7c6e70685e6', 'fd7188fda9d2d415'],
+    'smp-claims': ['c817d697e8592d00', '5ebe0d840e798f15'],
+    'smp-support': ['04e10423ae3aa168', 'cca2b247a10fb364'],
+  };
+
+  // ============================================================================================
+  // D72.1 buildRescueLadder unit checks
+  // ============================================================================================
+  if (typeof brl === 'function') {
+    const fx = FX.min;
+    const labOn = laborFor(fx, true);
+    const cases = generateCaseEntities({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: fx.calendar, sla: fx.sla, seed: 42 }).cases as CaseEntity[];
+    const slapMin = resolveShiftSlapMinutes(labOn);
+    const valid = getValidSlapStarts(fx.calendar, labOn.dailyProductiveHours * 60, slapMin);
+    const sum = (b: ShiftSlapDistribution) => b.slaps.reduce((s, x) => s + x.agentCount, 0);
+    const l20 = brl({ n: 20, cases, calendar: fx.calendar, labor: labOn, queueArchitecture: 'pooled' });
+    // 08:00-20:00 is 720 min, shift 480, slap grid 30: valid starts 0..240; the minimal cover is {0, 240} (0 covers to 480, 240 covers to 720).
+    // Seats 20: rung 0 = 1 late starter; then round(share x 20) = 5, 6, 7, 4, 8, 3, 2 late starters (25, 30, 35, 20, 40, 15, 10 %).
+    const lateCounts = l20.map((d) => d.__POOLED__.slaps.find((s) => s.startMinutesFromOpen === 240)?.agentCount ?? 0);
+    assert(JSON.stringify(lateCounts) === JSON.stringify([1, 5, 6, 7, 4, 8, 3, 2]), 'D72.1a fixed rung order for N=20 on 08:00-20:00 / 8 h: late starters at +240 = 1, 5, 6, 7, 4, 8, 3, 2', `got ${JSON.stringify(lateCounts)}`);
+    assert(l20.every((d) => Object.keys(d).join() === '__POOLED__' && sum(d.__POOLED__) === 20), 'D72.1b every pooled rung sums to N = 20', l20.map((d) => sum(d.__POOLED__)).join(','));
+    assert(l20.every((d) => d.__POOLED__.slaps.every((s) => valid.includes(s.startMinutesFromOpen) && s.agentCount > 0) && d.__POOLED__.slapMinutes === slapMin), 'D72.1c every offset is a member of getValidSlapStarts and no slap has zero agents', JSON.stringify(valid));
+    assert(JSON.stringify(l20) === JSON.stringify(brl({ n: 20, cases, calendar: fx.calendar, labor: labOn, queueArchitecture: 'pooled' })), 'D72.1d the ladder is identical across calls (deterministic order)', '');
+    assert(
+      JSON.stringify(l20[0]) === JSON.stringify(buildCoverageRepairDistribution({ n: 20, calendar: fx.calendar, labor: labOn, minAgentsPerInterval: 1, queueArchitecture: 'pooled' })),
+      'D72.1e first rung = the minimal later-start shape (coverage-repair roster with a minimum of 1 even with the floor off)', JSON.stringify(l20[0])
+    );
+    assert(new Set(l20.map((d) => JSON.stringify(d))).size === l20.length, 'D72.1f no duplicate rosters in the ladder', '');
+    assert(brl({ n: 1, cases, calendar: fx.calendar, labor: labOn, queueArchitecture: 'pooled' }).length === 0, 'D72.1g N=1: empty ladder (no seat for a late starter)', '');
+    // N=2: share rungs collapse onto rung 0 (1 late starter is the only possibility) -> exactly one rung 0:1 240:1.
+    const l2 = brl({ n: 2, cases, calendar: fx.calendar, labor: labOn, queueArchitecture: 'pooled' });
+    assert(l2.length === 1 && rosterStr72(l2[0]) === '0:1 240:1', 'D72.1h N=2: every share rung equals the minimal shape and is dropped as a duplicate -> one rung 0:1 240:1', rosterStr72(l2[0]));
+    // 24x7 and shift >= business window: empty ladder.
+    assert(brl({ n: 20, cases, calendar: CAL_24X7, labor: labOn, queueArchitecture: 'pooled' }).length === 0, 'D72.1i 24x7 calendar: empty ladder', '');
+    assert(brl({ n: 20, cases, calendar: BIZ_CAL, labor: { ...labOn, dailyProductiveHours: 8 }, queueArchitecture: 'pooled' }).length === 0, 'D72.1j shift == business window (09:00-17:00, 8 h): empty ladder', '');
+    assert(brl({ n: 20, cases, calendar: BIZ_CAL, labor: { ...labOn, dailyProductiveHours: 9 }, queueArchitecture: 'pooled' }).length === 0, 'D72.1k shift > business window: empty ladder', '');
+
+    // Two late starts: 07:00-22:00 (900 min) with a 6 h shift (360): minimal cover {0, 360, 540}? greedy picks the largest start <= frontier each time.
+    {
+      const calTwo: CalendarConfig = { ...BIZ_CAL, dailyOpenHour: 7, dailyCloseHour: 22 };
+      const labTwo: LaborConfig = { ...labOn, dailyProductiveHours: 6 };
+      const validTwo = getValidSlapStarts(calTwo, 360, resolveShiftSlapMinutes(labTwo));
+      const lt = brl({ n: 30, cases, calendar: calTwo, labor: labTwo, queueArchitecture: 'pooled' });
+      const offs = new Set<number>(); for (const d of lt) for (const s of d.__POOLED__.slaps) offs.add(s.startMinutesFromOpen);
+      assert(lt.length > 2 && lt.every((d) => sum(d.__POOLED__) === 30 && d.__POOLED__.slaps.every((s) => validTwo.includes(s.startMinutesFromOpen) && s.agentCount > 0)) && [...offs].filter((o) => o > 0).length === 2, 'D72.1l two late starts (07:00-22:00 / 6 h): every rung sums to N, offsets valid, exactly two distinct late offsets used', `offsets=${[...offs].sort((a, b) => a - b).join(',')} rungs=${lt.length}`);
+    }
+
+    // Siloed: one block per category from the DES's own seat split; a category with too few seats for a late starter is left out (amendment 4).
+    {
+      const fs = FX.d51a;
+      const labS = laborFor(fs, true);
+      const casesS = generateCaseEntities({ intervals: fs.intervals, openingWIP: [], categories: fs.categories, calendar: fs.calendar, sla: fs.sla, seed: 42 }).cases as CaseEntity[];
+      const wl = new Map<string, number>(); for (const c of casesS) wl.set(c.category, (wl.get(c.category) || 0) + c.totalAhtMinutes);
+      let allOk = true; let detail = '';
+      for (const n of [3, 5, 9, 17, 30]) {
+        const seats = allocateAgentsToCategories(wl, n);
+        const ladder = brl({ n, cases: casesS, calendar: fs.calendar, labor: labS, queueArchitecture: 'siloed' });
+        for (const d of ladder) {
+          for (const k of Object.keys(d)) {
+            if (!(seats.get(k)! >= 2) || sum(d[k]) !== seats.get(k)) { allOk = false; detail ||= `n=${n} ${k}: block ${sum(d[k])} vs seats ${seats.get(k)}`; }
+            if (d[k].slaps.some((s) => s.agentCount <= 0 || !valid.includes(s.startMinutesFromOpen))) { allOk = false; detail ||= `n=${n} ${k}: bad slap`; }
+          }
+        }
+        if (ladder.length === 0 && n >= 5) { allOk = false; detail ||= `n=${n}: empty siloed ladder`; }
+      }
+      assert(allOk, 'D72.1m siloed (N = 3, 5, 9, 17, 30): each listed block sums to its OWN seat count (DES seat split); a category with fewer than 2 seats is never listed; offsets valid; no zero-agent slaps', detail);
+      // N=3: seats split leaves one category with a single seat -> that category is absent from every rung and stays at opening.
+      const seats3 = allocateAgentsToCategories(wl, 3);
+      const single = [...seats3.entries()].filter(([, s]) => s === 1).map(([k]) => k);
+      const l3 = brl({ n: 3, cases: casesS, calendar: fs.calendar, labor: labS, queueArchitecture: 'siloed' });
+      assert(single.length === 1 && l3.length > 0 && l3.every((d) => d[single[0]] === undefined && Object.keys(d).length === 1), 'D72.1n siloed N=3: the category with one seat is left out of every rung (stays at opening); the other keeps a block', `seats=${JSON.stringify([...seats3])} rungs=${l3.map((d) => Object.keys(d).join('+')).join(',')}`);
+      assert(JSON.stringify(brl({ n: 17, cases: casesS, calendar: fs.calendar, labor: labS, queueArchitecture: 'siloed' })) === JSON.stringify(brl({ n: 17, cases: casesS, calendar: fs.calendar, labor: labS, queueArchitecture: 'siloed' })), 'D72.1o siloed ladder identical across calls', '');
+      const l17 = brl({ n: 17, cases: casesS, calendar: fs.calendar, labor: labS, queueArchitecture: 'siloed' });
+      const catWl = new Map<string, number>(); for (const c of casesS) catWl.set(c.category, (catWl.get(c.category) || 0) + c.totalAhtMinutes);
+      assert(JSON.stringify(l17[0]) === JSON.stringify(buildCoverageRepairDistribution({ n: 17, calendar: fs.calendar, labor: labS, minAgentsPerInterval: 1, queueArchitecture: 'siloed', categoryWorkloadMinutes: catWl })), 'D72.1p siloed: first rung equals the minimal later-start shape per category', '');
+    }
+  } else {
+    assert(false, 'D72.1 buildRescueLadder unit checks', 'buildRescueLadder is not exported');
+  }
+
+  // ============================================================================================
+  // D72.2 pre-screen inputs + evaluation stages
+  // ============================================================================================
+  if (typeof rsi === 'function' && typeof rre === 'function' && typeof ccb === 'function' && typeof dcs === 'function') {
+    const baseSla: SLAPolicyConfig = { ...sla72(85, 3), confidenceLevelPct: 95, occupancyCapEnabled: true, occupancyCapPct: 92, boAsaEnabled: true, boAsaTarget: 30 };
+    const cats: CategoryConfig[] = [{ ...cat2x[0], primaryPct: 90 }, { ...cat2x[1] }];
+    const sc = rsi(baseSla, cats);
+    assert(approx(sc.sla.primaryPct, 83.5) && sc.sla.confidenceLevelPct === 50, 'D72.2a screen: overall target 85 -> 83.5 and confidence level 50', `primary=${sc.sla.primaryPct} conf=${sc.sla.confidenceLevelPct}`);
+    assert(approx(sc.categories[0].primaryPct as number, 88.5) && sc.categories[1].primaryPct === undefined, 'D72.2b screen: a per-category target 90 -> 88.5; a category without its own target stays without one', JSON.stringify(sc.categories.map((c) => c.primaryPct)));
+    assert(sc.sla.occupancyCapEnabled === true && sc.sla.occupancyCapPct === 92 && sc.sla.boAsaEnabled === true && sc.sla.boAsaTarget === 30 && baseSla.primaryPct === 85 && baseSla.confidenceLevelPct === 95 && cats[0].primaryPct === 90, 'D72.2c screen: occupancy and ASA caps NOT relaxed; the caller\'s sla / categories are not mutated', JSON.stringify(sc.sla));
+    const fx = FX.min;
+    const blk = ccb({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: fx.calendar, sla: fx.sla, seed: fx.seed, replications: fx.reps });
+    const pSets = primarySets(fx);
+    const ctx = { sla: fx.sla, categories: fx.categories, replications: 8, baseSeed: fx.seed, precomputedCaseSets: pSets, confirmation: blk };
+    const eS = rre('screen', ctx), eP = rre('primary', ctx), eC = rre('confirm', ctx);
+    assert(eS.replications === 5 && rre('screen', { ...ctx, replications: 3 }).replications === 3 && eS.precomputedCaseSets === pSets && eS.baseSeed === 42, 'D72.2d screen stage: min(R, 5) replications on the first primary sets, same base seed', `reps=${eS.replications}`);
+    assert(eP.replications === 8 && eP.sla === fx.sla && eP.categories === fx.categories && eP.precomputedCaseSets === pSets && eP.baseSeed === 42, 'D72.2e primary stage: full R on the primary sets with the UNMODIFIED sla and categories', '');
+    assert(eC.replications === 8 && eC.sla === fx.sla && eC.categories === fx.categories && eC.precomputedCaseSets === blk.sets() && eC.baseSeed === dcs(fx.seed) && eC.baseSeed !== 42, 'D72.2f confirmation stage: full R on the confirmation block (its derived base seed) with the UNMODIFIED sla and categories', '');
+  } else {
+    assert(false, 'D72.2 screen / stage inputs', 'rescue helpers are not exported');
+  }
+
+  // ============================================================================================
+  // D72.3 acceptance rule (amendment 1) on constructed evaluator results
+  // ============================================================================================
+  if (typeof crs === 'function') {
+    const mkR = (k: number): ShiftDistributionByCategory => ({ __POOLED__: { slapMinutes: 30, slaps: [{ startMinutesFromOpen: 0, agentCount: 10 - k }, { startMinutesFromOpen: 240, agentCount: k }] } });
+    const ladder = [mkR(1), mkR(2), mkR(3)];
+    // script(rung, stage) -> passes; returns the visit log "s0 p0 c0 ..." and the result.
+    const drive = (script: (rung: number, stage: string) => boolean, tried: Array<ShiftDistributionByCategory | null | undefined> = []) => {
+      const s = crs({ ladder, alreadyTried: tried });
+      const log: string[] = [];
+      let guard = 0;
+      for (let c = s.next(); c !== null && guard < 100; c = s.next(), guard++) {
+        log.push(`${c.stage[0]}${c.rung}`);
+        s.record({ passesAllConstraints: script(c.rung, c.stage), tag: `${c.stage}-${c.rung}` });
+      }
+      return { log: log.join(' '), res: s.result() };
+    };
+    // (1) roster 0 passes the primary block but fails the confirmation block -> rejected, rung 1 tried; rung 1 passes both -> accepted.
+    const t1 = drive((r, st) => !(r === 0 && st === 'confirm'));
+    assert(t1.log === 's0 p0 c0 s1 p1 c1' && t1.res.winner?.rung === 1 && JSON.stringify(t1.res.winner.roster) === JSON.stringify(ladder[1]) && JSON.stringify(t1.res.rejectedAtConfirmation) === '[0]', 'D72.3a passes the primary block but fails the confirmation block -> rejected, next rung tried; the next rung that passes both is accepted', `log=${t1.log} winner=${t1.res.winner?.rung}`);
+    assert(t1.res.winner?.ev?.tag === 'primary-1', 'D72.3b the winner carries the PRIMARY-block evaluation (what is reported and cached), not the confirmation one', `tag=${t1.res.winner?.ev?.tag}`);
+    // (2) passes both on rung 0 -> accepted at once, nothing else evaluated.
+    const t2 = drive(() => true);
+    assert(t2.log === 's0 p0 c0' && t2.res.winner?.rung === 0, 'D72.3c a roster that passes screen, primary and confirmation is accepted at once; no further rung is evaluated', t2.log);
+    // (3) every rung passes primary but fails confirmation -> no winner, all rungs rejected at confirmation, each in order.
+    const t3 = drive((_r, st) => st !== 'confirm');
+    assert(t3.res.winner === null && t3.log === 's0 p0 c0 s1 p1 c1 s2 p2 c2' && JSON.stringify(t3.res.rejectedAtConfirmation) === '[0,1,2]', 'D72.3d every rung fails confirmation -> no winner (the headcount stays rejected)', t3.log);
+    // (4) the pre-screen never accepts: a screen pass followed by a full-R failure is rejected; a screen failure never reaches full R.
+    const t4 = drive((r, st) => (r === 0 ? st === 'screen' : false));
+    assert(t4.res.winner === null && t4.log === 's0 p0 s1 s2', 'D72.3e screen passes but primary full R fails -> rejected (no confirmation run); a failing screen skips straight to the next rung', t4.log);
+    const t5 = drive((_r, st) => st === 'screen' ? true : false);
+    assert(t5.res.winner === null, 'D72.3f the screen verdict alone can never produce a winner', t5.log);
+    // (5) rosters already tried at this N are removed.
+    const t6 = drive(() => true, [ladder[0], null, undefined]);
+    assert(t6.log === 's0 p0 c0' && JSON.stringify(t6.res.winner?.roster) === JSON.stringify(ladder[1]) && t6.res.ladderLength === 2, 'D72.3g a roster identical to one already tried at this N (uniform / repair / analytic) is skipped', `log=${t6.log} len=${t6.res.ladderLength}`);
+    // (6) empty ladder: nothing to evaluate.
+    const e = crs({ ladder: [], alreadyTried: [] });
+    assert(e.next() === null && e.result().winner === null, 'D72.3h empty ladder: next() is null, no winner', '');
+    // (7) a real pre-screen case: a roster whose cheap screen passes but whose full-R gate fails. Found by a throwaway scan over every
+    // (fixture, N, rung): on the D33 file with coverage ON, N=21, rung 0 (the minimal shape) screens at CI lower bound 78.8 against the
+    // relaxed target 78.5 (50% confidence, 5 reps) but fails the real gate: lower bound 78.3 < 80 at 90% confidence over 5 reps.
+    // The test re-finds it at run time over N = 15..23 so it is not tied to a digest.
+    if (typeof brl === 'function' && typeof rre === 'function' && typeof ccb === 'function') {
+      const fx = FX.d33; const pSets = primarySets(fx); const slaCov = slaFor(fx, true);
+      const blk = ccb({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: fx.calendar, sla: slaCov, seed: fx.seed, replications: fx.reps });
+      const ctx = { sla: slaCov, categories: fx.categories, replications: fx.reps, baseSeed: fx.seed, precomputedCaseSets: pSets, confirmation: blk };
+      const runStage = (n: number, stage: string, roster: ShiftDistributionByCategory) => { const p = rre(stage, ctx); return evaluateCandidateStatistical({ operationalHC: n, intervals: fx.intervals, openingWIP: [], categories: p.categories, calendar: fx.calendar, labor: laborFor(fx, true), sla: p.sla, baseSeed: p.baseSeed, replications: p.replications, queueArchitecture: 'pooled', precomputedCaseSets: p.precomputedCaseSets, shiftDistribution: roster }); };
+      let found: { n: number; rung: number; screenLow: number; fullLow: number } | null = null;
+      for (let n = 15; n <= 23 && !found; n++) {
+        const ld = brl({ n, cases: pSets[0].cases, calendar: fx.calendar, labor: laborFor(fx, true), queueArchitecture: 'pooled' });
+        for (let rung = 0; rung < ld.length && !found; rung++) {
+          const sc = runStage(n, 'screen', ld[rung]);
+          if (!sc.passesAllConstraints) continue;
+          const fu = runStage(n, 'primary', ld[rung]);
+          if (!fu.passesAllConstraints) found = { n, rung, screenLow: sc.primaryStats.ci95Low, fullLow: fu.primaryStats.ci95Low };
+        }
+      }
+      assert(found !== null, 'D72.3i a real DES case exists where the pre-screen passes but the full-R gate fails (D33 file, coverage ON, rung rosters over N = 15..23)', 'none found');
+      if (found) {
+        const ld = brl({ n: found.n, cases: pSets[0].cases, calendar: fx.calendar, labor: laborFor(fx, true), queueArchitecture: 'pooled' });
+        const s = crs({ ladder: [ld[found.rung]], alreadyTried: [] });
+        const visited: string[] = [];
+        for (let c = s.next(); c !== null; c = s.next()) { visited.push(c.stage); s.record(runStage(found.n, c.stage, c.roster)); }
+        assert(s.result().winner === null && visited.join() === 'screen,primary', `D72.3j that roster (N=${found.n}, rung ${found.rung}; screen CI low ${found.screenLow}, full-R CI low ${found.fullLow}) is rejected by the state machine at the full-R stage: stages ${visited.join('>')}`, JSON.stringify(s.result()));
+      }
+    }
+  } else {
+    assert(false, 'D72.3 acceptance rule', 'createRescueSearch is not exported');
+  }
+
+  // ============================================================================================
+  // D72.4 confirmation block: deterministic, disjoint from the primary block, identical for every candidate
+  // ============================================================================================
+  if (typeof ccb === 'function' && typeof dcs === 'function') {
+    const fx = FX.min;
+    const mk = (seed = fx.seed, reps = fx.reps) => ccb({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: fx.calendar, sla: fx.sla, seed, replications: reps });
+    const caseDigest = (sets: any[]) => sets.map((s) => createHash('sha1').update(JSON.stringify(s.cases.map((c: any) => [c.category, c.arrival.getTime(), c.totalAhtMinutes]))).digest('hex').slice(0, 12));
+    const a = mk(), b = mk();
+    assert(a.baseSeed === 1013003081 && a.baseSeed === (42 + 1013 * 1000003) % M72 && dcs(42) === 1013003081, 'D72.4a derived base seed, closed form: (seed + 1013 x 1000003) mod 2147483647 = 1013003081 for seed 42 (replication index r + 1000003 of the same seed stream)', `got ${a.baseSeed}`);
+    assert(JSON.stringify(caseDigest(a.sets())) === JSON.stringify(caseDigest(b.sets())) && a.sets() === a.sets() && a.sets().length === fx.reps, 'D72.4b deterministic: same run seed -> identical sets; the block is built once and reused (same array every call)', '');
+    const ref = hcNs.generatePrecomputedReplications({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: fx.calendar, sla: fx.sla, baseSeed: a.baseSeed, replications: fx.reps });
+    assert(JSON.stringify(caseDigest(ref)) === JSON.stringify(caseDigest(a.sets())), 'D72.4c the block is generatePrecomputedReplications at the derived base seed (one generator, no private copy of the formula)', '');
+    const prim = caseDigest(primarySets(fx)); const conf = caseDigest(a.sets());
+    assert(prim.length === fx.reps && conf.every((d) => !prim.includes(d)) && new Set([...prim, ...conf]).size === 2 * fx.reps, 'D72.4d disjoint arrival realisations: no confirmation replication equals any primary replication (and all 2R differ)', `primary=${prim.join()} confirm=${conf.join()}`);
+    let seedsDisjoint = true; let sd = '';
+    for (const seed of [1, 42, 12345, 987654321, 2147483000]) {
+      for (const R of [1, 8, 30, 200]) {
+        const p = new Set<number>(); for (let r = 0; r < R; r++) p.add((seed + r * 1013 + 7) % M72);
+        const cb = dcs(seed);
+        for (let r = 0; r < R; r++) if (p.has((cb + r * 1013 + 7) % M72)) { seedsDisjoint = false; sd ||= `seed=${seed} R=${R} r=${r}`; }
+      }
+    }
+    assert(seedsDisjoint, 'D72.4e per-replication seeds of the two blocks never coincide (5 run seeds x R in 1, 8, 30, 200)', sd);
+    assert(dcs(43) !== dcs(42) && JSON.stringify(caseDigest(mk(43).sets())) !== JSON.stringify(caseDigest(a.sets())), 'D72.4f control: a different run seed gives a different confirmation block', '');
+    // CRN within the block: every candidate N and rung is evaluated on the SAME case sets and the SAME base seed.
+    if (typeof rre === 'function') {
+      const ctx = { sla: fx.sla, categories: fx.categories, replications: fx.reps, baseSeed: fx.seed, precomputedCaseSets: primarySets(fx), confirmation: a };
+      const x1 = rre('confirm', ctx), x2 = rre('confirm', ctx);
+      assert(x1.precomputedCaseSets === x2.precomputedCaseSets && x1.baseSeed === x2.baseSeed && x1.precomputedCaseSets === a.sets(), 'D72.4g Common Random Numbers inside the block: every confirmation evaluation (any N, any rung) gets the identical sets and base seed', '');
+    }
+  } else {
+    assert(false, 'D72.4 confirmation block', 'createConfirmationBlock / deriveConfirmationBaseSeed are not exported');
+  }
+
+  // ============================================================================================
+  // D72.5 rescue by the minimal later-start shape (coverage OFF, Shift Placement ON) - "min" fixture
+  // ============================================================================================
+  {
+    const fx = FX.min;
+    const nPre = PRE_ON.min[1] as number; // 10 on the unchanged code
+    const on = S72('min', true, false);
+    const ctrlOnCovOn = S72('min', true, true);
+    assert(on.rec === nPre - 1, `D72.5a min fixture, coverage OFF, Shift Placement ON: recommended HC ${nPre - 1} (unchanged code: ${nPre})`, `got ${on.rec}`);
+    assert(ctrlOnCovOn.rec === PRE_ON.min[0], 'D72.5b CONTROL coverage ON, Shift Placement ON: still 9 (repair already tried the minimal shape; unchanged)', `got ${ctrlOnCovOn.rec}`);
+    // Evidence that N-1 = 9 fails the three existing routes and passes the minimal later-start shape on BOTH blocks (true before and after).
+    const n1 = nPre - 1;
+    const pSets = primarySets(fx);
+    const uni = evalAt(fx, false, n1, undefined, pSets, fx.seed);
+    const an = computeCandidatePlacementDistribution({ n: n1, cases: pSets[0].cases, calendar: fx.calendar, labor: laborFor(fx, true), queueArchitecture: 'pooled' });
+    const anEv = an ? evalAt(fx, false, n1, an, pSets, fx.seed) : null;
+    const minShape = buildCoverageRepairDistribution({ n: n1, calendar: fx.calendar, labor: laborFor(fx, true), minAgentsPerInterval: 1, queueArchitecture: 'pooled' });
+    const msP = evalAt(fx, false, n1, minShape ?? undefined, pSets, fx.seed);
+    assert(!uni.passesAllConstraints && !!anEv && !anEv.passesAllConstraints, 'D72.5c N-1: everyone at opening fails and the analytic placement roster fails (CI lower bounds 77.2 / 69.2 vs target 85)', `uniform=${uni.primaryStats.ci95Low} analytic=${anEv?.primaryStats.ci95Low}`);
+    assert(!!minShape && msP.passesAllConstraints && rosterStr72(minShape) === '0:8 240:1', 'D72.5d N-1: the minimal later-start shape (8 at opening + 1 at +240) passes the full-R gate on the primary block (CI lower bound 88.6)', `roster=${rosterStr72(minShape ?? undefined)} low=${msP.primaryStats.ci95Low}`);
+    if (typeof dcs === 'function') {
+      const msC = evalAt(fx, false, n1, minShape ?? undefined, confirmSets(fx), dcs(fx.seed));
+      assert(msC.passesAllConstraints, 'D72.5e N-1: the same roster also passes the full-R gate on the confirmation block (CI lower bound 87.9)', `low=${msC.primaryStats.ci95Low}`);
+    }
+    // Never a false accept: the reported roster, re-evaluated independently at full R with the unmodified SLA.
+    const rep = evalAt(fx, false, on.rec as number, on.win, pSets, fx.seed);
+    assert(on.rec !== null && !!on.win && rep.passesAllConstraints, 'D72.5f the roster the search reports at the new headcount passes the unmodified full-R gate when re-evaluated independently (primary block)', `rec=${on.rec} low=${rep.primaryStats.ci95Low}`);
+  }
+
+  // ============================================================================================
+  // D72.6 rescue by a share rung (coverage ON, Shift Placement ON) - the D33 shape
+  // ============================================================================================
+  {
+    const fx = FX.d33;
+    const on = S72('d33', true, true);
+    assert(on.rec === 21 && PRE_ON.d33[0] === 22, 'D72.6a D33 file, coverage ON, Shift Placement ON: recommended HC 21 (unchanged code: 22)', `got ${on.rec}`);
+    assert(S72('d33', true, false).rec === 21 && S72('d33', false, true).rec === 22, 'D72.6b CONTROLS: coverage OFF + placement ON stays 21; placement OFF stays 22', `${S72('d33', true, false).rec} / ${S72('d33', false, true).rec}`);
+    if (typeof brl === 'function' && typeof dcs === 'function') {
+      // Which route rescues 21? Walk the ladder independently (no pre-screen) with the unmodified gate on both blocks.
+      const pSets = primarySets(fx); const cSets = confirmSets(fx);
+      const ld = brl({ n: 21, cases: pSets[0].cases, calendar: fx.calendar, labor: laborFor(fx, true), queueArchitecture: 'pooled' });
+      const rows = ld.map((d, i) => ({ i, roster: rosterStr72(d), p: evalAt(fx, true, 21, d, pSets, fx.seed).passesAllConstraints, c: evalAt(fx, true, 21, d, cSets, dcs(fx.seed)).passesAllConstraints }));
+      const firstBoth = rows.find((r) => r.p && r.c);
+      assert(!!firstBoth && firstBoth.i > 0 && !rows[0].p, 'D72.6c at N=21 the minimal shape (rung 0) fails and a later SHARE rung passes both blocks', JSON.stringify(rows));
+      const rep = evalAt(fx, true, 21, on.win, pSets, fx.seed);
+      assert(!!on.win && rep.passesAllConstraints, 'D72.6d never a false accept: the reported roster at 21 passes the unmodified full-R gate when re-evaluated independently', `roster=${rosterStr72(on.win)} low=${rep.primaryStats.ci95Low}`);
+    } else {
+      assert(false, 'D72.6c/d share-rung evidence and independent re-evaluation (D33)', 'rescue helpers are not exported');
+    }
+  }
+
+  // ============================================================================================
+  // D72.7 the confirmation block on the built-in support sample (coverage OFF, Shift Placement ON)
+  // ============================================================================================
+  {
+    const fx = FX['smp-support'];
+    const on = S72('smp-support', true, false);
+    // Measured 2026-10-08: without the confirmation block the ladder rescues 27 (26 at opening + 1 later), which passes the search seed by about
+    // 0.1 point but only 7 of 21 fresh seeds; today's 28 passes 21 of 21. With the block 27 is rejected and the answer stays 28.
+    assert(on.rec === 28, 'D72.7a support sample, coverage OFF, Shift Placement ON: recommended HC stays 28 (the rescued 27 fails confirmation)', `got ${on.rec} roster=${rosterStr72(on.win)}`);
+    // Independent reproduction of the accepted roster on 10 fresh run seeds (7001..7010): must pass the unmodified gate on at least 8.
+    let passes = 0; const lows: number[] = [];
+    for (let s = 7001; s <= 7010; s++) {
+      const sets = hcNs.generatePrecomputedReplications({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: fx.calendar, sla: slaFor(fx, false), baseSeed: s, replications: fx.reps });
+      const ev = evalAt(fx, false, on.rec as number, on.win, sets, s);
+      if (ev.passesAllConstraints) passes++;
+      lows.push(ev.primaryStats.ci95Low);
+    }
+    assert(on.rec !== null && passes >= 8, `D72.7b the accepted roster at ${on.rec} (${rosterStr72(on.win)}) reproduces: passes the unmodified gate on ${passes} of 10 fresh seeds (need >= 8)`, `CI lows: ${lows.join(',')}`);
+  }
+
+  // ============================================================================================
+  // D72.8 never a false accept on the moved suite fixtures
+  // ============================================================================================
+  const NEW_ON_COV_ON: Record<string, number> = { d50: 7, d51a: 14, d52: 18 }; // measured after the change (unchanged code: 9 / 17 / 19)
+  if (typeof brl === 'function' && typeof dcs === 'function') {
+    for (const [name, cov] of [['d50', true], ['d51a', true], ['d52', true]] as Array<[string, boolean]>) {
+      const fx = FX[name];
+      const on = S72(name, true, cov);
+      const pre = PRE_ON[name][cov ? 0 : 1] as number;
+      if (on.rec === null) { assert(false, `D72.8 ${name}: search returned a recommendation`, 'null'); continue; }
+      assert(on.rec === NEW_ON_COV_ON[name], `D72.8z ${name}, coverage ON, Shift Placement ON: recommended HC ${NEW_ON_COV_ON[name]} (unchanged code: ${pre})`, `got ${on.rec}`);
+      const pSets = primarySets(fx); const cSets = confirmSets(fx);
+      const rep = evalAt(fx, cov, on.rec, on.win, pSets, fx.seed);
+      assert(rep.passesAllConstraints, `D72.8a ${name} (pre-change ${pre}, now ${on.rec}): the reported roster re-evaluated independently at full R with the unmodified SLA passes (primary block)`, `low=${rep.primaryStats.ci95Low}`);
+      if (on.rec < pre) {
+        // A rescue happened: some ladder rung passes the full-R gate on BOTH blocks at the new headcount.
+        const ld = brl({ n: on.rec, cases: pSets[0].cases, calendar: fx.calendar, labor: laborFor(fx, true), queueArchitecture: fx.arch });
+        const both = ld.filter((d) => evalAt(fx, cov, on.rec as number, d, pSets, fx.seed).passesAllConstraints && evalAt(fx, cov, on.rec as number, d, cSets, dcs(fx.seed)).passesAllConstraints);
+        assert(both.length > 0, `D72.8b ${name}: at the new headcount ${on.rec} at least one ladder roster passes the unmodified gate on the primary AND the confirmation block`, `rungs=${ld.length}`);
+      }
+    }
+  } else {
+    assert(false, 'D72.8 never a false accept on the moved suite fixtures (D50 / D51 / D52)', 'rescue helpers are not exported');
+  }
+
+  // ============================================================================================
+  // D72.9 never-worse sweep
+  // ============================================================================================
+  for (const name of NAMES72) {
+    for (const cov of [true, false]) {
+      const on = S72(name, true, cov), off = S72(name, false, cov);
+      const pre = PRE_ON[name][cov ? 0 : 1];
+      const v = (x: number | null) => (x === null ? Infinity : x);
+      assert(v(on.rec) <= v(off.rec) && v(on.rec) <= v(pre), `D72.9 ${name}, coverage ${cov ? 'ON' : 'OFF'}: placement ON ${on.rec} <= placement OFF ${off.rec} and <= pre-change placement ON ${pre}`, `on=${on.rec} off=${off.rec} pre=${pre}`);
+    }
+  }
+
+  // ============================================================================================
+  // D72.10 Shift Placement OFF controls (digests recorded on the unchanged code; must pass before AND after)
+  // ============================================================================================
+  for (const name of Object.keys(OFF_CTRL)) {
+    for (const [i, cov] of [[0, true], [1, false]] as Array<[number, boolean]>) {
+      const off = S72(name, false, cov);
+      assert(off.dig === OFF_CTRL[name][i], `D72.10 CONTROL ${name}, Shift Placement OFF, coverage ${cov ? 'ON' : 'OFF'}: full result digest equals the one recorded on the unchanged code (HC ${off.rec})`, `digest=${off.dig} expected=${OFF_CTRL[name][i]}`);
+    }
+  }
+
+  // ============================================================================================
+  // D72.11 determinism + sync == async (full-result digest) on the suite's search fixtures
+  // ============================================================================================
+  {
+    const again = summarize(FX.min, searchOptimalHC(paramsFor(FX.min, true, false)));
+    assert(again.dig === S72('min', true, false).dig, 'D72.11a determinism: same seed twice -> identical full result (min fixture, coverage OFF)', `${again.dig} vs ${S72('min', true, false).dig}`);
+    const cases72: Array<[string, boolean]> = [['min', false], ['min', true], ['d33', true], ['d33', false], ['d50', true], ['d51a', true], ['d52', true], ['d50p', true], ['smp-support', false]];
+    for (const [name, cov] of cases72) {
+      const a = await A72(name, true, cov);
+      const s = S72(name, true, cov);
+      assert(a.dig === s.dig && a.rec === s.rec, `D72.11b sync === async, full-result digest: ${name}, coverage ${cov ? 'ON' : 'OFF'} (HC ${s.rec})`, `sync=${s.dig}/${s.rec} async=${a.dig}/${a.rec}`);
+    }
+    const aOff = await A72('d33', false, true);
+    assert(aOff.dig === OFF_CTRL.d33[0], 'D72.11c sync === async with Shift Placement OFF (D33, coverage ON): async digest equals the recorded control', `async=${aOff.dig}`);
+  }
+
+  // ============================================================================================
+  // D72.12 monotonicity sweep (pattern D3.1): pass/fail in N with the ladder active
+  // The per-N decision is rebuilt from the same public pieces evaluateN uses (coverage repair -> uniform -> analytic placement ->
+  // shared ladder state machine with the shared stage rules), Shift Placement ON.
+  // ============================================================================================
+  if (typeof brl === 'function' && typeof crs === 'function' && typeof rre === 'function' && typeof ccb === 'function') {
+    const decide = (fx: Fx72, cov: boolean, sets: any[], blk: any, n: number): { pass: boolean; via: string } => {
+      const lab = laborFor(fx, true);
+      const slaX = slaFor(fx, cov);
+      const covPlan = (hcNs as any).planCoverageRepair({ n, sla: slaX, calendar: fx.calendar, labor: lab, queueArchitecture: fx.arch, representativeCases: sets[0].cases });
+      if (covPlan.dist && evalAt(fx, cov, n, covPlan.dist, sets, fx.seed).passesAllConstraints) return { pass: true, via: 'repair' };
+      if (!covPlan.repairFirst && evalAt(fx, cov, n, undefined, sets, fx.seed).passesAllConstraints) return { pass: true, via: 'uniform' };
+      const an = computeCandidatePlacementDistribution({ n, cases: sets[0].cases, calendar: fx.calendar, labor: lab, queueArchitecture: fx.arch });
+      if (an && evalAt(fx, cov, n, an, sets, fx.seed).passesAllConstraints) return { pass: true, via: 'analytic' };
+      const rs = crs({ ladder: brl({ n, cases: sets[0].cases, calendar: fx.calendar, labor: lab, queueArchitecture: fx.arch }), alreadyTried: [covPlan.dist, an] });
+      const ctx = { sla: slaX, categories: fx.categories, replications: fx.reps, baseSeed: fx.seed, precomputedCaseSets: sets, confirmation: blk };
+      for (let c = rs.next(); c !== null; c = rs.next()) {
+        const p = rre(c.stage, ctx);
+        rs.record(evaluateCandidateStatistical({ operationalHC: n, intervals: fx.intervals, openingWIP: [], categories: p.categories, calendar: fx.calendar, labor: lab, sla: p.sla, baseSeed: p.baseSeed, replications: p.replications, queueArchitecture: fx.arch, precomputedCaseSets: p.precomputedCaseSets, shiftDistribution: c.roster }));
+      }
+      const w = rs.result().winner;
+      return { pass: w !== null, via: w ? `rung${w.rung}` : 'none' };
+    };
+    for (const [name, cov, lo, hi] of [['min', false, 3, 14], ['d51a', true, 6, 18], ['d52', true, 10, 24]] as Array<[string, boolean, number, number]>) {
+      const fx = FX[name];
+      const sets = primarySets(fx);
+      const blk = ccb({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: fx.calendar, sla: slaFor(fx, cov), seed: fx.seed, replications: fx.reps });
+      const rows: Array<{ n: number; pass: boolean; via: string }> = [];
+      for (let n = lo; n <= hi; n++) rows.push({ n, ...decide(fx, cov, sets, blk, n) });
+      const dump = rows.map((r) => `${r.n}${r.pass ? 'P' : 'F'}:${r.via}`).join(' ');
+      const holes: string[] = [];
+      for (let i = 0; i < rows.length - 1; i++) if (rows[i].pass && !rows[i + 1].pass) holes.push(`N=${rows[i].n} passed but N=${rows[i + 1].n} failed`);
+      const cvTag = cov ? 'coverage ON' : 'coverage OFF';
+      assert(rows.some((r) => r.pass) && rows.some((r) => !r.pass), `D72.12a setup (${name}, ${fx.arch}, ${cvTag}): the swept range N=${lo}..${hi} contains both a failing and a passing N`, dump);
+      assert(holes.length === 0, `D72.12b ${name} (${fx.arch}, ${cvTag}): pass/fail is monotone in N over ${lo}..${hi} with the ladder active`, holes.join('; ') || dump);
+      assert(rows.some((r) => r.pass && r.via.startsWith('rung')), `D72.12c ${name} (${cvTag}): the sweep includes at least one N that only the ladder passes (so the ladder is really exercised)`, dump);
+      const rec = S72(name, true, cov).rec;
+      const firstPass = rows.find((r) => r.pass)?.n;
+      assert(rec === firstPass, `D72.12d ${name} (${cvTag}): the search's recommendation (${rec}) is the lowest passing N of the sweep (${firstPass})`, dump);
+    }
+  } else {
+    assert(false, 'D72.12 monotonicity sweep with the ladder active', 'rescue helpers are not exported');
+  }
+}
+
+// =================================================================
+// Suite D73 - PRD P1-6 / L23: replacement fixtures for the roster-polish paths
+//
+// With Shift Placement ON the search now tries a ladder of simple start-time rosters (each confirmed on a second independent replication
+// block) before rejecting a headcount. The lower headcounts that result leave the old D50 / D51 / D52 / D65 fixtures with nothing to re-spread
+// (their polish status became 'no_improvement'; see the 2026-10-08 notes there). This suite keeps every roster-polish path under test on
+// fixtures that are FOUND AT RUN TIME, not hand-tuned to a digest: a deterministic scan over a fixed, ordered parameter list takes the first
+// combination whose `rosterPolish.status` is the wanted one, and then asserts the properties of that path (the ones the old assertions
+// checked). A scan that finds nothing FAILS. All fixtures: Mon-Fri 08:00-20:00, 8 h shift, slap 30 min, 6 replications, seed 42, minimum
+// coverage ON (the polish works from the coverage profile).
+//
+//  D73.1  pooled   'adopted'                         (D50.1 / D50.2 / D50.3 / D50.5 / D50.6 and the D65 F3 statistics)
+//  D73.2  siloed   'adopted'                         (D51.1 a-h and the D65 F3 statistics)
+//  D73.3  pooled   'kept_current_failed_gate'        (D50.4 a-c, with a non-trivial headcount)
+//  D73.4  siloed   'adopted_partial' per queue       (D52.1: one queue saturates while another keeps improving)
+// =================================================================
+console.log('\n--- Suite D73: P1-6 replacement fixtures for the roster-polish paths (scan-found) ---');
+{
+  const t0 = Date.now();
+  const cal73: CalendarConfig = { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 20 };
+  const labor73Off: LaborConfig = { ...LABOR, dailyProductiveHours: 8 };
+  const labor73On: LaborConfig = { ...labor73Off, shiftPlacementEnabled: true, shiftSlapMinutes: 30 };
+  const mkIv73 = (cats: Array<[string, (h: number) => number]>): StandardInterval[] => {
+    const out: StandardInterval[] = [];
+    for (let day = 0; day < 5; day++) {
+      for (let h = 8; h < 20; h++) {
+        for (let m = 0; m < 60; m += 30) {
+          for (const [category, vf] of cats) {
+            out.push({ intervalIndex: out.length, start: new Date(2026, 2, 2 + day, h, m), end: new Date(2026, 2, 2 + day, h, m + 30), volume: vf(h), category });
+          }
+        }
+      }
+    }
+    return out;
+  };
+  const mkSla73 = (pct: number, windowH: number): SLAPolicyConfig => ({
+    primaryPct: pct, primaryWindow: windowH, primaryUnit: 'hours', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes',
+    asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'next_open',
+    occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 90, minCoverageEnabled: true,
+  });
+  const cat1y: CategoryConfig[] = [{ id: 'c1', name: 'General', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 }];
+  const cat2y: CategoryConfig[] = [
+    { id: 'A', name: 'A', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 },
+    { id: 'B', name: 'B', ahtMinutes: 25, shrinkagePct: 0.1, priority: 2 },
+  ];
+  type Fx73 = { label: string; intervals: StandardInterval[]; categories: CategoryConfig[]; sla: SLAPolicyConfig; arch: 'pooled' | 'siloed'; maxHC: number };
+  const run73 = (fx: Fx73, labor: LaborConfig) => ({
+    intervals: fx.intervals, openingWIP: [] as any[], categories: fx.categories, calendar: cal73, labor, sla: fx.sla, seed: 42, userMaxHC: fx.maxHC, replications: 6, queueArchitecture: fx.arch,
+  });
+  const cache73 = new Map<string, any>();
+  const onSearch = (fx: Fx73): any => {
+    if (!cache73.has(fx.label)) cache73.set(fx.label, searchOptimalHC(run73(fx, labor73On)));
+    return cache73.get(fx.label);
+  };
+  // First fixture of an ordered family whose placement-ON search satisfies `want`; `tried` is how many searches the scan ran.
+  const scan73 = (family: Fx73[], want: (r: any) => boolean): { fx: Fx73 | null; r: any; tried: number } => {
+    let tried = 0;
+    for (const fx of family) {
+      tried++;
+      const r = onSearch(fx);
+      if (want(r)) return { fx, r, tried };
+    }
+    return { fx: null, r: null, tried };
+  };
+  const distStr73 = (d: ShiftDistributionByCategory | undefined) => JSON.stringify(d ? Object.keys(d).sort().map((k) => [k, d[k].slaps]) : null);
+  const rosterStr73 = (d: ShiftDistributionByCategory | undefined) => (d ? Object.keys(d).sort().map((k) => `${k === '__POOLED__' ? '' : k + '='}${d[k].slaps.map((s) => `${s.startMinutesFromOpen}:${s.agentCount}`).join(' ')}`).join(' | ') : 'uniform');
+  const improves73 = (rp: any) => !!rp?.polished && (rp.polished.minOnShift > rp.current.minOnShift || (rp.polished.minOnShift === rp.current.minOnShift && rp.polished.gapAgentHours < rp.current.gapAgentHours - 1e-9));
+  const catImproves = (v: any) => !!v?.polished && !!v?.current && (v.polished.minOnShift > v.current.minOnShift || (v.polished.minOnShift === v.current.minOnShift && v.polished.gapAgentHours < v.current.gapAgentHours - 1e-9));
+  const catNoDrop = (rp: any, keys: string[]) => JSON.stringify(Object.keys(rp?.byCategory ?? {}).sort()) === JSON.stringify(keys) && keys.every((k) => rp.byCategory[k].polished && rp.byCategory[k].polished.minOnShift >= rp.byCategory[k].current.minOnShift);
+
+  // ---- ordered scan families (fixed order, nothing random) ----
+  const SLAS73: Array<[number, number]> = [[85, 3], [90, 3], [80, 3], [95, 4], [90, 4], [85, 4]];
+  const LEVELS73: Array<[number, number]> = [[3, 14], [4, 20], [5, 30], [6, 24], [4, 14], [6, 14], [8, 40], [6, 30]];
+  const SHAPES73: Array<[string, (b: number, p: number) => (h: number) => number]> = [
+    ['spike', (b, p) => (h) => (h === 8 ? p : b)],
+    ['peak', (b, p) => (h) => (h >= 12 && h < 16 ? p : b)],
+  ];
+  const pooledFamily: Fx73[] = [];
+  for (const [pct, w] of SLAS73) for (const [sn, sf] of SHAPES73) for (const [b, p] of LEVELS73) {
+    pooledFamily.push({ label: `pooled ${sn} ${b}/${p} SLA ${pct}/${w}h`, intervals: mkIv73([['General', sf(b, p)]]), categories: cat1y, sla: mkSla73(pct, w), arch: 'pooled', maxHC: 60 });
+  }
+  const siloedFamily: Fx73[] = [];
+  // Queue A: an 08:00 spike (base/spike volume per half-hour); queue B: a 12:00-16:00 peak (base/peak). Order is fixed.
+  const SILO_LEVELS: Array<[number, number, number, number]> = [[3, 14, 2, 7], [2, 20, 1, 10], [3, 40, 1, 7], [4, 40, 2, 7], [6, 40, 4, 7], [3, 60, 1, 10], [6, 60, 4, 10]];
+  for (const [pct, w] of [[95, 4], [90, 4], [95, 3], [85, 4]] as Array<[number, number]>) for (const [bA, pA, bB, pB] of SILO_LEVELS) {
+    siloedFamily.push({
+      label: `siloed A spike ${bA}/${pA} + B peak ${bB}/${pB} SLA ${pct}/${w}h`,
+      intervals: mkIv73([['A', (h) => (h === 8 ? pA : bA)], ['B', (h) => (h >= 12 && h < 16 ? pB : bB)]]), categories: cat2y, sla: mkSla73(pct, w), arch: 'siloed', maxHC: 60,
+    });
+  }
+
+  // ---- checks shared by the 'adopted' fixtures (pooled and siloed) ----
+  const f3Checks = (tag: string, fx: Fx73, r: any) => {
+    const N: number = r.recommendedHC;
+    const sets = hcNs.generatePrecomputedReplications({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: cal73, sla: fx.sla, baseSeed: 42, replications: 6 });
+    const ind: any = evaluateCandidateStatistical({
+      operationalHC: N, intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: cal73, labor: labor73On, sla: fx.sla,
+      baseSeed: 42, replications: 6, queueArchitecture: fx.arch, precomputedCaseSets: sets, shiftDistribution: r.shiftPlacement?.winningDistribution, dispatchFairness: undefined,
+    });
+    assert(JSON.stringify(r.primaryStatistical) === JSON.stringify(ind.primaryStats), `${tag}.F3a primaryStatistical describes the ADOPTED roster (equals an independent evaluation of it)`, `reported mean=${r.primaryStatistical?.achievedPctMean} independent mean=${ind.primaryStats?.achievedPctMean}`);
+    const row = r.searchHistory.find((x: any) => x.hc === N);
+    assert(!!row && r.searchHistory.filter((x: any) => x.hc === N).length === 1 && row.primaryPct === ind.primaryStats.achievedPctMedian && row.primaryCiLow === ind.primaryStats.ci95Low && row.primaryCiHigh === ind.primaryStats.ci95High && row.passed === ind.passesAllConstraints, `${tag}.F3b the single search-history row for N=${N} carries the adopted roster's numbers`, JSON.stringify(row));
+    assert(r.finalDESResult.primaryAchievedPct === ind.representativeResult.primaryAchievedPct, `${tag}.F3c the headline run equals the adopted evaluation's representative run`, `headline ${r.finalDESResult.primaryAchievedPct} vs rep ${ind.representativeResult.primaryAchievedPct}`);
+  };
+
+  // =============================================================================================================================
+  // D73.1 pooled 'adopted'
+  // =============================================================================================================================
+  {
+    const sc = scan73(pooledFamily, (r) => r.rosterPolish?.status === 'adopted');
+    assert(sc.fx !== null, 'D73.1a scan found a pooled fixture whose placement-ON polish is adopted', `no pooled 'adopted' fixture in ${pooledFamily.length} combinations`);
+    if (sc.fx) {
+      const { fx, r } = sc; const rp = r.rosterPolish;
+      console.log(`  (D73.1 fixture: ${fx.label}; HC ${r.recommendedHC}; moves ${rp.movesApplied}/${rp.movesTotal}; roster ${rosterStr73(r.shiftPlacement?.winningDistribution)}; scan ran ${sc.tried} searches)`);
+      const off = searchOptimalHC(run73(fx, labor73Off));
+      assert(rp.status === 'adopted' && rp.movesApplied === rp.movesTotal && rp.movesTotal > 0, 'D73.1b adopted pooled: every planned move applied (k* = K)', `${rp.movesApplied}/${rp.movesTotal}`);
+      assert(improves73(rp), 'D73.1c adopted roster improves coverage (higher minOnShift, tie -> lower gap)', `cur=${JSON.stringify(rp.current)} pol=${JSON.stringify(rp.polished)}`);
+      assert(rp.polished.minOnShift >= 1, 'D73.1d polished roster keeps at least one agent on shift in every bucket', `min=${rp.polished.minOnShift}`);
+      assert(r.recommendedHC !== null && off.recommendedHC !== null && r.recommendedHC <= off.recommendedHC, 'D73.1e HC with Shift Placement ON <= the placement-OFF run (polish itself never moves the headcount)', `off=${off.recommendedHC} on=${r.recommendedHC}`);
+      const rA: any = await searchOptimalHCAsync(run73(fx, labor73On));
+      assert(JSON.stringify(rA.rosterPolish) === JSON.stringify(rp) && distStr73(rA.shiftPlacement?.winningDistribution) === distStr73(r.shiftPlacement?.winningDistribution) && rA.recommendedHC === r.recommendedHC, 'D73.1i sync === async: rosterPolish, adopted roster and HC', `sync=${rosterStr73(r.shiftPlacement?.winningDistribution)} async=${rosterStr73(rA.shiftPlacement?.winningDistribution)}`);
+      const r2 = searchOptimalHC(run73(fx, labor73On));
+      assert(JSON.stringify(r2.rosterPolish) === JSON.stringify(rp), 'D73.1j same seed twice: identical rosterPolish', '');
+      const minCov = r.finalDESResult?.minCoverageObserved ?? -1;
+      assert(minCov >= 1, 'D73.1k adopted roster satisfies the coverage floor in the audit DES', `minCoverageObserved=${minCov}`);
+      f3Checks('D73.1', fx, r);
+      assert((off as any).rosterPolish === undefined, 'D73.1l placement OFF on the same fixture: rosterPolish undefined', '');
+    }
+  }
+
+  // =============================================================================================================================
+  // D73.2 + D73.4 siloed: one scan, two wanted statuses
+  // =============================================================================================================================
+  {
+    const sAd = scan73(siloedFamily, (r) => r.rosterPolish?.status === 'adopted');
+    assert(sAd.fx !== null, 'D73.2a scan found a siloed fixture whose placement-ON polish is adopted', `no siloed 'adopted' fixture in ${siloedFamily.length} combinations`);
+    if (sAd.fx) {
+      const { fx, r } = sAd; const rp = r.rosterPolish;
+      console.log(`  (D73.2 fixture: ${fx.label}; HC ${r.recommendedHC}; moves ${rp.movesApplied}/${rp.movesTotal}; roster ${rosterStr73(r.shiftPlacement?.winningDistribution)}; scan ran ${sAd.tried} searches)`);
+      const off = searchOptimalHC(run73(fx, labor73Off));
+      assert(improves73(rp), 'D73.2b siloed adopted: org-wide coverage improves', `cur=${JSON.stringify(rp.current)} pol=${JSON.stringify(rp.polished)}`);
+      assert(catNoDrop(rp, ['A', 'B']), "D73.2c both categories reported and no category's minOnShift decreases", JSON.stringify(rp.byCategory));
+      assert(r.recommendedHC !== null && off.recommendedHC !== null && r.recommendedHC <= off.recommendedHC, 'D73.2d HC with Shift Placement ON <= the placement-OFF run (sync)', `off=${off.recommendedHC} on=${r.recommendedHC}`);
+      const rA: any = await searchOptimalHCAsync(run73(fx, labor73On));
+      assert(rA.recommendedHC === r.recommendedHC && rA.staffing?.grossHCTotal === r.staffing?.grossHCTotal, 'D73.2e async HC and gross HC equal the sync run', `sync=${r.recommendedHC}/${r.staffing?.grossHCTotal} async=${rA.recommendedHC}/${rA.staffing?.grossHCTotal}`);
+      assert(JSON.stringify(rA.rosterPolish) === JSON.stringify(rp) && distStr73(rA.shiftPlacement?.winningDistribution) === distStr73(r.shiftPlacement?.winningDistribution), 'D73.2i sync === async (rosterPolish incl. byCategory + adopted roster)', '');
+      const r2 = searchOptimalHC(run73(fx, labor73On));
+      assert(JSON.stringify(r2.rosterPolish) === JSON.stringify(rp) && distStr73(r2.shiftPlacement?.winningDistribution) === distStr73(r.shiftPlacement?.winningDistribution), 'D73.2j deterministic across runs', '');
+      const floor = resolveMinAgentsPerInterval(fx.sla, r.recommendedHC ?? 0);
+      const minCov = r.finalDESResult?.minCoverageObserved ?? -1;
+      assert(floor >= 1 && minCov >= floor, `D73.2k coverage floor (org-wide gate, ${floor}) honoured in the final DES`, `minCoverageObserved=${minCov}`);
+      f3Checks('D73.2', fx, r);
+    }
+
+    // D73.4 - the per-queue property of the old D52.1: one queue saturates (does not reach its own target) while ANOTHER keeps improving.
+    const wantPartial = (r: any) => {
+      const rp = r.rosterPolish; const bc = rp?.byCategory;
+      return rp?.status === 'adopted_partial' && !!bc?.A && !!bc?.B && catImproves(bc.A) && catImproves(bc.B) && bc.A.movesApplied < bc.A.movesTotal;
+    };
+    const sPart = scan73(siloedFamily, wantPartial);
+    assert(sPart.fx !== null, "D73.4a scan found a siloed fixture with polish 'adopted_partial' where queue A saturates and queue B also improves its own minOnShift", `none in ${siloedFamily.length} combinations`);
+    if (sPart.fx) {
+      const { fx, r } = sPart; const rp = r.rosterPolish; const bc = rp.byCategory;
+      console.log(`  (D73.4 fixture: ${fx.label}; HC ${r.recommendedHC}; moves ${rp.movesApplied}/${rp.movesTotal}; A ${bc.A.movesApplied}/${bc.A.movesTotal} B ${bc.B.movesApplied}/${bc.B.movesTotal}; scan ran ${sPart.tried} new searches)`);
+      assert(rp.status === 'adopted_partial' && rp.movesApplied > 0 && rp.movesApplied < rp.movesTotal, 'D73.4b adopted_partial: 0 < k* < K at the top level', `${rp.movesApplied}/${rp.movesTotal}`);
+      assert(catImproves(bc.A), 'D73.4c first-by-name category A improves its own coverage', JSON.stringify(bc.A));
+      assert(catImproves(bc.B), 'D73.4d later category B ALSO improves its coverage although A stopped short (pre-fix: stuck at current)', JSON.stringify(bc.B));
+      assert(catNoDrop(rp, ['A', 'B']), 'D73.4e no category minOnShift drops', JSON.stringify(bc));
+      const sumApplied = Object.values<any>(bc).reduce((a, v) => a + (v.movesApplied ?? NaN), 0);
+      const sumTotal = Object.values<any>(bc).reduce((a, v) => a + (v.movesTotal ?? NaN), 0);
+      assert(sumApplied === rp.movesApplied && sumTotal === rp.movesTotal && bc.A.movesApplied < bc.A.movesTotal, 'D73.4f byCategory movesApplied/movesTotal are per key and sum to the top-level counts; A applied fewer than its own total', `${JSON.stringify(bc)} top=${rp.movesApplied}/${rp.movesTotal}`);
+      const off = searchOptimalHC(run73(fx, labor73Off));
+      assert(r.recommendedHC !== null && off.recommendedHC !== null && r.recommendedHC <= off.recommendedHC, 'D73.4g HC with Shift Placement ON <= the placement-OFF run', `off=${off.recommendedHC} on=${r.recommendedHC}`);
+      const rA: any = await searchOptimalHCAsync(run73(fx, labor73On));
+      assert(JSON.stringify(rA.rosterPolish) === JSON.stringify(rp) && distStr73(rA.shiftPlacement?.winningDistribution) === distStr73(r.shiftPlacement?.winningDistribution), 'D73.4h sync === async (rosterPolish incl. per-key moves + adopted roster)', '');
+      const floor = resolveMinAgentsPerInterval(fx.sla, r.recommendedHC ?? 0);
+      assert(floor >= 1 && (r.finalDESResult?.minCoverageObserved ?? -1) >= floor, 'D73.4i coverage floor honoured in the final DES', `min=${r.finalDESResult?.minCoverageObserved} floor=${floor}`);
+      f3Checks('D73.4', fx, r);
+    }
+  }
+
+  // =============================================================================================================================
+  // D73.3 pooled 'kept_current_failed_gate' at a non-trivial headcount (N >= 8) - the old D50.4 fixture (97% / 2 h after a 60-case spike) is now
+  // rescued to a roster nothing can improve, so the path is re-found by a scan over a tight-SLA spike family: one 08:00 spike (spike volume per
+  // half-hour from 30 to 56 in steps of 2, base volume 3 / 2 / 4) at SLA 90% / 3 h, then 85% / 3 h. First hit whose headcount is >= 8 wins.
+  // =============================================================================================================================
+  {
+    const keptFamily: Fx73[] = [];
+    for (const [pct, w] of [[90, 3], [85, 3]] as Array<[number, number]>) for (let p = 30; p <= 56; p += 2) for (const b of [3, 2, 4]) {
+      keptFamily.push({ label: `pooled spike ${b}/${p} SLA ${pct}/${w}h`, intervals: mkIv73([['General', (h) => (h === 8 ? p : b)]]), categories: cat1y, sla: mkSla73(pct, w), arch: 'pooled', maxHC: 60 });
+    }
+    const sk = scan73(keptFamily, (r) => r.rosterPolish?.status === 'kept_current_failed_gate' && (r.recommendedHC ?? 0) >= 8);
+    assert(sk.fx !== null, "D73.3a scan found a pooled fixture with polish 'kept_current_failed_gate' at a headcount of 8 or more", `none in ${keptFamily.length} combinations`);
+    if (sk.fx) {
+      const { fx, r } = sk; const rp = r.rosterPolish;
+      console.log(`  (D73.3 fixture: ${fx.label}; HC ${r.recommendedHC}; moves ${rp.movesApplied}/${rp.movesTotal}; roster ${rosterStr73(r.shiftPlacement?.winningDistribution)}; scan ran ${sk.tried} searches)`);
+      assert(rp.status === 'kept_current_failed_gate' && typeof rp.reason === 'string' && rp.reason.length > 0 && rp.movesApplied === 0 && rp.movesTotal > 0, 'D73.3b first move fails the gate: status kept_current_failed_gate with a reason, 0 moves applied out of K > 0', `status=${rp.status} moves=${rp.movesApplied}/${rp.movesTotal} reason=${rp.reason}`);
+      const off = searchOptimalHC(run73(fx, labor73Off));
+      assert(r.recommendedHC !== null && (off.recommendedHC === null || r.recommendedHC <= off.recommendedHC), 'D73.3c HC comes from the search itself and is <= the placement-OFF run (polish only re-spreads, it never raises HC)', `off=${off.recommendedHC} on=${r.recommendedHC}`);
+      const win = r.shiftPlacement?.winningDistribution?.__POOLED__?.slaps ?? [];
+      const onShift = (rp.profile.bucketStartMinutes as number[]).map((st) => win.reduce((acc: number, sl: ShiftSlapDistribution["slaps"][number]) => (sl.startMinutesFromOpen <= st && st < sl.startMinutesFromOpen + 8 * 60 ? acc + sl.agentCount : acc), 0));
+      assert(JSON.stringify(onShift) === JSON.stringify(rp.profile.onShiftCurrent) && distStr73(r.finalDESResult?.shiftDistributionUsed) === distStr73(r.shiftPlacement?.winningDistribution), 'D73.3d kept-current: the final roster (and the audit DES roster) is exactly the pre-polish current roster', `final=${JSON.stringify(onShift)} current=${JSON.stringify(rp.profile.onShiftCurrent)}`);
+      assert(JSON.stringify(rp.profile.onShiftPolished) !== JSON.stringify(rp.profile.onShiftCurrent), 'D73.3e a different (re-spread) target roster existed and was refused: planned on-shift profile differs from the kept one', '');
+      const rA: any = await searchOptimalHCAsync(run73(fx, labor73On));
+      assert(JSON.stringify(rA.rosterPolish) === JSON.stringify(rp) && rA.recommendedHC === r.recommendedHC && distStr73(rA.shiftPlacement?.winningDistribution) === distStr73(r.shiftPlacement?.winningDistribution), 'D73.3f sync === async: rosterPolish, HC and kept roster', '');
+      const r2 = searchOptimalHC(run73(fx, labor73On));
+      assert(JSON.stringify(r2.rosterPolish) === JSON.stringify(rp), 'D73.3g deterministic across runs', '');
+    }
+  }
+
+  console.log(`  (D73 elapsed ${((Date.now() - t0) / 1000).toFixed(1)}s)`);
 }
 
 console.log('\n==================================================');
