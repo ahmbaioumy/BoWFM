@@ -13,10 +13,10 @@
  *   Available (on-shift)  = busy + idle minutes: time the agent was in the queue on shift.
  *   Occupancy %           = busy / available. How hard the agent worked while in the queue.
  *   Scheduled             = available + the on-shift time after the agent's daily productive budget ran
- *                           out (out-of-queue but still on shift). Run on fixed shifts (Shift Placement on, or the
- *                           coverage-repair stagger): capped at the agent's own shift (daily productive hours
- *                           from their own start). Run without fixed shifts: no shift end exists, so it runs
- *                           to business close.
+ *                           out (out-of-queue but still on shift). Run on fixed shifts (every run whose business has
+ *                           opening and closing hours): capped at the agent's own shift (daily productive hours
+ *                           from their own start). Round-the-clock (24x7) run without placed start times: no shift
+ *                           end exists, so agents stay on around the clock and it runs to the end of each day.
  *   Utilisation %         = busy / scheduled. Lower than occupancy whenever an agent has scheduled
  *                           time outside the queue. NOT the Fairness panel figure: that panel's
  *                           "Occupancy %" is busy / on-shift available.
@@ -161,7 +161,7 @@ export interface AgentAnalytics {
   lateWindowMin: number;
   earliestCohortStart: string | null;
   filter: Required<AgentAnalyticsFilter>;
-  /** The run used fixed shifts (Shift Placement on, or the coverage-repair stagger): every agent works a fixed shift from their own start. */
+  /** The run used fixed shifts: every agent works a shift of dailyProductiveHours from their own start and then leaves (a start distribution was passed, or the calendar is not 24x7). False only for 24x7 without a distribution, where agents stay available all day. */
   staggered: boolean;
   /** Dates in `dates` after the last day of data (leftover work cleared on a part-day). Empty when none are in range. */
   drainDates: string[];
@@ -423,8 +423,9 @@ export function computeAgentAnalytics(input: {
 
   // ---- Rows -------------------------------------------------------------------------------
   const prodMin = labor.dailyProductiveHours * 60;
-  // A shiftDistribution was passed: every agent works a fixed shift of prodMin from their own start.
-  const staggered = !!des.shiftDistributionUsed;
+  // Fixed shifts: every agent works a shift of prodMin from their own start (a distribution was passed, or the
+  // calendar is not 24x7). Falls back to the distribution echo for results built before fixedShifts existed.
+  const staggered = des.fixedShifts ?? !!des.shiftDistributionUsed;
   const rows: AgentAnalyticsRow[] = [];
   const keptIds: number[] = [];
   for (let id = 0; id < hc; id++) {
@@ -454,7 +455,7 @@ export function computeAgentAnalytics(input: {
       const avail = cell.busy + cell.idle;
       // Staggered runs: every agent works a fixed shift (productive hours from their own start), so never
       // schedule past it. The cap uses all-category busy + idle so a category filter cannot hide it.
-      // Non-staggered runs have no shift end: the agent is on until business close (full tail).
+      // Runs without fixed shifts (24x7 with no placed start times) have no shift end: the agent is on to the end of the day (full tail).
       const tail = staggered ? Math.max(0, Math.min(cell.pendingOff, prodMin - (cell.busyAll + cell.idle))) : cell.pendingOff;
       scheduled += avail + tail;
     }
@@ -669,13 +670,13 @@ export function buildAgentAnalyticsNotes(a: AgentAnalytics, labor: LaborConfig):
     Item: 'Scheduled (min)',
     Note: a.staggered
       ? `The minutes the agent was on the plan to work. In this run each agent worked a fixed shift: the daily productive hours counted from their start time (${hours} h = ${mins} min per full day).`
-      : `The minutes the agent was on the plan to work. In this run agents had no fixed shift end, so this runs from the agent's start until business close. Shifts are fixed when Shift Placement is on, or when minimum coverage needs agents to start at different times.`,
+      : `The minutes the agent was on the plan to work. In this run the business is open around the clock and agents had no fixed shift end, so agents stay on around the clock and this counts their whole day. Shifts are fixed whenever the business has opening and closing hours; only a round-the-clock business without placed start times has no shift end.`,
   });
   out.push({
     Item: 'Utilisation % vs Occupancy %',
     Note: a.staggered
       ? `Normally the same number. They differ only on days when an agent's daily productive hours are used up before their shift ends, which happens when adherence is below 100%.`
-      : `In this run agents had no fixed shift end, so utilisation is measured against the time until business close, so it reads low on a business day longer than the daily productive hours (${hours} h). This is expected, not an error. Use Occupancy to judge workload; do not size from this column.`,
+      : `In this run the business is open around the clock and agents had no fixed shift end, so utilisation is measured against their whole day, so it reads low when the day is longer than the daily productive hours (${hours} h). This is expected, not an error. Use Occupancy to judge workload; do not size from this column.`,
   });
   out.push({
     Item: 'On-Shift Days',
@@ -697,8 +698,9 @@ export function buildAgentAnalyticsNotes(a: AgentAnalytics, labor: LaborConfig):
 }
 
 /**
- * True when the run has no fixed shifts AND the business day is longer than the daily productive hours,
- * i.e. utilisation will read low by design. Day length comes from the calendar's configured open/close times.
+ * True when the run has no fixed shifts (now only a 24x7 run without placed start times) AND the business day is
+ * longer than the daily productive hours, i.e. utilisation will read low by design. Day length comes from the
+ * calendar's configured open/close times.
  */
 export function utilisationReadsLowByDesign(a: AgentAnalytics, labor: LaborConfig, calendar: CalendarConfig): boolean {
   if (a.staggered) return false;

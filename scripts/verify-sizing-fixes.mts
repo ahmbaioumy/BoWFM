@@ -2077,8 +2077,14 @@ console.log('\n--- Suite D33: Phase 3 — coverage repair (redistribution before
     // uniform 9h shifts 'covered' a 14h window because agents with unused budget counted as present until close. Fixed
     // shifts cannot cover 14h from one start, so one seat moves to a late cohort and stops serving the morning peak:
     // coverage costs exactly one extra head here (22 vs 21).
-    searchWithCoverage.recommendedHC === (searchNoCoverage.recommendedHC ?? -1) + 1,
-    'D33.7 coverage costs exactly ONE extra head here (a 9h shift cannot cover a 14h window; one seat moves to a late cohort)',
+    // Updated 2026-10-08 (P2-9: non-24x7 runs without a start distribution now end each agent's shift
+    // dailyProductiveHours after open). Was 'coverage ON = coverage OFF + 1' (22 vs 21). With coverage OFF there is no
+    // late cohort any more, so every agent works ONE 9h shift from 08:00 and the 17:00-22:00 evening is unstaffed: the
+    // uniform-only answer rises 21 -> 28 and now EXCEEDS the coverage-ON answer (22, which keeps a late cohort that
+    // serves the evening). Pinned explicitly: ON = 22, OFF = 28, OFF >= ON.
+    searchWithCoverage.recommendedHC === 22 && searchNoCoverage.recommendedHC === 28 &&
+      (searchNoCoverage.recommendedHC ?? -1) >= (searchWithCoverage.recommendedHC ?? Infinity),
+    'D33.7 coverage ON = 22, coverage OFF = 28 (OFF >= ON: one shift from open leaves the evening unstaffed, a late cohort serves it)',
     `withCoverage=${searchWithCoverage.recommendedHC} withoutCoverage=${searchNoCoverage.recommendedHC}`
   );
 
@@ -3992,9 +3998,23 @@ console.log('\n--- Suite D52: roster polish, siloed per-queue parallel search --
       operationalHC: hc, intervals: iv52, openingWIP: [], categories: cats52, calendar: cal52, labor: labor52Off, sla: sla52,
       baseSeed: 42, replications: 4, queueArchitecture: 'siloed',
     });
+    // Updated 2026-10-08 (P2-9: non-24x7 runs without a start distribution now end each agent's shift
+    // dailyProductiveHours after open). The sweep used to pass no distribution and reach a passing HC at 20-30; with one
+    // 8h shift from 08:00 on this 08:00-20:00 day, cases arriving just before shift end wait until next morning and
+    // attainment plateaus at 95.2% with category B failing at every HC (see D52.3b). To keep this assertion's purpose --
+    // observe BOTH passing and failing headcounts -- the sweep now gives every HC a roster that can pass: the
+    // coverage-repair distribution (most agents at offset 0, one late starter per category at +240 min), built by
+    // buildCoverageRepairDistribution from the same per-category workload the search uses. Expected: fail at 4..16, pass at 20+.
+    const catWorkload52 = new Map<string, number>();
+    for (const iv of iv52) catWorkload52.set(iv.category, (catWorkload52.get(iv.category) || 0) + iv.volume * (cats52.find((c) => c.name === iv.category)?.ahtMinutes ?? 0));
+    const evalWithRoster52 = (hc: number) => (hcNs as any).evaluateCandidateStatistical({
+      operationalHC: hc, intervals: iv52, openingWIP: [], categories: cats52, calendar: cal52, labor: labor52Off, sla: sla52,
+      baseSeed: 42, replications: 4, queueArchitecture: 'siloed',
+      shiftDistribution: hcNs.buildCoverageRepairDistribution({ n: hc, calendar: cal52, labor: labor52Off, minAgentsPerInterval: 1, queueArchitecture: 'siloed', categoryWorkloadMinutes: catWorkload52 }) ?? undefined,
+    });
     let allAgree = true; let sawFail = false; let sawPass = false; let keysOk = true;
     for (const hc of [4, 8, 12, 16, 20, 30]) {
-      const r = evalAt(hc);
+      const r = evalWithRoster52(hc);
       const cp = r.categoryPasses as Record<string, boolean> | undefined;
       if (!cp) { allAgree = false; keysOk = false; break; }
       const allTrue = Object.values(cp).every(Boolean);
@@ -4004,6 +4024,24 @@ console.log('\n--- Suite D52: roster polish, siloed per-queue parallel search --
       if (allTrue) sawPass = true; else sawFail = true;
     }
     assert(allAgree && keysOk && sawFail && sawPass, 'D52.3 categoryPasses (keys = categories) all-true <=> passesCategorySLA, across passing and failing HCs', `agree=${allAgree} keys=${keysOk} fail=${sawFail} pass=${sawPass}`);
+
+    // D52.3b (added 2026-10-08, P2-9) -- records the single-shift fact. With NO distribution every agent works one 8h shift
+    // from 08:00 on a 12h day, so cases that arrive in the last 4h wait for the next morning: no headcount from 4 to 60
+    // passes, overall attainment plateaus at ~95.2% (95.1-95.4 CI) and category B keeps failing while A passes.
+    // Before the change the same sweep (agents stayed on to close) reached a passing HC at 20-30.
+    {
+      let anyPass = false; let bAlwaysFailsFrom30 = true; let aPassesFrom30 = true; let plateauOk = true;
+      for (let hc = 4; hc <= 60; hc += 4) {
+        const r = evalAt(hc);
+        if (r.passesAllConstraints || r.passesCategorySLA) anyPass = true;
+        if (hc >= 30) {
+          if (r.categoryPasses.B !== false) bAlwaysFailsFrom30 = false;
+          if (r.categoryPasses.A !== true) aPassesFrom30 = false;
+          if (Math.abs(r.primaryStats.achievedPctMean - 95.2) > 0.15) plateauOk = false;
+        }
+      }
+      assert(!anyPass && bAlwaysFailsFrom30 && aPassesFrom30 && plateauOk, 'D52.3b single shift, no distribution: no HC from 4 to 60 passes; attainment plateaus at ~95.2% (B fails, A passes from HC 30)', `anyPass=${anyPass} bFails=${bAlwaysFailsFrom30} aPasses=${aPassesFrom30} plateau=${plateauOk}`);
+    }
   }
 
   // D52.4 — the parallel k-search control (pure helper, fake evaluators).
@@ -4677,8 +4715,13 @@ console.log('\n--- Suite D62: G1 planning horizon from demand data only ---');
       fs += c.firstStartTime ? Math.round((c.firstStartTime.getTime() - H0.getTime()) / 1000) : 0;
       cs += c.completeTime ? Math.round((c.completeTime.getTime() - H0.getTime()) / 1000) : 0;
     }
-    assert(r.totalCases === 543 && r.completedCases === 543 && r.primaryAchievedPct === 100 && r.rawOccupancyPct === 72.4 && r.boAsaMeanMinutes === 0 && approx(r.totalHandlingMinutes, 16290, 0.01), 'D62.27 control: in-horizon backlog headline numbers identical to the pre-change engine', JSON.stringify({ t: r.totalCases, p: r.primaryAchievedPct, o: r.rawOccupancyPct, h: r.totalHandlingMinutes }));
-    assert(fs === 102067875 && cs === 103045275, 'D62.28 control: every case start/complete time identical to the pre-change engine (digest)', `fs=${fs} cs=${cs}`);
+    // Re-pinned 2026-10-08 (P2-9: non-24x7 runs without a start distribution now end each agent's shift dailyProductiveHours
+    // after open). This default 08:00-18:00 / 7.5 h calendar has no distribution, so each agent now leaves 450 min after open and
+    // cases arriving in the last 2.5 h wait for the next morning. Totals / completed / SLA 100% / occupancy 72.4% / handling 16290
+    // are unchanged (demand and planned capacity are the same); boAsaMeanMinutes moves 0 -> 25.3 (mean first-start wait is no
+    // longer zero) and the start/complete digests move 102067875 / 103045275 -> 110536781 / 114332981.
+    assert(r.totalCases === 543 && r.completedCases === 543 && r.primaryAchievedPct === 100 && r.rawOccupancyPct === 72.4 && approx(r.boAsaMeanMinutes, 25.3, 0.05) && approx(r.totalHandlingMinutes, 16290, 0.01), 'D62.27 control: in-horizon backlog headline numbers (totals/SLA/occupancy/handling unchanged; ASA mean 25.3 min under fixed shifts, was 0)', JSON.stringify({ t: r.totalCases, p: r.primaryAchievedPct, o: r.rawOccupancyPct, a: r.boAsaMeanMinutes, h: r.totalHandlingMinutes }));
+    assert(fs === 110536781 && cs === 114332981, 'D62.28 control: case start/complete time digest under fixed shifts (was 102067875 / 103045275 before P2-9)', `fs=${fs} cs=${cs}`);
     assert((r.overdueAtStartCount ?? 0) === 0 && r.caseResults.every((c) => !c.overdueAtStart), 'D62.29 control: in-horizon backlog is never flagged overdue at start');
   }
 
@@ -4937,7 +4980,8 @@ console.log('\n--- Suite D64: F2 24x7 park resumes when capacity exists ---');
     assert(pcts.every((p, i) => i === 0 || p >= pcts[i - 1] - 1e-9), 'D64.11 SLA % is non-decreasing in headcount for N = 14..17 (before the fix 14 -> 100%, 16 -> 98%)', `SLA% by N=14..17: ${pcts.map((p) => p.toFixed(1)).join(', ')}`);
   }
 
-  // (f) business-hours digest (Mon-Fri default calendar, uniform and staggered) identical before/after the fix
+  // (f) business-hours digest (Mon-Fri default calendar, uniform and staggered). The staggered digest (D64.12b) is identical before/after the
+  // D64 fix and before/after P2-9; the uniform one (D64.12a) moved on 2026-10-08 (see below).
   {
     const digest = (des: any): number => {
       let h = 2166136261;
@@ -4951,7 +4995,11 @@ console.log('\n--- Suite D64: F2 24x7 park resumes when capacity exists ---');
     for (let d = 0; d < 5; d++) for (const h of [8, 10, 12, 14]) { const s = new Date(2026, 9, 12 + d, h, 0); iv.push({ intervalIndex: iv.length, start: s, end: new Date(s.getTime() + 1800000), volume: 1, category: 'General' } as StandardInterval); }
     const mk = (offsets: number[] | null) => runBackofficeDES({ operationalHC: 3, intervals: iv, openingWIP: [], categories: catF2, calendar: DEFAULT_CALENDAR, labor: { ...DEFAULT_LABOR, adherencePct: 0.9 }, sla: slaF2, seed: 7, queueArchitecture: 'pooled', shiftDistribution: offsets ? stagF2(offsets) : undefined });
     const dU = digest(mk(null)), dS = digest(mk([0, 120, 240]));
-    assert(dU === 1141821764, 'D64.12a business-hours uniform run digest pinned (measured on the unchanged engine)', `digest=${dU}`);
+    // Re-pinned 2026-10-08 (P2-9: non-24x7 runs without a start distribution now end each agent's shift dailyProductiveHours
+    // after open). This uniform run (default 08:00-18:00 calendar, 7.5 h, adherence 0.9, no distribution) was 1141821764 on the
+    // pre-P2-9 engine, where agents stayed on to close; now each agent leaves 450 min after open (shift end is not shortened by
+    // adherence, decision 11), so cases arriving late wait for the next morning and the first-start / complete times move.
+    assert(dU === 3096667861, 'D64.12a business-hours uniform run digest pinned (fixed shifts, P2-9; was 1141821764 when agents stayed to close)', `digest=${dU}`);
     assert(dS === 147910604, 'D64.12b business-hours staggered 0/2/4 h run digest pinned (measured on the unchanged engine)', `digest=${dS}`);
   }
 
@@ -5071,11 +5119,16 @@ console.log('\n--- Suite D65: F3 statistics describe the adopted roster ---');
     const a: any = searchOptimalHC(baseOf(noImp));
     const aa: any = await searchOptimalHCAsync(baseOf(noImp));
     assert(a.rosterPolish?.status === 'no_improvement', 'D65.5a no_improvement scenario (placement ON, 95/2h) really is no_improvement', `status=${a.rosterPolish?.status}`);
-    assert(dg(a) === '733df309dc766f59' && dg(aa) === dg(a), 'D65.5b no_improvement: full result identical to today (pre) and sync = async', `sync ${dg(a)} async ${dg(aa)}`);
+    // Re-pinned 2026-10-08 (P2-9): digest 733df309dc766f59 -> 4f9350ef4421701d. The recommended HC is unchanged (12); only the
+    // `boundaryEvidence` block (the "one fewer agent" run, which used to have no shift end) and the new `fixedShifts` field on the
+    // result differ.
+    assert(dg(a) === '4f9350ef4421701d' && dg(aa) === dg(a), 'D65.5b no_improvement: full result pinned (P2-9: only boundaryEvidence + fixedShifts differ from the pre-change digest 733df309dc766f59) and sync = async', `sync ${dg(a)} async ${dg(aa)}`);
     const off: Scn = { intervals: iv1, categories: cat1, labor: laborOff65, sla: sla65, seed: 42, userMaxHC: 40 };
     const o: any = searchOptimalHC(baseOf(off));
     const oa: any = await searchOptimalHCAsync(baseOf(off));
-    assert(o.rosterPolish === undefined && dg(o) === '9038b551a950a83b' && dg(oa) === dg(o), 'D65.6 placement OFF: full result identical to today (pre) and sync = async', `sync ${dg(o)} async ${dg(oa)}`);
+    // Re-pinned 2026-10-08 (P2-9): digest 9038b551a950a83b -> dd646445fac9906d. The recommended HC is unchanged (9); only the
+    // `boundaryEvidence` block and the new `fixedShifts` field on the result differ.
+    assert(o.rosterPolish === undefined && dg(o) === 'dd646445fac9906d' && dg(oa) === dg(o), 'D65.6 placement OFF: full result pinned (P2-9: only boundaryEvidence + fixedShifts differ from the pre-change digest 9038b551a950a83b) and sync = async', `sync ${dg(o)} async ${dg(oa)}`);
   }
   // (i) placement stays opt-in
   assert(!DEFAULT_LABOR.shiftPlacementEnabled, 'D65.7 default labor config: shiftPlacementEnabled is OFF', `got ${String(DEFAULT_LABOR.shiftPlacementEnabled)}`);
@@ -5624,6 +5677,282 @@ import { diffRunData, diffRunInputs as diffRunInputs70, fingerprintBacklog, fing
   const wipR = mkWip().map((w) => ({ ...w, category: 'A' }));
   const remapped = remapCasesToIntervalSpelling(wipR, ivR);
   assert(fingerprintBacklog(remapped) === fingerprintBacklog(wipR), 'D70.10 remapCasesToIntervalSpelling returning equal content -> backlog not stale');
+}
+
+// =================================================================
+// Suite D71 - PRD P2-9: every agent leaves at the end of their own shift on a business-hours
+// calendar, even when no shift-start distribution is passed.
+//
+// Before: with no distribution every agent started at open and stayed available until business
+// close (work capped by the daily productive budget, idle time not counted). After: fixed-shift
+// mode is on whenever a distribution is passed OR the calendar is not 24x7; with no distribution
+// every agent sits at offset 0 (= "one cohort, everyone at offset 0"). 24x7 with no distribution
+// keeps today's behaviour (planner decision).
+//
+// Fixture "long day": Mon-Fri 08:00-22:00 (840 min), dailyProductiveHours 9 => shift 08:00-17:00.
+// Controls marked CONTROL must pass on the unchanged engine AND after the change.
+// =================================================================
+console.log('\n--- Suite D71: P2-9 shift end without a start distribution ---');
+{
+  const sortKeys71 = (_k: string, v: any) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v);
+  // Digest over EVERY field of a DESResult (scalars, caseResults, agentTimeline, fairness ledger...)
+  // except the two fields that legitimately differ between "no distribution" and "explicit
+  // single cohort": the shiftDistributionUsed echo, and the new fixedShifts flag (absent on the
+  // pre-change engine, so it must stay out of the hard-coded control digests).
+  const fullDigest71 = (des: any): string => {
+    const { shiftDistributionUsed: _e, fixedShifts: _f, ...rest } = des;
+    // Dates are written as minutes from horizonStart so the pinned digests do not depend on the machine's time zone.
+    const base = des.horizonStart.getTime();
+    const replacer = function (this: any, k: string, v: any) {
+      const raw = this[k];
+      return raw instanceof Date ? (raw.getTime() - base) / 60000 : sortKeys71(k, v);
+    };
+    return createHash('sha1').update(JSON.stringify(rest, replacer)).digest('hex').slice(0, 16);
+  };
+
+  const calLong71: CalendarConfig = { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 22 };
+  const labLong71: LaborConfig = { ...LABOR, dailyProductiveHours: 9 };
+  const cats71: CategoryConfig[] = [
+    { id: 'a', name: 'A', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 },
+    { id: 'b', name: 'B', ahtMinutes: 30, shrinkagePct: 0.1, priority: 2 },
+  ];
+  const sla71: SLAPolicyConfig = {
+    primaryPct: 80, primaryWindow: 4, primaryUnit: 'hours', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes',
+    asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'next_open',
+    occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 90, minCoverageEnabled: false,
+  };
+  // 3 working days (Mon 2 Mar 2026 ...), one interval per 30 min across [openH, closeH), A volume 6 + B volume 4.
+  // Demand = (6*20 + 4*30) = 240 min per 30-min slot = 8 agent-equivalents of work all day.
+  const mkIv71 = (openH: number, closeH: number, days = 3, vA = 6, vB = 4): StandardInterval[] => {
+    const out: StandardInterval[] = [];
+    for (let day = 0; day < days; day++) {
+      for (let h = openH; h < closeH; h++) {
+        for (let m = 0; m < 60; m += 30) {
+          for (const [category, volume] of [['A', vA], ['B', vB]] as const) {
+            out.push({ intervalIndex: out.length, start: new Date(2026, 2, 2 + day, h, m), end: new Date(2026, 2, 2 + day, h, m + 30), volume, category });
+          }
+        }
+      }
+    }
+    return out;
+  };
+  const ivLong71 = mkIv71(8, 22);
+  const cohort0 = (n: number, keys: string[]): ShiftDistributionByCategory =>
+    Object.fromEntries(keys.map((k) => [k, { slapMinutes: 60, slaps: [{ startMinutesFromOpen: 0, agentCount: n }] }])) as ShiftDistributionByCategory;
+  // Explicit single cohort at offset 0. Siloed: one entry per category, agentCount = N (the cursor stops at the
+  // category's own seat block, so an oversized count just means "every agent of that category").
+  const runLong71 = (n: number, arch: 'pooled' | 'siloed', dist?: ShiftDistributionByCategory, over: any = {}) =>
+    runBackofficeDES({
+      operationalHC: n, intervals: ivLong71, openingWIP: [], categories: cats71, calendar: calLong71, labor: labLong71,
+      sla: sla71, seed: 7, queueArchitecture: arch, shiftDistribution: dist, ...over,
+    });
+  const busyByAgent71 = (des: any): number[] => {
+    const b = new Array<number>(des.operationalHC).fill(0);
+    for (const s of des.agentTimeline as any[]) if (s.state === 'busy') b[s.agentId] += s.minutes;
+    return b.map((x) => Math.round(x * 1000) / 1000);
+  };
+  const caseTimes71 = (des: any): string =>
+    createHash('sha1').update(JSON.stringify([...(des.caseResults as any[])].sort((x, y) => (x.caseId < y.caseId ? -1 : 1)).map((c) => [c.caseId, c.firstStartTime?.getTime() ?? null, c.completeTime?.getTime() ?? null, c.parkCount]))).digest('hex').slice(0, 16);
+  const dayOpenMs71 = (d: Date, cal: CalendarConfig) => new Date(d.getFullYear(), d.getMonth(), d.getDate(), cal.dailyOpenHour, cal.dailyOpenMinute).getTime();
+
+  // --- D71.1: EQUIVALENCE (core proof) ---------------------------------------------------------------
+  // No distribution == explicit single cohort at offset 0, everything except the echo, pooled and siloed, several N.
+  {
+    for (const arch of ['pooled', 'siloed'] as const) {
+      for (const n of [6, 10, 13, 18]) {
+        const keys = arch === 'pooled' ? ['__POOLED__'] : ['A', 'B'];
+        const a: any = runLong71(n, arch);
+        const b: any = runLong71(n, arch, cohort0(n, keys));
+        const sameScalars = a.completedCases === b.completedCases && a.primaryAchievedPct === b.primaryAchievedPct && JSON.stringify(busyByAgent71(a)) === JSON.stringify(busyByAgent71(b));
+        assert(
+          sameScalars && caseTimes71(a) === caseTimes71(b) && fullDigest71(a) === fullDigest71(b),
+          `D71.1 ${arch} N=${n}: no distribution === explicit single cohort at offset 0 (completed, SLA %, per-agent busy minutes, case start/complete digest, full-result digest)`,
+          `completed ${a.completedCases}/${b.completedCases} sla ${a.primaryAchievedPct}/${b.primaryAchievedPct} times ${caseTimes71(a)}/${caseTimes71(b)} full ${fullDigest71(a)}/${fullDigest71(b)}`
+        );
+      }
+    }
+  }
+
+  // --- D71.2: no activity after the shift end; per-agent available minutes per full day <= 540 ----------
+  {
+    for (const arch of ['pooled', 'siloed'] as const) {
+      const des: any = runLong71(13, arch);
+      let late = 0, worstDay = 0, worstEnd = 0;
+      const perAgentDay = new Map<string, number>();
+      for (const s of des.agentTimeline as any[]) {
+        if (s.state !== 'busy' && s.state !== 'idle') continue;
+        const endMin = (s.to.getTime() - dayOpenMs71(s.from, calLong71)) / 60000;
+        worstEnd = Math.max(worstEnd, endMin);
+        if (endMin > 9 * 60 + 1e-6) late++;
+        const k = `${s.agentId}_${s.date}`;
+        perAgentDay.set(k, (perAgentDay.get(k) ?? 0) + s.minutes);
+      }
+      for (const v of perAgentDay.values()) worstDay = Math.max(worstDay, v);
+      assert(late === 0, `D71.2a ${arch}: no busy or idle slice ends after open + dailyProductiveHours*60 (08:00 + 540 = 17:00) on any day`, `${late} slices end later; latest end = open + ${worstEnd.toFixed(1)} min`);
+      assert(worstDay <= 540 + 0.01, `D71.2b ${arch}: busy + idle minutes per agent per day <= 540`, `worst agent-day = ${worstDay.toFixed(2)} min`);
+      const inv = verifyAgentTimelineInvariants(des, labLong71, calLong71);
+      assert(inv.valid, `D71.2c ${arch}: timeline invariants valid (incl. shift-end invariant after the change)`, inv.errors.slice(0, 3).join('; '));
+      // The horizon is 3 data days + the drain day(s) the engine runs to clear leftover work: count the days actually present.
+      const nDays = new Set((des.agentTimeline as any[]).map((s) => s.date)).size;
+      const fairAvail = (des.agentFairness?.perAgent ?? []).map((r: any) => r.availableMinutes as number);
+      assert(fairAvail.length === 13 && nDays >= 3 && Math.max(...fairAvail) <= nDays * 540 + 0.01, `D71.2d ${arch}: agentFairness availableMinutes per agent <= (days in horizon) x 540`, `max=${Math.max(...fairAvail)} days=${nDays}`);
+    }
+  }
+
+  // --- D71.3: the shift-end invariant fires on a timeline that violates it -----------------------------
+  // (mutates a copy: adds an idle slice that ends after 17:00 for agent 0 on day 1)
+  {
+    const des: any = runLong71(13, 'pooled');
+    const d0 = new Date(2026, 2, 2, 17, 0), d1 = new Date(2026, 2, 2, 18, 0);
+    const bad = { ...des, fixedShifts: true, agentTimeline: [...des.agentTimeline, { agentId: 0, agentLabel: 'Agent-1', date: '2026-03-02', state: 'idle', rosterSource: 'existing', caseId: null, category: null, from: d0, to: d1, minutes: 60, isResume: false, inBindingWindow: false }] };
+    const inv = verifyAgentTimelineInvariants(bad, labLong71, calLong71);
+    assert(inv.errors.some((e) => /shift end/i.test(e)), "D71.3 verifyAgentTimelineInvariants reports a slice that ends after the agent's own shift end", inv.errors.slice(0, 3).join('; ') || '(no error reported)');
+  }
+
+  // --- D71.4: hand-built, closed-form -----------------------------------------------------------------
+  // 1 agent, long day, shift Mon 12 Oct 2026 08:00-17:00, adherence 1.0 (budget 540 = shift length).
+  //  X: one case arrives Mon 16:30, AHT 60. Works 16:30-17:00 (30 min), shift ends -> handed back (parkCount 1),
+  //     Tue 08:00 resumes the remaining 30 min -> completes Tue 08:30. (Pre-change: ran 16:30-17:30, one slice.)
+  //  Y: one case arrives Mon 18:00 (after shift end), AHT 30. Waits for next open: starts Tue 08:00, done Tue 08:30.
+  //     (Pre-change: started at 18:00, done 18:30.)
+  //  Adherence 0.9 (budget 486 min, unused that day): shift still ends at 17:00.
+  //  Z: arrives 16:40, AHT 15 -> 16:40-16:55 (inside the shift).  W: arrives 16:50, AHT 30 -> 16:50-17:00, then Tue 08:00-08:20.
+  //     If adherence shortened the shift (to 486 min = 16:06) Z would wait until Tue.
+  {
+    const at = (day: number, h: number, m = 0) => new Date(2026, 9, day, h, m);
+    const catHB: CategoryConfig[] = [{ id: 'g', name: 'General', ahtMinutes: 60, shrinkagePct: 0.2, priority: 1, primaryWindowMinutes: 2880 }];
+    const mk = (id: string, arr: Date, aht: number): CaseEntity => {
+      const dl = new Date(arr.getTime() + 48 * 3600000);
+      return { id, syntheticId: 1, category: 'General', priority: 1, arrival: arr, clockStart: arr, totalAhtMinutes: aht, remainingWorkMinutes: aht, primaryDeadline: dl, latestSafeStart: new Date(dl.getTime() - aht * 60000), firstStartTime: null, completeTime: null, parkCount: 0, isOpeningWip: false };
+    };
+    const run = (c: CaseEntity, adh = 1.0): any => runBackofficeDES({
+      operationalHC: 1, intervals: [], openingWIP: [], categories: catHB, calendar: calLong71, labor: { ...labLong71, adherencePct: adh },
+      sla: sla71, seed: 7, precomputedCases: { cases: [c], horizonStart: at(12, 8), horizonEnd: at(14, 22) },
+    });
+    const hm = (d: Date) => `${d.getDate()}/${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`;
+    const busy = (d: any) => (d.agentTimeline as any[]).filter((s) => s.state === 'busy').sort((a, b) => a.from - b.from);
+    const x = run(mk('X', at(12, 16, 30), 60));
+    const xs = busy(x).map((s) => `${hm(s.from)}-${hm(s.to)}`);
+    assert(xs.join(',') === '12/16:30-12/17:00,13/8:00-13/8:30', 'D71.4a in-progress case is handed back at shift end 17:00 and finished next working day 08:00-08:30', xs.join(','));
+    const xr = x.caseResults[0];
+    assert(xr.parkCount === 1 && xr.isCompleted && !!xr.completeTime && hm(xr.completeTime) === '13/8:30', 'D71.4b the handed-back case counts one park and completes Tue 08:30', `park=${xr.parkCount} complete=${xr.completeTime ? hm(xr.completeTime) : null}`);
+    const y = run(mk('Y', at(12, 18, 0), 30));
+    const ys = busy(y).map((s) => `${hm(s.from)}-${hm(s.to)}`);
+    assert(ys.join(',') === '13/8:00-13/8:30', 'D71.4c a case arriving after the shift end (Mon 18:00) waits until next open: works Tue 08:00-08:30', ys.join(','));
+    const z = run(mk('Z', at(12, 16, 40), 15), 0.9);
+    const zs = busy(z).map((s) => `${hm(s.from)}-${hm(s.to)}`);
+    assert(zs.join(',') === '12/16:40-12/16:55', 'D71.4d adherence 0.9: a 15-min case arriving 16:40 is worked inside the shift (shift end stays 17:00, not shortened)', zs.join(','));
+    const w = run(mk('W', at(12, 16, 50), 30), 0.9);
+    const ws = busy(w).map((s) => `${hm(s.from)}-${hm(s.to)}`);
+    assert(ws.join(',') === '12/16:50-12/17:00,13/8:00-13/8:20', 'D71.4e adherence 0.9: case arriving 16:50 gets 10 min before the 17:00 shift end, finishes Tue 08:00-08:20', ws.join(','));
+  }
+
+  // --- D71.5: adherence 0.9 on the generated fixture: shift end is open + 540 -----------------------------
+  {
+    const des: any = runLong71(13, 'pooled', undefined, { labor: { ...labLong71, adherencePct: 0.9 } });
+    let worstEnd = 0;
+    for (const s of des.agentTimeline as any[]) if (s.state === 'busy' || s.state === 'idle') worstEnd = Math.max(worstEnd, (s.to.getTime() - dayOpenMs71(s.from, calLong71)) / 60000);
+    assert(Math.abs(worstEnd - 540) <= 1e-6, 'D71.5 adherence 0.9: last timeline slice ends at exactly open + 540 (not shortened to 486, not stretched to close)', `latest slice end = open + ${worstEnd.toFixed(2)} min`);
+  }
+
+  // --- D71.6: seed determinism ---------------------------------------------------------------------------
+  {
+    const a = fullDigest71(runLong71(12, 'pooled')), b = fullDigest71(runLong71(12, 'pooled')), c = fullDigest71(runLong71(12, 'pooled', undefined, { seed: 8 }));
+    assert(a === b, 'D71.6a same seed twice -> identical result (digest over every field)', `${a} vs ${b}`);
+    assert(a !== c, 'D71.6b control: a different seed gives a different digest (the digest is sensitive)', `${a} vs ${c}`);
+    const s1 = fullDigest71(runLong71(12, 'siloed')), s2 = fullDigest71(runLong71(12, 'siloed'));
+    assert(s1 === s2, 'D71.6c siloed: same seed twice -> identical result', `${s1} vs ${s2}`);
+  }
+
+  // --- D71.7: monotonicity sweep + CI gate (long day, coverage OFF) -------------------------------------
+  {
+    const evalAt = (n: number) => evaluateCandidateStatistical({
+      operationalHC: n, intervals: ivLong71, openingWIP: [], categories: cats71, calendar: calLong71, labor: labLong71, sla: sla71,
+      baseSeed: 42, replications: 8,
+    });
+    const rows = [] as Array<{ n: number; pass: boolean; mean: number; median: number; low: number; catPass: boolean; ciPass: boolean }>;
+    for (let n = 8; n <= 24; n++) {
+      const r: any = evalAt(n);
+      rows.push({ n, pass: r.passesAllConstraints, mean: r.primaryStats.achievedPctMean, median: r.primaryStats.achievedPctMedian, low: r.primaryStats.ci95Low, catPass: r.passesCategorySLA, ciPass: r.passesPrimaryCI });
+    }
+    const dump = JSON.stringify(rows.map((r) => [r.n, r.pass, +r.mean.toFixed(1), r.low]));
+    assert(rows.some((r) => r.pass) && rows.some((r) => !r.pass), 'D71.7a setup: the swept range N=8..24 contains both a failing and a passing N', dump);
+    const holes: string[] = [];
+    for (let i = 0; i < rows.length - 1; i++) if (rows[i].pass && !rows[i + 1].pass) holes.push(`N=${rows[i].n} passed but N=${rows[i + 1].n} failed`);
+    assert(holes.length === 0, 'D71.7b passesAllConstraints is monotone in N over 8..24 on the long-day fixture, coverage OFF', holes.join('; ') || dump);
+    // CI gate: an N whose mean AND median clear the 80% target but which still fails on the lower bound (overall or per category).
+    const tgt = sla71.primaryPct;
+    const ciOnly = rows.find((r) => r.mean >= tgt && r.median >= tgt && (!r.ciPass || !r.catPass));
+    if (ciOnly) {
+      assert(ciOnly.low < tgt || !ciOnly.catPass, `D71.7c CI gate: N=${ciOnly.n} has mean ${ciOnly.mean.toFixed(1)}% / median ${ciOnly.median.toFixed(1)}% >= ${tgt}% but is rejected on the lower bound (overall ${ciOnly.low}% / categories pass=${ciOnly.catPass})`, JSON.stringify(ciOnly));
+    } else {
+      // No such N on this fixture: construct it the way D57 does (hand-built replications; mean 80 == target, lower bound 78.0).
+      const reps = [78, 82, 80, 79, 81].map((v) => ({ primaryAchievedPct: v, rawOccupancyPct: 50, boAsaMeanMinutes: 0, minCoverageObserved: Infinity, categoryStats: { A: { primaryPct: 100 }, B: { primaryPct: 100 } } })) as any[];
+      const ev: any = hcNs.computeStatisticalEvaluation(4, reps, reps.map((r) => r.primaryAchievedPct), reps.length, { ...sla71, confidenceLevelPct: 95 }, calLong71, cats71);
+      assert(ev.primaryStats.achievedPctMean >= tgt && ev.passesAllConstraints === false && ev.passesPrimaryCI === false, 'D71.7c CI gate (constructed D57-style: no swept N had mean and median >= target with a failing bound): mean 80 clears 80, lower bound 78.0 does not -> rejected', dump);
+    }
+  }
+
+  // --- D71.8: fixedShifts flag -----------------------------------------------------------------------------
+  {
+    const noDist: any = runLong71(8, 'pooled');
+    const withDist: any = runLong71(8, 'pooled', cohort0(8, ['__POOLED__']));
+    assert(noDist.fixedShifts === true, 'D71.8a non-24x7, no distribution: fixedShifts true', `got ${noDist.fixedShifts}`);
+    assert(withDist.fixedShifts === true, 'D71.8b non-24x7, with a distribution: fixedShifts true', `got ${withDist.fixedShifts}`);
+    assert(noDist.shiftDistributionUsed === undefined && withDist.shiftDistributionUsed !== undefined, 'D71.8c shiftDistributionUsed is still only the echo of a passed distribution (undefined when none passed)', '');
+    const iv247 = mkIv71(0, 24, 2);
+    const r247: any = runBackofficeDES({ operationalHC: 6, intervals: iv247, openingWIP: [], categories: cats71, calendar: CAL_24X7, labor: LABOR, sla: sla71, seed: 7, queueArchitecture: 'pooled' });
+    assert(r247.fixedShifts === false, 'D71.8d 24x7, no distribution: fixedShifts false', `got ${r247.fixedShifts}`);
+    const r247d: any = runBackofficeDES({ operationalHC: 6, intervals: iv247, openingWIP: [], categories: cats71, calendar: CAL_24X7, labor: LABOR, sla: sla71, seed: 7, queueArchitecture: 'pooled', shiftDistribution: cohort0(6, ['__POOLED__']) });
+    assert(r247d.fixedShifts === true, 'D71.8e 24x7 WITH a distribution: fixedShifts true (staggered 24x7 is unchanged)', `got ${r247d.fixedShifts}`);
+    const r0: any = runBackofficeDES({ operationalHC: 0, intervals: ivLong71, openingWIP: [], categories: cats71, calendar: calLong71, labor: labLong71, sla: sla71, seed: 7 });
+    assert(r0.fixedShifts === false, 'D71.8f zero headcount: fixedShifts false (mode needs operationalHC > 0)', `got ${r0.fixedShifts}`);
+  }
+
+  // --- D71.9: a 00:00-24:00 calendar WITHOUT the is24x7 flag ----------------------------------------------------
+  // Documented behaviour (not special-cased): it is a business-hours calendar, so one shift from 00:00 for
+  // dailyProductiveHours (8 h => 00:00-08:00), then nobody until the next 00:00. 16 h/day unstaffed.
+  {
+    const calMid: CalendarConfig = { workingDays: [1, 2, 3, 4, 5], dailyOpenHour: 0, dailyOpenMinute: 0, dailyCloseHour: 24, dailyCloseMinute: 0, holidays: [] };
+    const iv = mkIv71(0, 24, 2, 2, 1);
+    const des: any = runBackofficeDES({ operationalHC: 4, intervals: iv, openingWIP: [], categories: cats71, calendar: calMid, labor: LABOR, sla: sla71, seed: 7, queueArchitecture: 'pooled' });
+    let lateSlices = 0, busyN = 0, day2Busy = 0;
+    for (const s of des.agentTimeline as any[]) {
+      if (s.state !== 'busy' && s.state !== 'idle') continue;
+      const endMin = (s.to.getTime() - dayOpenMs71(s.from, calMid)) / 60000;
+      if (endMin > 8 * 60 + 1e-6) lateSlices++;
+      if (s.state === 'busy') { busyN++; if (s.from.getDate() === 3) day2Busy++; }
+    }
+    assert(des.fixedShifts === true && des.totalCases > 0 && busyN > 0 && day2Busy > 0, 'D71.9a 00:00-24:00 without is24x7: runs without error, fixedShifts true, work happens on both days', `fixed=${des.fixedShifts} cases=${des.totalCases} busy=${busyN} day2=${day2Busy}`);
+    assert(lateSlices === 0, 'D71.9b 00:00-24:00 without is24x7: no busy/idle slice after 08:00 (one 8 h shift from 00:00, then off) - the shift-end rule applies', `${lateSlices} slices end after 08:00`);
+    const inv = verifyAgentTimelineInvariants(des, LABOR, calMid);
+    assert(inv.valid, 'D71.9c timeline invariants valid for the 00:00-24:00 non-24x7 run', inv.errors.slice(0, 3).join('; '));
+  }
+
+  // --- D71.C: CONTROLS (must pass BEFORE and AFTER the engine change) -----------------------------------------
+  // The hard-coded digests below were captured on 2026-10-08 by running THIS fixture on the UNCHANGED engine
+  // (checkpoint c59dd89, des-engine.ts not yet edited) via `npx tsx scripts/verify-sizing-fixes.mts` and reading
+  // the digest printed in the failure detail while the constant was still a placeholder. Digest = fullDigest71
+  // (sha1 of the key-sorted JSON of every DESResult field except shiftDistributionUsed / fixedShifts, first 16 hex).
+  const CTRL_A_DIGEST = 'bdedcc57cfd4cc09';
+  const CTRL_B_DIGEST = '697b95ca38183ef7';
+  const CTRL_C_DIGEST = '31c6b07200eaebe0';
+  {
+    // (a) shift == business day (09:00-17:00, 8 h): no distribution === explicit single cohort, and === the recorded digest.
+    const ivA = mkIv71(9, 17);
+    const mkA = (dist?: ShiftDistributionByCategory) => runBackofficeDES({ operationalHC: 10, intervals: ivA, openingWIP: [], categories: cats71, calendar: BIZ_CAL, labor: LABOR, sla: sla71, seed: 7, queueArchitecture: 'pooled', shiftDistribution: dist });
+    const a0 = fullDigest71(mkA()), a1 = fullDigest71(mkA(cohort0(10, ['__POOLED__'])));
+    assert(a0 === a1, 'D71.C-a1 CONTROL 09:00-17:00 / 8 h: no-distribution run === explicit single-cohort run (digest)', `${a0} vs ${a1}`);
+    assert(a0 === CTRL_A_DIGEST, 'D71.C-a2 CONTROL 09:00-17:00 / 8 h: no-distribution digest equals the one recorded on the unchanged engine', `digest=${a0}`);
+    // (b) 24x7, no distribution: untouched.
+    const iv247 = mkIv71(0, 24, 2);
+    const b0 = fullDigest71(runBackofficeDES({ operationalHC: 9, intervals: iv247, openingWIP: [], categories: cats71, calendar: CAL_24X7, labor: LABOR, sla: sla71, seed: 7, queueArchitecture: 'pooled' }));
+    assert(b0 === CTRL_B_DIGEST, 'D71.C-b CONTROL 24x7, no distribution: digest equals the one recorded on the unchanged engine', `digest=${b0}`);
+    // (c) explicit two-cohort distribution on the long day: unchanged.
+    const two: ShiftDistributionByCategory = { __POOLED__: { slapMinutes: 60, slaps: [{ startMinutesFromOpen: 0, agentCount: 9 }, { startMinutesFromOpen: 300, agentCount: 5 }] } };
+    const c0 = fullDigest71(runLong71(14, 'pooled', two));
+    assert(c0 === CTRL_C_DIGEST, 'D71.C-c CONTROL explicit two-cohort distribution (08:00 x9, 13:00 x5): digest equals the one recorded on the unchanged engine', `digest=${c0}`);
+  }
 }
 
 console.log('\n==================================================');

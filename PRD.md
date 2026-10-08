@@ -3,11 +3,11 @@
 | | |
 |---|---|
 | **Status** | Draft — as-built specification |
-| **Version** | 1.20.4 |
-| **Date** | 2026-10-07 |
+| **Version** | 1.21.0 |
+| **Date** | 2026-10-08 |
 | **Owner** | _(unassigned)_ |
 | **Product** | Backoffice WFM Sizing Engine |
-| **Artifact** | `BoWFM.html` — single self-contained offline HTML file (~617 KB) |
+| **Artifact** | `BoWFM.html` — single self-contained offline HTML file (~641 KB) |
 
 > **Scope of this document.** This is an **as-built** PRD: §1–§10 specify the product as it
 > actually behaves today, verified against source. §11 carries known defects and unbuilt
@@ -322,7 +322,10 @@ runs used to re-admit agents still processing across midnight to the idle pool).
 
 **FR-4.6** — The Capacity Basis (M1) rule must be displayed live with a `COMPLIANT` /
 `VIOLATION` indicator: scheduled daily productive hours must not exceed the daily business
-window.
+window. Since 1.21.0 the note also says that on a business day longer than the daily productive
+hours, later hours are staffed only if minimum coverage or Shift Placement gives some agents later
+starts, and that a business entered as 00:00-24:00 without the 24x7 option counts as having opening
+hours (every agent works one shift from 00:00; see L22).
 
 ### 5.5 SLA policy configuration
 
@@ -393,7 +396,8 @@ adherence`) is exhausted a few minutes before its shift ends is still on the flo
 still caps *work* and dispatch eligibility is unchanged. Unstaggered (uniform) layouts have
 `startOffset = 0`, so **a shift shorter than the open day fails coverage for any headcount**
 (structural) — only staggered starts (coverage repair / placement) can cover the tail of the
-window. Fixed shifts (no split shifts) and the 08:00–22:00 window are user-confirmed domain
+window. Since 1.21.0 dispatch obeys that window too on every non-24×7 run (Stage 3a, P2-9), so with
+the floor off and no placed start times the evening is genuinely unstaffed, not only reported as such. Fixed shifts (no split shifts) and the 08:00–22:00 window are user-confirmed domain
 facts. Previously presence was the proxy "budget remaining or busy", which made every shift
 "leave" `(1 - adherence) x shiftLength` minutes early: at adherence 0.98 a saturated late
 cohort could never cover the close, repair never passed on real files, and uniform passed only
@@ -621,21 +625,22 @@ and the Audit breach list.
   are unchanged (measured on EGS_Only.csv: rec HC 51; Agent-51 finished 733 vs 338 but work
   share 334 vs 346, avg handle 35.0 min for all).
   **Occupancy = busy / available; utilisation = busy / scheduled.** Scheduled is the agent's
-  own shift: with shift placement on (a shift distribution was passed) every agent, whichever
-  cohort, is scheduled for `dailyProductiveHours` from their own start (available + the shift
-  time left after the daily productive-hour budget is exhausted, never past the shift end).
-  With shift placement off the engine has no shift end, so Scheduled runs to business close
-  (L20), so utilisation reads low on a business day longer than the productive hours
-  (expected; occupancy is the workload figure). With shift placement on, occupancy and
+  own shift: on every run whose business has opening and closing hours (since 1.21.0; before it,
+  only runs that passed a start distribution) every agent, whichever cohort, is scheduled for
+  `dailyProductiveHours` from their own start (available + the shift time left after the daily
+  productive-hour budget is exhausted, never past the shift end). Only a round-the-clock (24×7) run
+  without placed start times has no shift end: agents stay on around the clock, Scheduled runs to
+  the end of each day (L20), so utilisation reads low when the day is longer than the productive
+  hours (expected; occupancy is the workload figure). On fixed-shift runs, occupancy and
   utilisation are identical except on budget-exhausted days (e.g. adherence below 100%).
   **1.20.4 — the panel and the export say which case applies to the run** (display/export
   only; no number, column or section order changed). `computeAgentAnalytics` returns three
-  facts: `staggered` (the run used fixed shifts: Shift Placement on, or the coverage-repair stagger that minimum coverage applies even with the switch off), `drainDates` (shown dates after the last day of
+  facts: `staggered` (the run used fixed shifts: `des.fixedShifts`, i.e. every non-24×7 run since 1.21.0, and 24×7 runs with a start distribution; the name is historical), `drainDates` (shown dates after the last day of
   data) and `pooledCategoryFilter` (category filter on a shared pool). A header pill reads
-  "Shifts: fixed length" / "Shifts: open until close" (it describes what the run did, not the Shift Placement switch); the help text is one generic sentence plus the mode-specific
+  "Shifts: fixed length" / "Shifts: around the clock" (it describes what the run did, not the Shift Placement switch; the second wording was "open until close" before 1.21.0); the help text is one generic sentence plus the mode-specific
   line (shown in amber, "expected, not an error; use Occupancy to judge workload; do not size
-  from this column", only when the run has no fixed shifts and the business day is longer than the
-  daily productive hours); the status line names part-days after the data ends only when the
+  from this column", only when the run has no fixed shifts — now only a 24×7 run without placed start times — and the business day is longer than the
+  daily productive hours; since 1.21.0 the wording says shifts are fixed whenever the business has opening and closing hours, and no longer says "until business close"); the status line names part-days after the data ends only when the
   range contains one ("Includes N part-day(s) after the data ends (dates) while leftover work
   is cleared"; the minutes stay as actually on shift, not a full shift); a category note shows
   only for a category filter on a shared pool (Busy/Occupancy/Utilisation count that
@@ -833,8 +838,35 @@ disagreed with this section's own capacity model (confined to
 `[offset, offset+shiftLength]`) and was the root cause of the greedy routinely choosing
 distributions worse than uniform-start. When an agent's shift ends mid-case, the case is
 handed to a still-on-shift colleague the same day rather than parked overnight. 24×7
-calendars are unaffected (still zero staggering) pending a separate multi-start increment.
-See PRD §11 P0-4.
+calendars with a start distribution obey the same window (real 24×7 multi-start was delivered
+the same week; see the coverage section above). See PRD §11 P0-4.
+
+**Every agent leaves at the end of their shift, with or without a start distribution (1.21.0,
+2026-10-08; P2-9).** Until 1.20.4 a run with NO start distribution (minimum coverage off, a
+headcount too small to stagger, or the "one fewer agent" evidence run) kept every agent available
+until business close; only their daily productive time capped the work, so a quiet morning meant
+cases were still taken at 20:00 on an 08:00–22:00 day. That is not a real roster, and it disagreed
+with the coverage check, which already counted the agent as gone after their shift. Now fixed-shift
+mode is on for every non-24×7 run: with no distribution every agent is at offset 0, works one shift
+from opening and leaves `dailyProductiveHours` after open (not shortened by adherence, decision 11).
+`DESResult.fixedShifts` is the flag; `shiftDistributionUsed` still only echoes an input
+distribution. The invariant checker gains check #9 (no busy or idle slice past the agent's own shift
+end). 24×7 without a distribution is unchanged (§10 L21).
+Measured effects (same seeds):
+- Minimum coverage ON (the app default): recommended headcount unchanged everywhere measured — the
+  planner's file (`EGS_Only.csv`, 08:00–22:00, 9 h) stays 47; the app-default samples and D65
+  pins (12 / 9) are unchanged. Only the "one fewer agent" evidence block moves: it used to run with
+  no shift end and contradicted the search (planner file: 46 agents shown passing at 83.3% while
+  the search rejected 46 at 77.2%); it now shows 76.7%, a fail, in agreement with the search.
+- Minimum coverage OFF: the recommendation rises, because one shift from opening leaves the evening
+  unstaffed — planner file 46 → 48; D33 fixture (08:00–22:00, 9 h) 21 → 28; support pooled
+  23 → 28; healthcare pooled 28 → 31 and siloed 25 → 27. It can now exceed the coverage-ON figure
+  (D33: 28 vs 22; support 28 vs 27; planner 48 vs 47), since coverage ON forces a late starter that
+  serves the evening.
+- A short SLA can become unreachable with a single shift: the D52 fixture (08:00–20:00, 8 h) plateaus
+  at 95.2% attainment at every headcount up to 60, because cases arriving just before shift end
+  wait until the next morning.
+- Saved results and screenshots from earlier versions will not reproduce in these cases.
 
 **24×7 parked work resumes when capacity exists (DES-8, 1.17.0, 2026-10-06).** On a 24×7
 calendar a case parked because its agent ran out of daily productive time used to sit in the
@@ -1169,13 +1201,13 @@ comment. Nothing else.
 
 ## 9. Validation and quality
 
-### 9.1 Automated test suites — 1,283 checks (174 + 858 + 87 + 164 trusted-source)
+### 9.1 Automated test suites — 1,331 checks (174 + 901 + 92 + 164 trusted-source)
 
 | Suite | Tests | Covers |
 |---|---|---|
 | `scripts/verify-fixes.mts` | 174 | Legacy regression: CSV parsing, date handling, calendar arithmetic, CRN consistency, occupancy semantics, standalone artifact integrity, analytical infeasibility diagnosis, 24x7 midnight budget accounting |
-| `scripts/verify-sizing-fixes.mts` | 858 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement, fair agent assignment (D43: spread bounds, determinism, EDF order pinned to the pre-change engine, OFF = original HC, HC pins on pooled/siloed/staggered/24x7; D44: no double-booking in gated 24x7 runs; D45: availability accrual and pinned HC of the three built-in samples; D47: Workload Floor toggle; D48: clock-start derivation; D49: pinned HC of `test_files/AJM_Only.csv`; D50/D51/D52: roster polish at fixed HC — pooled, siloed guard, per-queue search; D53: Results use run-time settings; D54: number fields keep what is typed; D55-D61 (G12): the frozen sizing decisions are guarded by tests — dispatch order incl. the priority tie-break, business-calendar `latestSafeStart`, CI-gated acceptance (primary / per-category / occupancy cap / ASA each use the confidence bound, not the mean), Common Random Numbers, unfinished cases in the SLA denominator, Gross HC and harmonic shrinkage, volume rounding; each proven red against its own mutation; D62 (G1) + D63 (G1-a: stray date blocks from 8 empty days): horizon from demand only, backlog injection clamp, rule D4 overdue-at-start scoring, search N_min/N_occ/recommendation with old and Friday backlog (sync = async), and the three new data-quality rules), `D64` (F2: 24x7 budget-exhausted parks hand back at once - zero avoidable waits, legitimate waits kept, SLA monotone in headcount, business-hours digest pinned, stress + determinism), `D65` (F3: statistics describe the adopted roster), `D66` (G2 + H2: numbers read from files), `D67` (input safety part 2: absolute-instant timezone checks, marker count and warning, category spelling merge, rename list, backlog match by key, samples unchanged), `D68` (input safety part 3: reader errors E1-E7 and warnings W1-W3 with exact rows, pipe delimiter, quoted delimiter/line-break row numbers, UTF-16-style tab file, duplicate headers, file warnings in data quality, identical to the legacy reader on clean files and the built-in samples; D69: unmapped required columns are named; D70: stale-results fingerprints for demand data and opening backlog, incl. the real mapping function) |
-| `scripts/verify-agent-analytics.mts` | 87 | Export timestamps equal the on-screen formatter; agent analytics reconcile to `completedCases` / `totalHandlingMinutes` / `agentFairness`; work-share case credit; scheduled minutes capped at the agent's own shift; run facts (`staggered`, `drainDates`, `pooledCategoryFilter`); the three-section export and the Notes wording (AA.40-AA.45) |
+| `scripts/verify-sizing-fixes.mts` | 901 | Sizing chain: working-day counting, apportionment monotonicity, staffing-chain integrity, offline/zero-dependency enforcement, fair agent assignment (D43: spread bounds, determinism, EDF order pinned to the pre-change engine, OFF = original HC, HC pins on pooled/siloed/staggered/24x7; D44: no double-booking in gated 24x7 runs; D45: availability accrual and pinned HC of the three built-in samples; D47: Workload Floor toggle; D48: clock-start derivation; D49: pinned HC of `test_files/AJM_Only.csv`; D50/D51/D52: roster polish at fixed HC — pooled, siloed guard, per-queue search; D53: Results use run-time settings; D54: number fields keep what is typed; D55-D61 (G12): the frozen sizing decisions are guarded by tests — dispatch order incl. the priority tie-break, business-calendar `latestSafeStart`, CI-gated acceptance (primary / per-category / occupancy cap / ASA each use the confidence bound, not the mean), Common Random Numbers, unfinished cases in the SLA denominator, Gross HC and harmonic shrinkage, volume rounding; each proven red against its own mutation; D62 (G1) + D63 (G1-a: stray date blocks from 8 empty days): horizon from demand only, backlog injection clamp, rule D4 overdue-at-start scoring, search N_min/N_occ/recommendation with old and Friday backlog (sync = async), and the three new data-quality rules), `D64` (F2: 24x7 budget-exhausted parks hand back at once - zero avoidable waits, legitimate waits kept, SLA monotone in headcount, business-hours digest pinned, stress + determinism), `D65` (F3: statistics describe the adopted roster), `D66` (G2 + H2: numbers read from files), `D67` (input safety part 2: absolute-instant timezone checks, marker count and warning, category spelling merge, rename list, backlog match by key, samples unchanged), `D68` (input safety part 3: reader errors E1-E7 and warnings W1-W3 with exact rows, pipe delimiter, quoted delimiter/line-break row numbers, UTF-16-style tab file, duplicate headers, file warnings in data quality, identical to the legacy reader on clean files and the built-in samples; D69: unmapped required columns are named; D70: stale-results fingerprints for demand data and opening backlog, incl. the real mapping function; `D71` (P2-9): fixed shifts on every non-24x7 run — no-distribution run equals an explicit single cohort at offset 0, nobody works past their own shift end, adherence does not shorten it, 24x7-without-distribution and equal-length-day controls unchanged, determinism, monotone pass/fail sweep, CI-gate rejection, `fixedShifts` flag; D33.7 / D52.3b pin the new coverage-off numbers) |
+| `scripts/verify-agent-analytics.mts` | 92 | Export timestamps equal the on-screen formatter; agent analytics reconcile to `completedCases` / `totalHandlingMinutes` / `agentFairness`; work-share case credit; scheduled minutes capped at the agent's own shift; run facts (`staggered`, `drainDates`, `pooledCategoryFilter`); the three-section export and the Notes wording (AA.40-AA.45); a 24×7 no-distribution fixture for the "around the clock" case (AA.46-AA.46e) |
 | `scripts/verify-trusted-source.mts` (`npm run test:trusted-source`) | 164 | Hand-derived ground truth in `trusted-source-validation.json` (T0 invariants 35, T1 domain algebra 71, T2 hand-traced DES 31, T3 characterization 27). Authored under `Asia/Dubai`; on any other host timezone it prints a warning and continues (verified: all 164 pass under UTC, America/New_York, Asia/Tokyo, Pacific/Auckland, Europe/London) |
 | `scripts/audit-compare.mts` (`npm run test:audit`, opt-in, ~30 min) | 24 cells | Re-runs all four `test_files/` samples × 6 settings and fails on any difference from `docs/audit/sample-hc-after-2026-09-30.jsonl` |
 | `scripts/check-artifact-freshness.mts` | gate | Fails if `BoWFM.html` is missing or older than shippable sources (`npm run check:artifact`) |
@@ -1245,7 +1277,9 @@ Behaviours a user must understand to interpret results correctly.
 | **L17** | **Fair agent assignment no longer changes the recommended HC (resolved by C6, 1.12.0).** Until 1.12.0 fair assignment could raise the recommendation by 1 in near-capacity runs (a 20% workload-reduction fixture 13→14; `AJM_Simu.csv` pooled 103→104), because the coverage gate counted "budget remaining" as presence and fair dispatch drains every agent's daily budget together at ~98% occupancy. Presence is now the agent's own shift window (FR-5.12), so that artefact is gone. Re-measured 2026-09-29 after the change, fair ON vs OFF: **0 of 18 scenarios differ** (8 real-file runs and 6 built-in samples, each pooled/siloed as applicable, plus the 4 D43.13 pin fixtures); N_min is identical in both modes. The suite pins ON = OFF (D43.13, D45.2). | Fair assignment is HC-neutral. It still changes *who* gets each case (FR-4.7), not how many agents are needed. The toggle remains for reproducing legacy assignment. |
 | **L18** | **Workload Floor OFF can recommend an unsustainable team** (FR-5.13). Below `max(N_min, N_occ)` a team can pass the finite-horizon simulation by draining backlog after the horizon end. The always-on occupancy ceiling blocks most of this (anything whose demand exceeds planned capacity fails), so in default configs Off changes nothing; it bites with agent-hours overrides. | Leave the floor ON for committed plans. Treat any result with the red "below the workload floor" warning as optimistic. |
 | **L19** | **SLA % excludes backlog that was already overdue when the plan starts** (G1, rule D4). Opening-backlog cases that arrived before the first interval and cannot meet their deadline even if work starts at the first working instant are worked and counted as workload, but are not in the SLA % or the wait-time mean; they are reported separately (`overdueAtStartCount`, Results note, case CSV column, Data Quality warning). | A plan with a large overdue carry-over can show a high SLA % that says nothing about that backlog. Read the count beside the SLA headline; it is workload the team must still clear. |
-| **L20** | **Agent Analytics "Scheduled (min)" is the agent's own shift only when the run used fixed shifts (Shift Placement on, or the coverage-repair stagger)** (1.20.3). Without a shift distribution the engine has no shift end, so Scheduled runs to business close and Utilisation reads low on a long business day (e.g. ~50% on 08:00-22:00 with 9 productive hours). Since 1.20.4 the panel and the export state this (amber note, Notes section); the number itself is unchanged. A part-day after the data ends keeps the minutes actually on shift (it is labelled, not scaled to a full shift). | Display only; sizing, recommended HC and Results occupancy are unaffected. Turn shift placement on to get per-shift utilisation; read occupancy (busy / available) when the pill says "Shifts: open until close". |
+| **L20** | **Agent Analytics "Scheduled (min)" runs to the end of each day for a 24×7 run without placed start times** (1.20.3; narrowed in 1.21.0). Every run whose business has opening and closing hours now has a shift end, so Scheduled is the agent's own shift there. Only a 24×7 run with no start distribution keeps agents on around the clock, so Scheduled runs to the end of each day and Utilisation reads low when the day is longer than the productive hours (e.g. 33% against 41-45% occupancy on a full day of the 4-agent, 8-productive-hour fixture AA.46). The panel and the export state this (amber note, Notes section); the number itself is unchanged. A part-day after the data ends keeps the minutes actually on shift (it is labelled, not scaled to a full shift). | Display only; sizing, recommended HC and Results occupancy are unaffected. Place start times (Shift Placement or minimum coverage) to get per-shift utilisation; read occupancy (busy / available) when the pill says "Shifts: around the clock". |
+| **L21** | **24×7 runs without placed start times keep agents on around the clock** (1.21.0, P2-9 left this case on the old model by decision). The simulator has no shift end there: an agent is limited only by the daily productive time and the midnight spill-over rules. With minimum coverage on, the coverage-repair stagger usually places starts, so this mostly affects 24×7 runs with the floor off or a headcount too small to stagger. | Recommended headcount for those runs can be lower than a real roster would need. Turn minimum coverage on or enable Shift Placement to get fixed shifts on a 24×7 calendar. |
+| **L22** | **A business entered as 00:00–24:00 without the 24×7 option gets one shift from 00:00** (1.21.0). It counts as having opening hours, so every agent works one shift of the daily productive hours from 00:00 and the rest of the day is unstaffed unless minimum coverage or Shift Placement gives some agents later starts. Tick the 24×7 option for a round-the-clock business. | The Capacity Basis note on the Labor page says so. Headcount for such a business can be higher than for the same business entered as 24×7. |
 
 ---
 
@@ -1408,13 +1442,6 @@ by an unrelated metric; ASA censoring measured only to horizon end; and two inde
 **P2-8 — Restore Headline Hiring FTE (M4) UI when a clean FTE product story exists.**
 Engine still computes `fteNet` / `fteGross*`. UI hides M4 so Manual Override is only the
 Workload HC agent-hours denominator (Option B). Re-expose FTE only without dual-role confusion.
-
-**P2-9 — Give runs without fixed shifts a shift end.**
-When the run has no fixed shifts the engine keeps agents on until business close, so Agent Analytics
-"Scheduled (min)" runs to close and Utilisation reads low on a long business day (L20; today only
-labelled). A true per-agent shift end for that mode is an engine change that would alter
-recommended headcount, so it needs explicit approval before any work. *Rationale: removes the
-last case where the Utilisation column cannot be read at face value.*
 
 ### Modelling fidelity gaps
 

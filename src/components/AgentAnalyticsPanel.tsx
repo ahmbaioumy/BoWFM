@@ -29,9 +29,9 @@ const shortDate = (d: string) => d.slice(5); // MM-DD
 
 const DEFINITIONS =
   'Available = busy + idle minutes while the agent is on shift and ready for work. Occupancy = busy / available. ' +
-  'Utilisation = busy / scheduled. Scheduled = the minutes the agent was on the plan to work. When agents work fixed shifts: the agent\'s own shift, i.e. the daily productive hours from their start time (e.g. 9 h = 540 min per full day). When agents have no fixed shift end: from the agent\'s start until business close. Shifts are fixed when Shift Placement is on, or when minimum coverage needs agents to start at different times. ' +
+  'Utilisation = busy / scheduled. Scheduled = the minutes the agent was on the plan to work. When agents work fixed shifts: the agent\'s own shift, i.e. the daily productive hours from their start time (e.g. 9 h = 540 min per full day). When agents have no fixed shift end: the agents stay on around the clock, so it counts their whole day. Shifts are fixed whenever the business has opening and closing hours; only a round-the-clock business without placed start times has no shift end. ' +
   'When agents work fixed shifts, occupancy and utilisation are the SAME number for any agent-day where the agent\'s daily productive hours are not used up before the shift ends; they differ only on days when they are (for example when adherence is below 100%). ' +
-  'When agents have no fixed shift end, utilisation is measured against the time until business close and reads lower on a business day longer than the daily productive hours; this is expected, and occupancy is the figure to judge workload. ' +
+  'When agents have no fixed shift end, utilisation is measured against their whole day and reads lower when the day is longer than the daily productive hours; this is expected, and occupancy is the figure to judge workload. ' +
   'The date range can include a part-day after the data ends, while leftover backlog is cleared; that day counts as a day on shift with only the minutes actually on shift. ' +
   'Work share = for each finished case, the agent\'s busy minutes on it / all agents\' busy minutes on it (a case split 30/10 min is 0.75/0.25); it sums to the number of finished cases. ' +
   'Finished = whole cases the agent closed (finisher credit; overstates agents who only resume cases others parked). Touched = cases the agent worked on, including split cases. ' +
@@ -282,7 +282,7 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
           <div className="flex items-center gap-2 flex-wrap">
             <h3 className="text-sm font-bold text-slate-900">Agent Analytics</h3>
             <span className="text-xs bg-amber-50 border border-amber-200 text-amber-800 font-semibold px-2 py-0.5 rounded-full">audit run (single seed)</span>
-            <span className="text-xs bg-slate-100 border border-slate-200 text-slate-700 font-semibold px-2 py-0.5 rounded-full">{a.staggered ? 'Shifts: fixed length' : 'Shifts: open until close'}</span>
+            <span className="text-xs bg-slate-100 border border-slate-200 text-slate-700 font-semibold px-2 py-0.5 rounded-full">{a.staggered ? 'Shifts: fixed length' : 'Shifts: around the clock'}</span>
           </div>
           <p className="text-xs text-slate-500 mt-1 flex items-start gap-1.5">
             <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-slate-400" />
@@ -384,7 +384,7 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
               <th className={th} title="Busy + idle minutes while on shift and ready for work">Available (min)</th>
               <th className={th}>Idle (min)</th>
               <th className={th} title="Busy / available">Occupancy %</th>
-              <th className={th} title="Busy / scheduled time. Scheduled = the minutes the agent was on the plan to work: when agents work fixed shifts, the agent's own shift (daily productive hours from their start); when agents have no fixed shift end, from their start until business close (so it reads low on a long business day; expected). With fixed shifts it differs from occupancy only on days when the daily productive hours are used up before the shift ends. Shifts are fixed when Shift Placement is on, or when minimum coverage needs agents to start at different times.">Utilisation %</th>
+              <th className={th} title="Busy / scheduled time. Scheduled = the minutes the agent was on the plan to work: when agents work fixed shifts, the agent's own shift (daily productive hours from their start); when agents have no fixed shift end, their whole day (so it reads low when the day is longer than the daily productive hours; expected). With fixed shifts it differs from occupancy only on days when the daily productive hours are used up before the shift ends. Shifts are fixed whenever the business has opening and closing hours; only a round-the-clock business without placed start times has no shift end.">Utilisation %</th>
               <th className={th} title="Busy minutes on finished-case work / work share">Avg handle (min)</th>
               <th className={th} title="Work share / days on shift">Cases/day</th>
               <th className={th} title="Busy slices that resumed a parked case">Resumes</th>

@@ -765,10 +765,10 @@ export function runBackofficeDES(params: {
   skipCaseResultsAndTimeline?: boolean;
   /**
    * Optional deadline-coverage shift-start distribution (see computeShiftPlacement in
-   * hc-search.ts). Absent = today's exact behavior: every agent starts one uniform shift
-   * at business open. When present (and calendar is not 24x7), agents are grouped into
-   * cohorts starting at their assigned slap offset instead. Keyed by category name for
-   * siloed queueArchitecture, or '__POOLED__' for pooled.
+   * hc-search.ts). Absent = every agent starts one shift at business open (one cohort at
+   * offset 0); on a non-24x7 calendar that shift still ends dailyProductiveHours later (P2-9).
+   * When present, agents are grouped into cohorts starting at their assigned slap offset
+   * instead. Keyed by category name for siloed queueArchitecture, or '__POOLED__' for pooled.
    */
   shiftDistribution?: ShiftDistributionByCategory;
   /**
@@ -979,21 +979,25 @@ export function runBackofficeDES(params: {
     }
   }
 
-  // --- Deadline-coverage shift placement: staggered per-agent availability -----------------
-  // Absent shiftDistribution ⇒ agentSlapStartMinutes stays all-zero and every agent behaves
-  // exactly as today: one system-wide AgentAvailable at business open. staggeredMode is the
-  // only fork point; every branch below collapses to the pre-existing single-SYS_OPEN
-  // behavior when it is false. 24x7 is now a valid staggeredMode target (fixed 2026-08-28 —
-  // previously always false for is24x7, which combined with the default-on coverage floor
-  // to create a regression: coverage was enforced for 24x7 with no lever to satisfy it).
-  const staggeredMode = !!shiftDistribution && operationalHC > 0;
+  // --- Fixed shifts: per-agent availability window (own start + dailyProductiveHours) ------
+  // staggeredMode is the only fork point (the name is historical: it now means "fixed-shift
+  // mode"). It is on whenever a shiftDistribution is passed OR the calendar is not 24x7 (and
+  // there are agents). With no distribution agentSlapStartMinutes stays all-zero, i.e. one
+  // cohort at offset 0: every agent works one shift from business open and leaves
+  // dailyProductiveHours later (P2-9; decision 11 — dispatch obeys the same window as
+  // countAgentsOnShiftNow). 24x7 WITHOUT a distribution is the one exception and keeps the
+  // legacy single-SYS_OPEN behavior (unbounded presence, midnight spill-over). 24x7 is a valid
+  // staggeredMode target when a distribution is passed (fixed 2026-08-28 — previously always
+  // false for is24x7, which combined with the default-on coverage floor to create a
+  // regression: coverage was enforced for 24x7 with no lever to satisfy it).
+  const staggeredMode = (!!shiftDistribution || !calendar.is24x7) && operationalHC > 0;
   const agentSlapStartMinutes = new Float64Array(operationalHC); // all-zero when not staggered
   const slapOffsetToAgentIds = new Map<number, number[]>();
   let slapOffsetsSorted: number[] = [];
   // Shift LENGTH (minutes) an agent is on the floor for, from their own start — only
-  // meaningful/enforced in staggeredMode. Not staggered ⇒ unbounded presence (unchanged
-  // legacy behavior: an agent stays available all day, limited only by daily budget and
-  // business close), exactly as before this shift-end mechanism was added.
+  // meaningful/enforced in staggeredMode. Not staggered (24x7 with no distribution only) ⇒
+  // unbounded presence (legacy behavior: an agent stays available all day, limited only by
+  // daily budget), exactly as before this shift-end mechanism was added.
   const shiftLengthMinutes = labor.dailyProductiveHours * 60;
 
   if (staggeredMode) {
@@ -1011,8 +1015,8 @@ export function runBackofficeDES(params: {
     }
 
     for (const [key, agentIdBlock] of categoryAgentBlocks.entries()) {
-      const dist = shiftDistribution![key];
-      if (!dist) continue; // no distribution for this category ⇒ its agents stay at offset 0
+      const dist = shiftDistribution?.[key];
+      if (!dist) continue; // no distribution (or none for this category) ⇒ its agents stay at offset 0
       const sortedSlaps = [...dist.slaps].sort((a, b) => a.startMinutesFromOpen - b.startMinutesFromOpen);
       let cursor = 0;
       for (const slap of sortedSlaps) {
@@ -1191,9 +1195,11 @@ export function runBackofficeDES(params: {
         if (openTime.getTime() >= horizonStart.getTime() && openTime.getTime() <= drainHorizonEnd.getTime()) {
           scheduleEvent(openTime, 'AgentAvailable', 'SYS_OPEN');
         }
-        // Uniform presence ends at open + shiftLength (coverage only — nothing else changes at
-        // that instant: dispatch is unbounded by shift end in this mode). A pure sampling marker
-        // so the coverage sampler observes the drop; skipped when the shift reaches close.
+        // This branch now serves only 24x7 without a distribution (every non-24x7 run, with or
+        // without a distribution, takes the staggered branch above). Uniform presence ends at
+        // open + shiftLength (coverage only — nothing else changes at that instant: dispatch is
+        // unbounded by shift end in this mode). A pure sampling marker so the coverage sampler
+        // observes the drop; skipped when the shift reaches close.
         const uniformEndMs = openTime.getTime() + shiftLengthMinutes * 60000;
         if (uniformEndMs < closeTime.getTime() && uniformEndMs >= horizonStart.getTime() && uniformEndMs <= drainHorizonEnd.getTime()) {
           scheduleEvent(uniformEndMs, 'CoverageCheck', 'SYS_COVERAGE_END');
@@ -1425,7 +1431,7 @@ export function runBackofficeDES(params: {
 
       const agentBudget = agentDailyMinutesRemaining[agentId];
       // Third bound alongside budget and business close: this agent's OWN shift end, when
-      // staggeredMode is active. Absent it (uniform, unstaggered — legacy behavior, unchanged),
+      // staggeredMode is active. Absent it (24x7 with no distribution — legacy behavior, unchanged),
       // this is Infinity and never binds. See `wfm-sizing-simulation`/PRD Stage 3a for why an
       // agent's presence must not outlast their assigned shift length.
       let shiftMinutesRemainingToday = Infinity;
@@ -1695,7 +1701,7 @@ export function runBackofficeDES(params: {
       case 'AgentAvailable': {
         // scopedAgentIds is set only for staggered per-slap events (see the day-open
         // scheduling above); undefined for the legacy single system-wide open event, which
-        // is the only kind ever scheduled when shiftDistribution is absent.
+        // is only ever scheduled for 24x7 with no shiftDistribution.
         const scopedAgentIds: number[] | undefined = ev.data?.agentIds;
 
         // Reset each agent's daily budget for the new calendar day. In UNSTAGGERED 24x7
@@ -2223,6 +2229,7 @@ export function runBackofficeDES(params: {
     caseResults,
     agentTimeline,
     ...(shiftDistribution ? { shiftDistributionUsed: shiftDistribution } : {}),
+    fixedShifts: staggeredMode,
     doubleBookedAssignments,
     ...(agentFairness ? { agentFairness } : {}),
   };
@@ -2367,7 +2374,7 @@ export function verifyAgentTimelineInvariants(
     }
   }
 
-  // 8. Per-agent stagger-offset compliance (I5). Check #7 only validates the GLOBAL business
+  // 8. Per-agent stagger-offset compliance (I5) and, for every fixed-shift run, the shift END. Check #7 only validates the GLOBAL business
   // window and cannot catch an agent dispatched before ITS OWN assigned offset while the
   // business is already open — measured: a synthetic timeline with exactly that violation
   // passed check #7 with valid=true. Uses des.shiftDistributionUsed (already echoed by
@@ -2377,14 +2384,16 @@ export function verifyAgentTimelineInvariants(
   // internally (see the staggeredMode setup above); an agent's own category is read from any
   // of its busy slices (siloed agents keep one category for their whole run), so an agent
   // that never worked is skipped — nothing to validate for it.
-  if (calendar && !calendar.is24x7 && des.shiftDistributionUsed) {
+  const fixedShiftRun = des.fixedShifts ?? !!des.shiftDistributionUsed;
+  if (calendar && !calendar.is24x7 && fixedShiftRun) {
     const agentCategory = new Map<number, string>();
     for (const slice of des.agentTimeline) {
       if (slice.state === 'busy' && slice.category && !agentCategory.has(slice.agentId)) {
         agentCategory.set(slice.agentId, slice.category);
       }
     }
-    const isPooledDist = '__POOLED__' in des.shiftDistributionUsed;
+    const distUsed = des.shiftDistributionUsed;
+    const isPooledDist = !!distUsed && '__POOLED__' in distUsed;
     const blockOf = new Map<string, number[]>();
     for (let id = 0; id < des.operationalHC; id++) {
       const key = isPooledDist ? '__POOLED__' : agentCategory.get(id);
@@ -2394,7 +2403,7 @@ export function verifyAgentTimelineInvariants(
     }
     const agentOffset = new Map<number, number>();
     for (const [key, ids] of blockOf.entries()) {
-      const dist = des.shiftDistributionUsed[key];
+      const dist = distUsed?.[key];
       if (!dist) continue;
       ids.sort((a, b) => a - b);
       const sortedSlaps = [...dist.slaps].sort((a, b) => a.startMinutesFromOpen - b.startMinutesFromOpen);
@@ -2415,6 +2424,25 @@ export function verifyAgentTimelineInvariants(
       if (slice.from.getTime() < ownStart.getTime()) {
         errors.push(
           `Agent-${slice.agentId + 1} busy slice starts before its own assigned offset: ${formatDateTime24(slice.from)} (own shift starts ${formatDateTime24(ownStart)}, offset +${offset}min)`
+        );
+      }
+    }
+
+    // 9. Shift END (P2-9): no busy or idle slice runs past dayOpen + offset + dailyProductiveHours*60.
+    // Offset is the agent's reconstructed one (agentOffset above); with no distribution echoed every
+    // agent is at offset 0. When a distribution WAS echoed, an agent whose offset cannot be
+    // reconstructed (it never worked, so its category is unknown) is skipped — no false positives.
+    const shiftLenMs = labor.dailyProductiveHours * 60 * 60000;
+    for (const slice of des.agentTimeline) {
+      if (slice.state !== 'busy' && slice.state !== 'idle') continue;
+      if (!isWorkingDay(slice.from, calendar)) continue;
+      const offset = agentOffset.has(slice.agentId) ? agentOffset.get(slice.agentId)! : distUsed ? undefined : 0;
+      if (offset === undefined) continue;
+      const { openTime } = getDailyOpenClose(slice.from, calendar);
+      const ownEnd = openTime.getTime() + offset * 60000 + shiftLenMs;
+      if (slice.to.getTime() > ownEnd + 1) {
+        errors.push(
+          `Agent-${slice.agentId + 1} ${slice.state} slice ends after its own shift end: ${formatDateTime24(slice.to)} (own shift ends ${formatDateTime24(new Date(ownEnd))}, offset +${offset}min)`
         );
       }
     }

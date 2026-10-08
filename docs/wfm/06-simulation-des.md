@@ -72,7 +72,9 @@ per-case assignment ledger and per-agent summary exist only in the single-seed a
 It changes *who* works a case, not *which* case goes next, and not the requirements — N_min is
 unchanged, and recommended HC is identical to the legacy pick in all 18 re-measured scenarios (the earlier +1 in 2 of 125 was the
 budget-as-presence coverage artefact, removed 2026-09-29: coverage presence is now the agent's own shift window
-[start, start + shiftLength), independent of remaining budget). A Labor-tab button turns it off (`dispatchFairness.enabled
+[start, start + shiftLength), independent of remaining budget; since 2026-10-08 dispatch obeys that same window on every
+non-24x7 run, with or without a start distribution — with none, every agent is at offset 0 and leaves `dailyProductiveHours`
+after open; 24x7 without a distribution keeps agents on around the clock). A Labor-tab button turns it off (`dispatchFairness.enabled
 = false`), which restores the legacy pick and the original numbers exactly. Note: once a daily
 budget binds, a different agent choice can shift when cases are parked, so case *timing* may
 differ; case *order* is identical while budgets do not bind.

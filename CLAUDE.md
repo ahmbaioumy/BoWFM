@@ -98,6 +98,7 @@ shrinkage gross-up, harmonic blend, sum, then a single `round`).
     reintroduce "productive budget remaining" as presence — adherence loss shortens the
     budget, so every shift "left" early and real-file recommendations inflated 30–40%.
     Adherence stays a reduction of daily productive time, not a gap at shift start/end.
+    Since 2026-10-08 dispatch obeys the same window on every non-24x7 run, with or without a start distribution (`fixedShifts` on the result; suite D71); 24x7 runs without a distribution keep agents on around the clock.
 
 | Concern | File |
 |---|---|
