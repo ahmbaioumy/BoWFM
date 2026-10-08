@@ -5955,6 +5955,521 @@ console.log('\n--- Suite D71: P2-9 shift end without a start distribution ---');
   }
 }
 
+// =================================================================
+// Suite D72 - PRD P1-6 / L23: with Shift Placement ON, a headcount that failed with everyone at opening,
+// with the coverage-repair roster and with the analytic placement roster is no longer rejected until a
+// short FIXED ladder of simple "some agents start later" rosters has been tried. A ladder roster is accepted
+// only if it passes the unmodified full-R gate on the primary case sets AND on a second, disjoint block of R
+// case sets (the confirmation block, amendment 1). The min(R,5)-rep pre-screen can only skip a roster.
+//
+// Fixtures (all values below measured 2026-10-08 on checkpoint 7ad848f = the code BEFORE this change):
+//  - "min": single category, Mon-Fri 08:00-20:00, 8 h shift, 08:00 spike (36 cases per half-hour, 5 otherwise,
+//    AHT 20), SLA 85% / 3 h, 6 reps, seed 42. Found by a throwaway scan (4 calendars x 2 shift lengths x 4 volume
+//    shapes x 4 SLA pairs x 3 volume levels, 384 fixtures): the first of 9 where, one head below the pre-change
+//    recommendation, uniform and the analytic placement roster fail but the minimal later-start shape (8 at opening
+//    + 1 at +240 min) passes on the primary block and on the confirmation block. Measured CI lower bounds at N=9
+//    (target 85): uniform 77.2, analytic placement 69.2, minimal shape 88.6 (primary) / 87.9 (confirmation).
+//  - "d33": the D33 file (08:00-22:00, 9 h shift, flat volume 20, SLA 80% / 4 h, 5 reps, seed 42).
+//  - "d50", "d50c", "d50p", "d51a", "d51b", "d52": the D50 / D51 / D52 placement fixtures.
+//  - the three built-in samples at the app defaults (pooled).
+// The PRE_ON / OFF_CTRL tables are the values recorded from the UNCHANGED code; they are hard-coded on purpose.
+// =================================================================
+console.log('\n--- Suite D72: P1-6 / L23 rescue ladder with a confirmation block ---');
+{
+  const M72 = 2147483647;
+  const sortKeys72 = (_k: string, v: any) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v);
+  // Digest over the WHOLE search result. Dates are written as minutes from the first interval so the pinned digests do not depend on the machine's time zone.
+  const dig72 = (x: unknown, base: number): string => {
+    const rep = function (this: any, k: string, v: any) {
+      const raw = this[k];
+      return raw instanceof Date ? (raw.getTime() - base) / 60000 : sortKeys72(k, v);
+    };
+    return createHash('sha1').update(JSON.stringify(x, rep)).digest('hex').slice(0, 16);
+  };
+  const sla72 = (pct: number, windowH: number): SLAPolicyConfig => ({
+    primaryPct: pct, primaryWindow: windowH, primaryUnit: 'hours', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes',
+    asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'next_open',
+    occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 90,
+  });
+  type Fx72 = {
+    name: string; intervals: StandardInterval[]; categories: CategoryConfig[]; calendar: CalendarConfig; labor: LaborConfig;
+    sla: SLAPolicyConfig; seed: number; reps: number; arch: 'pooled' | 'siloed'; maxHC: number;
+  };
+  const cal72: CalendarConfig = { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 20 };
+  const lab72: LaborConfig = { ...LABOR, dailyProductiveHours: 8 };
+  const mkIv72 = (open: number, close: number, cats: Array<[string, (h: number) => number]>): StandardInterval[] => {
+    const out: StandardInterval[] = [];
+    for (let day = 0; day < 5; day++) {
+      for (let h = open; h < close; h++) {
+        for (let m = 0; m < 60; m += 30) {
+          for (const [category, vf] of cats) {
+            out.push({ intervalIndex: out.length, start: new Date(2026, 2, 2 + day, h, m), end: new Date(2026, 2, 2 + day, h, m + 30), volume: vf(h), category });
+          }
+        }
+      }
+    }
+    return out;
+  };
+  const cat1x: CategoryConfig[] = [{ id: 'c1', name: 'General', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 }];
+  const cat2x: CategoryConfig[] = [
+    { id: 'A', name: 'A', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 },
+    { id: 'B', name: 'B', ahtMinutes: 25, shrinkagePct: 0.1, priority: 2 },
+  ];
+  const FX: Record<string, Fx72> = {};
+  const addFx = (f: Fx72) => { FX[f.name] = f; };
+  addFx({ name: 'min', intervals: mkIv72(8, 20, [['General', (h) => (h === 8 ? 36 : 5)]]), categories: cat1x, calendar: cal72, labor: lab72, sla: sla72(85, 3), seed: 42, reps: 6, arch: 'pooled', maxHC: 60 });
+  addFx({ name: 'd33', intervals: mkIv72(8, 22, [['General', () => 20]]), categories: cat1x, calendar: { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 22 }, labor: { ...LABOR, dailyProductiveHours: 9 }, sla: sla72(80, 4), seed: 42, reps: 5, arch: 'pooled', maxHC: 60 });
+  addFx({ name: 'd50', intervals: mkIv72(8, 20, [['General', (h) => (h >= 12 && h < 16 ? 14 : 3)]]), categories: cat1x, calendar: cal72, labor: lab72, sla: sla72(85, 3), seed: 42, reps: 6, arch: 'pooled', maxHC: 40 });
+  addFx({ name: 'd50c', intervals: mkIv72(8, 20, [['General', (h) => (h === 8 ? 60 : 5)]]), categories: cat1x, calendar: cal72, labor: lab72, sla: sla72(97, 2), seed: 42, reps: 6, arch: 'pooled', maxHC: 40 });
+  addFx({ name: 'd50p', intervals: mkIv72(8, 20, [['General', (h) => (h === 8 ? 60 : 4)]]), categories: cat1x, calendar: cal72, labor: lab72, sla: sla72(95, 4), seed: 42, reps: 6, arch: 'pooled', maxHC: 40 });
+  addFx({ name: 'd51a', intervals: mkIv72(8, 20, [['A', (h) => (h >= 12 && h < 16 ? 14 : 3)], ['B', (h) => (h >= 12 && h < 16 ? 10 : 2)]]), categories: cat2x, calendar: cal72, labor: lab72, sla: sla72(85, 3), seed: 42, reps: 6, arch: 'siloed', maxHC: 60 });
+  addFx({ name: 'd51b', intervals: mkIv72(8, 20, [['A', (h) => (h === 8 ? 60 : 4)], ['B', (h) => (h === 8 ? 40 : 3)]]), categories: cat2x, calendar: cal72, labor: lab72, sla: sla72(95, 4), seed: 42, reps: 6, arch: 'siloed', maxHC: 60 });
+  addFx({ name: 'd52', intervals: mkIv72(8, 20, [['A', (h) => (h === 8 ? 60 : 4)], ['B', (h) => (h >= 12 && h < 16 ? 10 : 2)]]), categories: cat2x, calendar: cal72, labor: lab72, sla: sla72(95, 4), seed: 42, reps: 6, arch: 'siloed', maxHC: 60 });
+  for (const type of ['support', 'healthcare', 'claims'] as const) {
+    const { rows } = buildSampleDataset(type, new Date(2026, 9, 5, 8, 0, 0, 0));
+    const ivs = mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+    const cats = discoverAndSyncCategories(ivs, DEFAULT_CATEGORIES, DEFAULT_SLA);
+    addFx({ name: `smp-${type}`, intervals: ivs, categories: cats, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, seed: DEFAULT_SIM_PARAMS.seed, reps: DEFAULT_SIM_PARAMS.replications, arch: 'pooled', maxHC: DEFAULT_SIM_PARAMS.maxHCSearch });
+  }
+  const NAMES72 = Object.keys(FX);
+  const laborFor = (fx: Fx72, place: boolean): LaborConfig => ({ ...fx.labor, shiftPlacementEnabled: place, ...(place ? { shiftSlapMinutes: fx.labor.shiftSlapMinutes ?? 30 } : {}) });
+  const slaFor = (fx: Fx72, cov: boolean): SLAPolicyConfig => ({ ...fx.sla, minCoverageEnabled: cov });
+  const paramsFor = (fx: Fx72, place: boolean, cov: boolean) => ({
+    intervals: fx.intervals, openingWIP: [] as OpeningWIPCase[], categories: fx.categories, calendar: fx.calendar, labor: laborFor(fx, place), sla: slaFor(fx, cov),
+    seed: fx.seed, userMaxHC: fx.maxHC, replications: fx.reps, queueArchitecture: fx.arch,
+  });
+  const summarize = (fx: Fx72, r: any) => ({
+    rec: r.recommendedHC as number | null, gross: r.staffing?.grossHCTotal as number | undefined, dig: dig72(r, fx.intervals[0].start.getTime()),
+    win: r.shiftPlacement?.winningDistribution as ShiftDistributionByCategory | undefined, polish: r.rosterPolish?.status as string | undefined,
+  });
+  const syncCache = new Map<string, ReturnType<typeof summarize>>();
+  const S72 = (name: string, place: boolean, cov: boolean) => {
+    const key = `${name}|${place}|${cov}`;
+    if (!syncCache.has(key)) syncCache.set(key, summarize(FX[name], searchOptimalHC(paramsFor(FX[name], place, cov))));
+    return syncCache.get(key)!;
+  };
+  const A72 = async (name: string, place: boolean, cov: boolean) => summarize(FX[name], await searchOptimalHCAsync(paramsFor(FX[name], place, cov)));
+  const rosterStr72 = (d: ShiftDistributionByCategory | undefined) => (d ? Object.keys(d).sort().map((k) => `${k === '__POOLED__' ? '' : k + '='}${d[k].slaps.map((s) => `${s.startMinutesFromOpen}:${s.agentCount}`).join(' ')}`).join(' | ') : 'uniform');
+
+  // ---- API presence (everything below that needs the new helpers is guarded so this suite RUNS on the unchanged code and fails, not crashes) ----
+  const brl = (hcNs as any).buildRescueLadder as ((p: any) => ShiftDistributionByCategory[]) | undefined;
+  const crs = (hcNs as any).createRescueSearch as ((p: any) => { next: () => any; record: (e: any) => void; result: () => any }) | undefined;
+  const rsi = (hcNs as any).rescueScreenInputs as ((sla: SLAPolicyConfig, cats: CategoryConfig[]) => { sla: SLAPolicyConfig; categories: CategoryConfig[] }) | undefined;
+  const rre = (hcNs as any).resolveRescueEvaluation as ((stage: string, ctx: any) => any) | undefined;
+  const ccb = (hcNs as any).createConfirmationBlock as ((p: any) => { baseSeed: number; sets: () => any[] }) | undefined;
+  const dcs = (hcNs as any).deriveConfirmationBaseSeed as ((seed: number) => number) | undefined;
+  const haveApi = [brl, crs, rsi, rre, ccb, dcs].every((f) => typeof f === 'function');
+  assert(haveApi, 'D72.0 rescue API exported: buildRescueLadder, createRescueSearch, rescueScreenInputs, resolveRescueEvaluation, createConfirmationBlock, deriveConfirmationBaseSeed', `present=${[brl, crs, rsi, rre, ccb, dcs].map((f) => typeof f === 'function').join(',')}`);
+  assert(
+    (hcNs as any).RESCUE_SCREEN_MARGIN_PP === 1.5 && (hcNs as any).RESCUE_SCREEN_REPLICATIONS === 5 &&
+      JSON.stringify((hcNs as any).RESCUE_LATE_SHARES) === JSON.stringify([0.25, 0.30, 0.35, 0.20, 0.40, 0.15, 0.10]),
+    'D72.0b named constants: screen margin 1.5 pp, screen size 5 replications, late shares 25/30/35/20/40/15/10 %',
+    `margin=${(hcNs as any).RESCUE_SCREEN_MARGIN_PP} reps=${(hcNs as any).RESCUE_SCREEN_REPLICATIONS} shares=${JSON.stringify((hcNs as any).RESCUE_LATE_SHARES)}`
+  );
+
+  const primarySets = (fx: Fx72) => hcNs.generatePrecomputedReplications({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: fx.calendar, sla: fx.sla, baseSeed: fx.seed, replications: fx.reps });
+  const confirmSets = (fx: Fx72) => hcNs.generatePrecomputedReplications({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: fx.calendar, sla: fx.sla, baseSeed: (dcs ? dcs(fx.seed) : -1), replications: fx.reps });
+  const evalAt = (fx: Fx72, cov: boolean, n: number, roster: ShiftDistributionByCategory | undefined, sets: any[], baseSeed: number) =>
+    evaluateCandidateStatistical({
+      operationalHC: n, intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: fx.calendar, labor: laborFor(fx, true), sla: slaFor(fx, cov),
+      baseSeed, replications: fx.reps, queueArchitecture: fx.arch, precomputedCaseSets: sets, shiftDistribution: roster,
+    });
+
+  // ---- Recorded from the UNCHANGED code (checkpoint 7ad848f, 2026-10-08): recommended HC with Shift Placement ON, [coverage ON, coverage OFF] ----
+  const PRE_ON: Record<string, [number | null, number | null]> = {
+    min: [9, 10], d33: [22, 21], d50: [9, 7], d50c: [29, 29], d50p: [11, 11], d51a: [17, 13], d51b: [20, 21], d52: [19, 21],
+    'smp-support': [27, 28], 'smp-healthcare': [31, 31], 'smp-claims': [31, 31],
+  };
+  // ---- Shift Placement OFF controls: full-result digests recorded from the UNCHANGED code, [coverage ON, coverage OFF] ----
+  const OFF_CTRL: Record<string, [string, string]> = {
+    d33: ['9bfa6b712030ca31', 'e7648280481a50de'],
+    d50: ['7e51ccbdd49beee7', '99118c71f91661d0'],
+    d51a: ['5a50233e9e8ebe81', 'b039820a28ec7405'],
+    min: ['9fbac7c6e70685e6', 'fd7188fda9d2d415'],
+    'smp-claims': ['c817d697e8592d00', '5ebe0d840e798f15'],
+    'smp-support': ['04e10423ae3aa168', 'cca2b247a10fb364'],
+  };
+
+  // ============================================================================================
+  // D72.1 buildRescueLadder unit checks
+  // ============================================================================================
+  if (typeof brl === 'function') {
+    const fx = FX.min;
+    const labOn = laborFor(fx, true);
+    const cases = generateCaseEntities({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: fx.calendar, sla: fx.sla, seed: 42 }).cases as CaseEntity[];
+    const slapMin = resolveShiftSlapMinutes(labOn);
+    const valid = getValidSlapStarts(fx.calendar, labOn.dailyProductiveHours * 60, slapMin);
+    const sum = (b: ShiftSlapDistribution) => b.slaps.reduce((s, x) => s + x.agentCount, 0);
+    const l20 = brl({ n: 20, cases, calendar: fx.calendar, labor: labOn, queueArchitecture: 'pooled' });
+    // 08:00-20:00 is 720 min, shift 480, slap grid 30: valid starts 0..240; the minimal cover is {0, 240} (0 covers to 480, 240 covers to 720).
+    // Seats 20: rung 0 = 1 late starter; then round(share x 20) = 5, 6, 7, 4, 8, 3, 2 late starters (25, 30, 35, 20, 40, 15, 10 %).
+    const lateCounts = l20.map((d) => d.__POOLED__.slaps.find((s) => s.startMinutesFromOpen === 240)?.agentCount ?? 0);
+    assert(JSON.stringify(lateCounts) === JSON.stringify([1, 5, 6, 7, 4, 8, 3, 2]), 'D72.1a fixed rung order for N=20 on 08:00-20:00 / 8 h: late starters at +240 = 1, 5, 6, 7, 4, 8, 3, 2', `got ${JSON.stringify(lateCounts)}`);
+    assert(l20.every((d) => Object.keys(d).join() === '__POOLED__' && sum(d.__POOLED__) === 20), 'D72.1b every pooled rung sums to N = 20', l20.map((d) => sum(d.__POOLED__)).join(','));
+    assert(l20.every((d) => d.__POOLED__.slaps.every((s) => valid.includes(s.startMinutesFromOpen) && s.agentCount > 0) && d.__POOLED__.slapMinutes === slapMin), 'D72.1c every offset is a member of getValidSlapStarts and no slap has zero agents', JSON.stringify(valid));
+    assert(JSON.stringify(l20) === JSON.stringify(brl({ n: 20, cases, calendar: fx.calendar, labor: labOn, queueArchitecture: 'pooled' })), 'D72.1d the ladder is identical across calls (deterministic order)', '');
+    assert(
+      JSON.stringify(l20[0]) === JSON.stringify(buildCoverageRepairDistribution({ n: 20, calendar: fx.calendar, labor: labOn, minAgentsPerInterval: 1, queueArchitecture: 'pooled' })),
+      'D72.1e first rung = the minimal later-start shape (coverage-repair roster with a minimum of 1 even with the floor off)', JSON.stringify(l20[0])
+    );
+    assert(new Set(l20.map((d) => JSON.stringify(d))).size === l20.length, 'D72.1f no duplicate rosters in the ladder', '');
+    assert(brl({ n: 1, cases, calendar: fx.calendar, labor: labOn, queueArchitecture: 'pooled' }).length === 0, 'D72.1g N=1: empty ladder (no seat for a late starter)', '');
+    // N=2: share rungs collapse onto rung 0 (1 late starter is the only possibility) -> exactly one rung 0:1 240:1.
+    const l2 = brl({ n: 2, cases, calendar: fx.calendar, labor: labOn, queueArchitecture: 'pooled' });
+    assert(l2.length === 1 && rosterStr72(l2[0]) === '0:1 240:1', 'D72.1h N=2: every share rung equals the minimal shape and is dropped as a duplicate -> one rung 0:1 240:1', rosterStr72(l2[0]));
+    // 24x7 and shift >= business window: empty ladder.
+    assert(brl({ n: 20, cases, calendar: CAL_24X7, labor: labOn, queueArchitecture: 'pooled' }).length === 0, 'D72.1i 24x7 calendar: empty ladder', '');
+    assert(brl({ n: 20, cases, calendar: BIZ_CAL, labor: { ...labOn, dailyProductiveHours: 8 }, queueArchitecture: 'pooled' }).length === 0, 'D72.1j shift == business window (09:00-17:00, 8 h): empty ladder', '');
+    assert(brl({ n: 20, cases, calendar: BIZ_CAL, labor: { ...labOn, dailyProductiveHours: 9 }, queueArchitecture: 'pooled' }).length === 0, 'D72.1k shift > business window: empty ladder', '');
+
+    // Two late starts: 07:00-22:00 (900 min) with a 6 h shift (360): minimal cover {0, 360, 540}? greedy picks the largest start <= frontier each time.
+    {
+      const calTwo: CalendarConfig = { ...BIZ_CAL, dailyOpenHour: 7, dailyCloseHour: 22 };
+      const labTwo: LaborConfig = { ...labOn, dailyProductiveHours: 6 };
+      const validTwo = getValidSlapStarts(calTwo, 360, resolveShiftSlapMinutes(labTwo));
+      const lt = brl({ n: 30, cases, calendar: calTwo, labor: labTwo, queueArchitecture: 'pooled' });
+      const offs = new Set<number>(); for (const d of lt) for (const s of d.__POOLED__.slaps) offs.add(s.startMinutesFromOpen);
+      assert(lt.length > 2 && lt.every((d) => sum(d.__POOLED__) === 30 && d.__POOLED__.slaps.every((s) => validTwo.includes(s.startMinutesFromOpen) && s.agentCount > 0)) && [...offs].filter((o) => o > 0).length === 2, 'D72.1l two late starts (07:00-22:00 / 6 h): every rung sums to N, offsets valid, exactly two distinct late offsets used', `offsets=${[...offs].sort((a, b) => a - b).join(',')} rungs=${lt.length}`);
+    }
+
+    // Siloed: one block per category from the DES's own seat split; a category with too few seats for a late starter is left out (amendment 4).
+    {
+      const fs = FX.d51a;
+      const labS = laborFor(fs, true);
+      const casesS = generateCaseEntities({ intervals: fs.intervals, openingWIP: [], categories: fs.categories, calendar: fs.calendar, sla: fs.sla, seed: 42 }).cases as CaseEntity[];
+      const wl = new Map<string, number>(); for (const c of casesS) wl.set(c.category, (wl.get(c.category) || 0) + c.totalAhtMinutes);
+      let allOk = true; let detail = '';
+      for (const n of [3, 5, 9, 17, 30]) {
+        const seats = allocateAgentsToCategories(wl, n);
+        const ladder = brl({ n, cases: casesS, calendar: fs.calendar, labor: labS, queueArchitecture: 'siloed' });
+        for (const d of ladder) {
+          for (const k of Object.keys(d)) {
+            if (!(seats.get(k)! >= 2) || sum(d[k]) !== seats.get(k)) { allOk = false; detail ||= `n=${n} ${k}: block ${sum(d[k])} vs seats ${seats.get(k)}`; }
+            if (d[k].slaps.some((s) => s.agentCount <= 0 || !valid.includes(s.startMinutesFromOpen))) { allOk = false; detail ||= `n=${n} ${k}: bad slap`; }
+          }
+        }
+        if (ladder.length === 0 && n >= 5) { allOk = false; detail ||= `n=${n}: empty siloed ladder`; }
+      }
+      assert(allOk, 'D72.1m siloed (N = 3, 5, 9, 17, 30): each listed block sums to its OWN seat count (DES seat split); a category with fewer than 2 seats is never listed; offsets valid; no zero-agent slaps', detail);
+      // N=3: seats split leaves one category with a single seat -> that category is absent from every rung and stays at opening.
+      const seats3 = allocateAgentsToCategories(wl, 3);
+      const single = [...seats3.entries()].filter(([, s]) => s === 1).map(([k]) => k);
+      const l3 = brl({ n: 3, cases: casesS, calendar: fs.calendar, labor: labS, queueArchitecture: 'siloed' });
+      assert(single.length === 1 && l3.length > 0 && l3.every((d) => d[single[0]] === undefined && Object.keys(d).length === 1), 'D72.1n siloed N=3: the category with one seat is left out of every rung (stays at opening); the other keeps a block', `seats=${JSON.stringify([...seats3])} rungs=${l3.map((d) => Object.keys(d).join('+')).join(',')}`);
+      assert(JSON.stringify(brl({ n: 17, cases: casesS, calendar: fs.calendar, labor: labS, queueArchitecture: 'siloed' })) === JSON.stringify(brl({ n: 17, cases: casesS, calendar: fs.calendar, labor: labS, queueArchitecture: 'siloed' })), 'D72.1o siloed ladder identical across calls', '');
+      const l17 = brl({ n: 17, cases: casesS, calendar: fs.calendar, labor: labS, queueArchitecture: 'siloed' });
+      const catWl = new Map<string, number>(); for (const c of casesS) catWl.set(c.category, (catWl.get(c.category) || 0) + c.totalAhtMinutes);
+      assert(JSON.stringify(l17[0]) === JSON.stringify(buildCoverageRepairDistribution({ n: 17, calendar: fs.calendar, labor: labS, minAgentsPerInterval: 1, queueArchitecture: 'siloed', categoryWorkloadMinutes: catWl })), 'D72.1p siloed: first rung equals the minimal later-start shape per category', '');
+    }
+  } else {
+    assert(false, 'D72.1 buildRescueLadder unit checks', 'buildRescueLadder is not exported');
+  }
+
+  // ============================================================================================
+  // D72.2 pre-screen inputs + evaluation stages
+  // ============================================================================================
+  if (typeof rsi === 'function' && typeof rre === 'function' && typeof ccb === 'function' && typeof dcs === 'function') {
+    const baseSla: SLAPolicyConfig = { ...sla72(85, 3), confidenceLevelPct: 95, occupancyCapEnabled: true, occupancyCapPct: 92, boAsaEnabled: true, boAsaTarget: 30 };
+    const cats: CategoryConfig[] = [{ ...cat2x[0], primaryPct: 90 }, { ...cat2x[1] }];
+    const sc = rsi(baseSla, cats);
+    assert(approx(sc.sla.primaryPct, 83.5) && sc.sla.confidenceLevelPct === 50, 'D72.2a screen: overall target 85 -> 83.5 and confidence level 50', `primary=${sc.sla.primaryPct} conf=${sc.sla.confidenceLevelPct}`);
+    assert(approx(sc.categories[0].primaryPct as number, 88.5) && sc.categories[1].primaryPct === undefined, 'D72.2b screen: a per-category target 90 -> 88.5; a category without its own target stays without one', JSON.stringify(sc.categories.map((c) => c.primaryPct)));
+    assert(sc.sla.occupancyCapEnabled === true && sc.sla.occupancyCapPct === 92 && sc.sla.boAsaEnabled === true && sc.sla.boAsaTarget === 30 && baseSla.primaryPct === 85 && baseSla.confidenceLevelPct === 95 && cats[0].primaryPct === 90, 'D72.2c screen: occupancy and ASA caps NOT relaxed; the caller\'s sla / categories are not mutated', JSON.stringify(sc.sla));
+    const fx = FX.min;
+    const blk = ccb({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: fx.calendar, sla: fx.sla, seed: fx.seed, replications: fx.reps });
+    const pSets = primarySets(fx);
+    const ctx = { sla: fx.sla, categories: fx.categories, replications: 8, baseSeed: fx.seed, precomputedCaseSets: pSets, confirmation: blk };
+    const eS = rre('screen', ctx), eP = rre('primary', ctx), eC = rre('confirm', ctx);
+    assert(eS.replications === 5 && rre('screen', { ...ctx, replications: 3 }).replications === 3 && eS.precomputedCaseSets === pSets && eS.baseSeed === 42, 'D72.2d screen stage: min(R, 5) replications on the first primary sets, same base seed', `reps=${eS.replications}`);
+    assert(eP.replications === 8 && eP.sla === fx.sla && eP.categories === fx.categories && eP.precomputedCaseSets === pSets && eP.baseSeed === 42, 'D72.2e primary stage: full R on the primary sets with the UNMODIFIED sla and categories', '');
+    assert(eC.replications === 8 && eC.sla === fx.sla && eC.categories === fx.categories && eC.precomputedCaseSets === blk.sets() && eC.baseSeed === dcs(fx.seed) && eC.baseSeed !== 42, 'D72.2f confirmation stage: full R on the confirmation block (its derived base seed) with the UNMODIFIED sla and categories', '');
+  } else {
+    assert(false, 'D72.2 screen / stage inputs', 'rescue helpers are not exported');
+  }
+
+  // ============================================================================================
+  // D72.3 acceptance rule (amendment 1) on constructed evaluator results
+  // ============================================================================================
+  if (typeof crs === 'function') {
+    const mkR = (k: number): ShiftDistributionByCategory => ({ __POOLED__: { slapMinutes: 30, slaps: [{ startMinutesFromOpen: 0, agentCount: 10 - k }, { startMinutesFromOpen: 240, agentCount: k }] } });
+    const ladder = [mkR(1), mkR(2), mkR(3)];
+    // script(rung, stage) -> passes; returns the visit log "s0 p0 c0 ..." and the result.
+    const drive = (script: (rung: number, stage: string) => boolean, tried: Array<ShiftDistributionByCategory | null | undefined> = []) => {
+      const s = crs({ ladder, alreadyTried: tried });
+      const log: string[] = [];
+      let guard = 0;
+      for (let c = s.next(); c !== null && guard < 100; c = s.next(), guard++) {
+        log.push(`${c.stage[0]}${c.rung}`);
+        s.record({ passesAllConstraints: script(c.rung, c.stage), tag: `${c.stage}-${c.rung}` });
+      }
+      return { log: log.join(' '), res: s.result() };
+    };
+    // (1) roster 0 passes the primary block but fails the confirmation block -> rejected, rung 1 tried; rung 1 passes both -> accepted.
+    const t1 = drive((r, st) => !(r === 0 && st === 'confirm'));
+    assert(t1.log === 's0 p0 c0 s1 p1 c1' && t1.res.winner?.rung === 1 && JSON.stringify(t1.res.winner.roster) === JSON.stringify(ladder[1]) && JSON.stringify(t1.res.rejectedAtConfirmation) === '[0]', 'D72.3a passes the primary block but fails the confirmation block -> rejected, next rung tried; the next rung that passes both is accepted', `log=${t1.log} winner=${t1.res.winner?.rung}`);
+    assert(t1.res.winner?.ev?.tag === 'primary-1', 'D72.3b the winner carries the PRIMARY-block evaluation (what is reported and cached), not the confirmation one', `tag=${t1.res.winner?.ev?.tag}`);
+    // (2) passes both on rung 0 -> accepted at once, nothing else evaluated.
+    const t2 = drive(() => true);
+    assert(t2.log === 's0 p0 c0' && t2.res.winner?.rung === 0, 'D72.3c a roster that passes screen, primary and confirmation is accepted at once; no further rung is evaluated', t2.log);
+    // (3) every rung passes primary but fails confirmation -> no winner, all rungs rejected at confirmation, each in order.
+    const t3 = drive((_r, st) => st !== 'confirm');
+    assert(t3.res.winner === null && t3.log === 's0 p0 c0 s1 p1 c1 s2 p2 c2' && JSON.stringify(t3.res.rejectedAtConfirmation) === '[0,1,2]', 'D72.3d every rung fails confirmation -> no winner (the headcount stays rejected)', t3.log);
+    // (4) the pre-screen never accepts: a screen pass followed by a full-R failure is rejected; a screen failure never reaches full R.
+    const t4 = drive((r, st) => (r === 0 ? st === 'screen' : false));
+    assert(t4.res.winner === null && t4.log === 's0 p0 s1 s2', 'D72.3e screen passes but primary full R fails -> rejected (no confirmation run); a failing screen skips straight to the next rung', t4.log);
+    const t5 = drive((_r, st) => st === 'screen' ? true : false);
+    assert(t5.res.winner === null, 'D72.3f the screen verdict alone can never produce a winner', t5.log);
+    // (5) rosters already tried at this N are removed.
+    const t6 = drive(() => true, [ladder[0], null, undefined]);
+    assert(t6.log === 's0 p0 c0' && JSON.stringify(t6.res.winner?.roster) === JSON.stringify(ladder[1]) && t6.res.ladderLength === 2, 'D72.3g a roster identical to one already tried at this N (uniform / repair / analytic) is skipped', `log=${t6.log} len=${t6.res.ladderLength}`);
+    // (6) empty ladder: nothing to evaluate.
+    const e = crs({ ladder: [], alreadyTried: [] });
+    assert(e.next() === null && e.result().winner === null, 'D72.3h empty ladder: next() is null, no winner', '');
+    // (7) a real pre-screen case: a roster whose cheap screen passes but whose full-R gate fails. Found by a throwaway scan over every
+    // (fixture, N, rung): on the D33 file with coverage ON, N=21, rung 0 (the minimal shape) screens at CI lower bound 78.8 against the
+    // relaxed target 78.5 (50% confidence, 5 reps) but fails the real gate: lower bound 78.3 < 80 at 90% confidence over 5 reps.
+    // The test re-finds it at run time over N = 15..23 so it is not tied to a digest.
+    if (typeof brl === 'function' && typeof rre === 'function' && typeof ccb === 'function') {
+      const fx = FX.d33; const pSets = primarySets(fx); const slaCov = slaFor(fx, true);
+      const blk = ccb({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: fx.calendar, sla: slaCov, seed: fx.seed, replications: fx.reps });
+      const ctx = { sla: slaCov, categories: fx.categories, replications: fx.reps, baseSeed: fx.seed, precomputedCaseSets: pSets, confirmation: blk };
+      const runStage = (n: number, stage: string, roster: ShiftDistributionByCategory) => { const p = rre(stage, ctx); return evaluateCandidateStatistical({ operationalHC: n, intervals: fx.intervals, openingWIP: [], categories: p.categories, calendar: fx.calendar, labor: laborFor(fx, true), sla: p.sla, baseSeed: p.baseSeed, replications: p.replications, queueArchitecture: 'pooled', precomputedCaseSets: p.precomputedCaseSets, shiftDistribution: roster }); };
+      let found: { n: number; rung: number; screenLow: number; fullLow: number } | null = null;
+      for (let n = 15; n <= 23 && !found; n++) {
+        const ld = brl({ n, cases: pSets[0].cases, calendar: fx.calendar, labor: laborFor(fx, true), queueArchitecture: 'pooled' });
+        for (let rung = 0; rung < ld.length && !found; rung++) {
+          const sc = runStage(n, 'screen', ld[rung]);
+          if (!sc.passesAllConstraints) continue;
+          const fu = runStage(n, 'primary', ld[rung]);
+          if (!fu.passesAllConstraints) found = { n, rung, screenLow: sc.primaryStats.ci95Low, fullLow: fu.primaryStats.ci95Low };
+        }
+      }
+      assert(found !== null, 'D72.3i a real DES case exists where the pre-screen passes but the full-R gate fails (D33 file, coverage ON, rung rosters over N = 15..23)', 'none found');
+      if (found) {
+        const ld = brl({ n: found.n, cases: pSets[0].cases, calendar: fx.calendar, labor: laborFor(fx, true), queueArchitecture: 'pooled' });
+        const s = crs({ ladder: [ld[found.rung]], alreadyTried: [] });
+        const visited: string[] = [];
+        for (let c = s.next(); c !== null; c = s.next()) { visited.push(c.stage); s.record(runStage(found.n, c.stage, c.roster)); }
+        assert(s.result().winner === null && visited.join() === 'screen,primary', `D72.3j that roster (N=${found.n}, rung ${found.rung}; screen CI low ${found.screenLow}, full-R CI low ${found.fullLow}) is rejected by the state machine at the full-R stage: stages ${visited.join('>')}`, JSON.stringify(s.result()));
+      }
+    }
+  } else {
+    assert(false, 'D72.3 acceptance rule', 'createRescueSearch is not exported');
+  }
+
+  // ============================================================================================
+  // D72.4 confirmation block: deterministic, disjoint from the primary block, identical for every candidate
+  // ============================================================================================
+  if (typeof ccb === 'function' && typeof dcs === 'function') {
+    const fx = FX.min;
+    const mk = (seed = fx.seed, reps = fx.reps) => ccb({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: fx.calendar, sla: fx.sla, seed, replications: reps });
+    const caseDigest = (sets: any[]) => sets.map((s) => createHash('sha1').update(JSON.stringify(s.cases.map((c: any) => [c.category, c.arrival.getTime(), c.totalAhtMinutes]))).digest('hex').slice(0, 12));
+    const a = mk(), b = mk();
+    assert(a.baseSeed === 1013003081 && a.baseSeed === (42 + 1013 * 1000003) % M72 && dcs(42) === 1013003081, 'D72.4a derived base seed, closed form: (seed + 1013 x 1000003) mod 2147483647 = 1013003081 for seed 42 (replication index r + 1000003 of the same seed stream)', `got ${a.baseSeed}`);
+    assert(JSON.stringify(caseDigest(a.sets())) === JSON.stringify(caseDigest(b.sets())) && a.sets() === a.sets() && a.sets().length === fx.reps, 'D72.4b deterministic: same run seed -> identical sets; the block is built once and reused (same array every call)', '');
+    const ref = hcNs.generatePrecomputedReplications({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: fx.calendar, sla: fx.sla, baseSeed: a.baseSeed, replications: fx.reps });
+    assert(JSON.stringify(caseDigest(ref)) === JSON.stringify(caseDigest(a.sets())), 'D72.4c the block is generatePrecomputedReplications at the derived base seed (one generator, no private copy of the formula)', '');
+    const prim = caseDigest(primarySets(fx)); const conf = caseDigest(a.sets());
+    assert(prim.length === fx.reps && conf.every((d) => !prim.includes(d)) && new Set([...prim, ...conf]).size === 2 * fx.reps, 'D72.4d disjoint arrival realisations: no confirmation replication equals any primary replication (and all 2R differ)', `primary=${prim.join()} confirm=${conf.join()}`);
+    let seedsDisjoint = true; let sd = '';
+    for (const seed of [1, 42, 12345, 987654321, 2147483000]) {
+      for (const R of [1, 8, 30, 200]) {
+        const p = new Set<number>(); for (let r = 0; r < R; r++) p.add((seed + r * 1013 + 7) % M72);
+        const cb = dcs(seed);
+        for (let r = 0; r < R; r++) if (p.has((cb + r * 1013 + 7) % M72)) { seedsDisjoint = false; sd ||= `seed=${seed} R=${R} r=${r}`; }
+      }
+    }
+    assert(seedsDisjoint, 'D72.4e per-replication seeds of the two blocks never coincide (5 run seeds x R in 1, 8, 30, 200)', sd);
+    assert(dcs(43) !== dcs(42) && JSON.stringify(caseDigest(mk(43).sets())) !== JSON.stringify(caseDigest(a.sets())), 'D72.4f control: a different run seed gives a different confirmation block', '');
+    // CRN within the block: every candidate N and rung is evaluated on the SAME case sets and the SAME base seed.
+    if (typeof rre === 'function') {
+      const ctx = { sla: fx.sla, categories: fx.categories, replications: fx.reps, baseSeed: fx.seed, precomputedCaseSets: primarySets(fx), confirmation: a };
+      const x1 = rre('confirm', ctx), x2 = rre('confirm', ctx);
+      assert(x1.precomputedCaseSets === x2.precomputedCaseSets && x1.baseSeed === x2.baseSeed && x1.precomputedCaseSets === a.sets(), 'D72.4g Common Random Numbers inside the block: every confirmation evaluation (any N, any rung) gets the identical sets and base seed', '');
+    }
+  } else {
+    assert(false, 'D72.4 confirmation block', 'createConfirmationBlock / deriveConfirmationBaseSeed are not exported');
+  }
+
+  // ============================================================================================
+  // D72.5 rescue by the minimal later-start shape (coverage OFF, Shift Placement ON) - "min" fixture
+  // ============================================================================================
+  {
+    const fx = FX.min;
+    const nPre = PRE_ON.min[1] as number; // 10 on the unchanged code
+    const on = S72('min', true, false);
+    const ctrlOnCovOn = S72('min', true, true);
+    assert(on.rec === nPre - 1, `D72.5a min fixture, coverage OFF, Shift Placement ON: recommended HC ${nPre - 1} (unchanged code: ${nPre})`, `got ${on.rec}`);
+    assert(ctrlOnCovOn.rec === PRE_ON.min[0], 'D72.5b CONTROL coverage ON, Shift Placement ON: still 9 (repair already tried the minimal shape; unchanged)', `got ${ctrlOnCovOn.rec}`);
+    // Evidence that N-1 = 9 fails the three existing routes and passes the minimal later-start shape on BOTH blocks (true before and after).
+    const n1 = nPre - 1;
+    const pSets = primarySets(fx);
+    const uni = evalAt(fx, false, n1, undefined, pSets, fx.seed);
+    const an = computeCandidatePlacementDistribution({ n: n1, cases: pSets[0].cases, calendar: fx.calendar, labor: laborFor(fx, true), queueArchitecture: 'pooled' });
+    const anEv = an ? evalAt(fx, false, n1, an, pSets, fx.seed) : null;
+    const minShape = buildCoverageRepairDistribution({ n: n1, calendar: fx.calendar, labor: laborFor(fx, true), minAgentsPerInterval: 1, queueArchitecture: 'pooled' });
+    const msP = evalAt(fx, false, n1, minShape ?? undefined, pSets, fx.seed);
+    assert(!uni.passesAllConstraints && !!anEv && !anEv.passesAllConstraints, 'D72.5c N-1: everyone at opening fails and the analytic placement roster fails (CI lower bounds 77.2 / 69.2 vs target 85)', `uniform=${uni.primaryStats.ci95Low} analytic=${anEv?.primaryStats.ci95Low}`);
+    assert(!!minShape && msP.passesAllConstraints && rosterStr72(minShape) === '0:8 240:1', 'D72.5d N-1: the minimal later-start shape (8 at opening + 1 at +240) passes the full-R gate on the primary block (CI lower bound 88.6)', `roster=${rosterStr72(minShape ?? undefined)} low=${msP.primaryStats.ci95Low}`);
+    if (typeof dcs === 'function') {
+      const msC = evalAt(fx, false, n1, minShape ?? undefined, confirmSets(fx), dcs(fx.seed));
+      assert(msC.passesAllConstraints, 'D72.5e N-1: the same roster also passes the full-R gate on the confirmation block (CI lower bound 87.9)', `low=${msC.primaryStats.ci95Low}`);
+    }
+    // Never a false accept: the reported roster, re-evaluated independently at full R with the unmodified SLA.
+    const rep = evalAt(fx, false, on.rec as number, on.win, pSets, fx.seed);
+    assert(on.rec !== null && !!on.win && rep.passesAllConstraints, 'D72.5f the roster the search reports at the new headcount passes the unmodified full-R gate when re-evaluated independently (primary block)', `rec=${on.rec} low=${rep.primaryStats.ci95Low}`);
+  }
+
+  // ============================================================================================
+  // D72.6 rescue by a share rung (coverage ON, Shift Placement ON) - the D33 shape
+  // ============================================================================================
+  {
+    const fx = FX.d33;
+    const on = S72('d33', true, true);
+    assert(on.rec === 21 && PRE_ON.d33[0] === 22, 'D72.6a D33 file, coverage ON, Shift Placement ON: recommended HC 21 (unchanged code: 22)', `got ${on.rec}`);
+    assert(S72('d33', true, false).rec === 21 && S72('d33', false, true).rec === 22, 'D72.6b CONTROLS: coverage OFF + placement ON stays 21; placement OFF stays 22', `${S72('d33', true, false).rec} / ${S72('d33', false, true).rec}`);
+    if (typeof brl === 'function' && typeof dcs === 'function') {
+      // Which route rescues 21? Walk the ladder independently (no pre-screen) with the unmodified gate on both blocks.
+      const pSets = primarySets(fx); const cSets = confirmSets(fx);
+      const ld = brl({ n: 21, cases: pSets[0].cases, calendar: fx.calendar, labor: laborFor(fx, true), queueArchitecture: 'pooled' });
+      const rows = ld.map((d, i) => ({ i, roster: rosterStr72(d), p: evalAt(fx, true, 21, d, pSets, fx.seed).passesAllConstraints, c: evalAt(fx, true, 21, d, cSets, dcs(fx.seed)).passesAllConstraints }));
+      const firstBoth = rows.find((r) => r.p && r.c);
+      assert(!!firstBoth && firstBoth.i > 0 && !rows[0].p, 'D72.6c at N=21 the minimal shape (rung 0) fails and a later SHARE rung passes both blocks', JSON.stringify(rows));
+      const rep = evalAt(fx, true, 21, on.win, pSets, fx.seed);
+      assert(!!on.win && rep.passesAllConstraints, 'D72.6d never a false accept: the reported roster at 21 passes the unmodified full-R gate when re-evaluated independently', `roster=${rosterStr72(on.win)} low=${rep.primaryStats.ci95Low}`);
+    } else {
+      assert(false, 'D72.6c/d share-rung evidence and independent re-evaluation (D33)', 'rescue helpers are not exported');
+    }
+  }
+
+  // ============================================================================================
+  // D72.7 the confirmation block on the built-in support sample (coverage OFF, Shift Placement ON)
+  // ============================================================================================
+  {
+    const fx = FX['smp-support'];
+    const on = S72('smp-support', true, false);
+    // Measured 2026-10-08: without the confirmation block the ladder rescues 27 (26 at opening + 1 later), which passes the search seed by about
+    // 0.1 point but only 7 of 21 fresh seeds; today's 28 passes 21 of 21. With the block 27 is rejected and the answer stays 28.
+    assert(on.rec === 28, 'D72.7a support sample, coverage OFF, Shift Placement ON: recommended HC stays 28 (the rescued 27 fails confirmation)', `got ${on.rec} roster=${rosterStr72(on.win)}`);
+    // Independent reproduction of the accepted roster on 10 fresh run seeds (7001..7010): must pass the unmodified gate on at least 8.
+    let passes = 0; const lows: number[] = [];
+    for (let s = 7001; s <= 7010; s++) {
+      const sets = hcNs.generatePrecomputedReplications({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: fx.calendar, sla: slaFor(fx, false), baseSeed: s, replications: fx.reps });
+      const ev = evalAt(fx, false, on.rec as number, on.win, sets, s);
+      if (ev.passesAllConstraints) passes++;
+      lows.push(ev.primaryStats.ci95Low);
+    }
+    assert(on.rec !== null && passes >= 8, `D72.7b the accepted roster at ${on.rec} (${rosterStr72(on.win)}) reproduces: passes the unmodified gate on ${passes} of 10 fresh seeds (need >= 8)`, `CI lows: ${lows.join(',')}`);
+  }
+
+  // ============================================================================================
+  // D72.8 never a false accept on the moved suite fixtures
+  // ============================================================================================
+  const NEW_ON_COV_ON: Record<string, number> = { d50: 7, d51a: 14, d52: 18 }; // measured after the change (unchanged code: 9 / 17 / 19)
+  if (typeof brl === 'function' && typeof dcs === 'function') {
+    for (const [name, cov] of [['d50', true], ['d51a', true], ['d52', true]] as Array<[string, boolean]>) {
+      const fx = FX[name];
+      const on = S72(name, true, cov);
+      const pre = PRE_ON[name][cov ? 0 : 1] as number;
+      if (on.rec === null) { assert(false, `D72.8 ${name}: search returned a recommendation`, 'null'); continue; }
+      assert(on.rec === NEW_ON_COV_ON[name], `D72.8z ${name}, coverage ON, Shift Placement ON: recommended HC ${NEW_ON_COV_ON[name]} (unchanged code: ${pre})`, `got ${on.rec}`);
+      const pSets = primarySets(fx); const cSets = confirmSets(fx);
+      const rep = evalAt(fx, cov, on.rec, on.win, pSets, fx.seed);
+      assert(rep.passesAllConstraints, `D72.8a ${name} (pre-change ${pre}, now ${on.rec}): the reported roster re-evaluated independently at full R with the unmodified SLA passes (primary block)`, `low=${rep.primaryStats.ci95Low}`);
+      if (on.rec < pre) {
+        // A rescue happened: some ladder rung passes the full-R gate on BOTH blocks at the new headcount.
+        const ld = brl({ n: on.rec, cases: pSets[0].cases, calendar: fx.calendar, labor: laborFor(fx, true), queueArchitecture: fx.arch });
+        const both = ld.filter((d) => evalAt(fx, cov, on.rec as number, d, pSets, fx.seed).passesAllConstraints && evalAt(fx, cov, on.rec as number, d, cSets, dcs(fx.seed)).passesAllConstraints);
+        assert(both.length > 0, `D72.8b ${name}: at the new headcount ${on.rec} at least one ladder roster passes the unmodified gate on the primary AND the confirmation block`, `rungs=${ld.length}`);
+      }
+    }
+  } else {
+    assert(false, 'D72.8 never a false accept on the moved suite fixtures (D50 / D51 / D52)', 'rescue helpers are not exported');
+  }
+
+  // ============================================================================================
+  // D72.9 never-worse sweep
+  // ============================================================================================
+  for (const name of NAMES72) {
+    for (const cov of [true, false]) {
+      const on = S72(name, true, cov), off = S72(name, false, cov);
+      const pre = PRE_ON[name][cov ? 0 : 1];
+      const v = (x: number | null) => (x === null ? Infinity : x);
+      assert(v(on.rec) <= v(off.rec) && v(on.rec) <= v(pre), `D72.9 ${name}, coverage ${cov ? 'ON' : 'OFF'}: placement ON ${on.rec} <= placement OFF ${off.rec} and <= pre-change placement ON ${pre}`, `on=${on.rec} off=${off.rec} pre=${pre}`);
+    }
+  }
+
+  // ============================================================================================
+  // D72.10 Shift Placement OFF controls (digests recorded on the unchanged code; must pass before AND after)
+  // ============================================================================================
+  for (const name of Object.keys(OFF_CTRL)) {
+    for (const [i, cov] of [[0, true], [1, false]] as Array<[number, boolean]>) {
+      const off = S72(name, false, cov);
+      assert(off.dig === OFF_CTRL[name][i], `D72.10 CONTROL ${name}, Shift Placement OFF, coverage ${cov ? 'ON' : 'OFF'}: full result digest equals the one recorded on the unchanged code (HC ${off.rec})`, `digest=${off.dig} expected=${OFF_CTRL[name][i]}`);
+    }
+  }
+
+  // ============================================================================================
+  // D72.11 determinism + sync == async (full-result digest) on the suite's search fixtures
+  // ============================================================================================
+  {
+    const again = summarize(FX.min, searchOptimalHC(paramsFor(FX.min, true, false)));
+    assert(again.dig === S72('min', true, false).dig, 'D72.11a determinism: same seed twice -> identical full result (min fixture, coverage OFF)', `${again.dig} vs ${S72('min', true, false).dig}`);
+    const cases72: Array<[string, boolean]> = [['min', false], ['min', true], ['d33', true], ['d33', false], ['d50', true], ['d51a', true], ['d52', true], ['d50p', true], ['smp-support', false]];
+    for (const [name, cov] of cases72) {
+      const a = await A72(name, true, cov);
+      const s = S72(name, true, cov);
+      assert(a.dig === s.dig && a.rec === s.rec, `D72.11b sync === async, full-result digest: ${name}, coverage ${cov ? 'ON' : 'OFF'} (HC ${s.rec})`, `sync=${s.dig}/${s.rec} async=${a.dig}/${a.rec}`);
+    }
+    const aOff = await A72('d33', false, true);
+    assert(aOff.dig === OFF_CTRL.d33[0], 'D72.11c sync === async with Shift Placement OFF (D33, coverage ON): async digest equals the recorded control', `async=${aOff.dig}`);
+  }
+
+  // ============================================================================================
+  // D72.12 monotonicity sweep (pattern D3.1): pass/fail in N with the ladder active
+  // The per-N decision is rebuilt from the same public pieces evaluateN uses (coverage repair -> uniform -> analytic placement ->
+  // shared ladder state machine with the shared stage rules), Shift Placement ON.
+  // ============================================================================================
+  if (typeof brl === 'function' && typeof crs === 'function' && typeof rre === 'function' && typeof ccb === 'function') {
+    const decide = (fx: Fx72, cov: boolean, sets: any[], blk: any, n: number): { pass: boolean; via: string } => {
+      const lab = laborFor(fx, true);
+      const slaX = slaFor(fx, cov);
+      const covPlan = (hcNs as any).planCoverageRepair({ n, sla: slaX, calendar: fx.calendar, labor: lab, queueArchitecture: fx.arch, representativeCases: sets[0].cases });
+      if (covPlan.dist && evalAt(fx, cov, n, covPlan.dist, sets, fx.seed).passesAllConstraints) return { pass: true, via: 'repair' };
+      if (!covPlan.repairFirst && evalAt(fx, cov, n, undefined, sets, fx.seed).passesAllConstraints) return { pass: true, via: 'uniform' };
+      const an = computeCandidatePlacementDistribution({ n, cases: sets[0].cases, calendar: fx.calendar, labor: lab, queueArchitecture: fx.arch });
+      if (an && evalAt(fx, cov, n, an, sets, fx.seed).passesAllConstraints) return { pass: true, via: 'analytic' };
+      const rs = crs({ ladder: brl({ n, cases: sets[0].cases, calendar: fx.calendar, labor: lab, queueArchitecture: fx.arch }), alreadyTried: [covPlan.dist, an] });
+      const ctx = { sla: slaX, categories: fx.categories, replications: fx.reps, baseSeed: fx.seed, precomputedCaseSets: sets, confirmation: blk };
+      for (let c = rs.next(); c !== null; c = rs.next()) {
+        const p = rre(c.stage, ctx);
+        rs.record(evaluateCandidateStatistical({ operationalHC: n, intervals: fx.intervals, openingWIP: [], categories: p.categories, calendar: fx.calendar, labor: lab, sla: p.sla, baseSeed: p.baseSeed, replications: p.replications, queueArchitecture: fx.arch, precomputedCaseSets: p.precomputedCaseSets, shiftDistribution: c.roster }));
+      }
+      const w = rs.result().winner;
+      return { pass: w !== null, via: w ? `rung${w.rung}` : 'none' };
+    };
+    for (const [name, cov, lo, hi] of [['min', false, 3, 14], ['d51a', true, 6, 18], ['d52', true, 10, 24]] as Array<[string, boolean, number, number]>) {
+      const fx = FX[name];
+      const sets = primarySets(fx);
+      const blk = ccb({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: fx.calendar, sla: slaFor(fx, cov), seed: fx.seed, replications: fx.reps });
+      const rows: Array<{ n: number; pass: boolean; via: string }> = [];
+      for (let n = lo; n <= hi; n++) rows.push({ n, ...decide(fx, cov, sets, blk, n) });
+      const dump = rows.map((r) => `${r.n}${r.pass ? 'P' : 'F'}:${r.via}`).join(' ');
+      const holes: string[] = [];
+      for (let i = 0; i < rows.length - 1; i++) if (rows[i].pass && !rows[i + 1].pass) holes.push(`N=${rows[i].n} passed but N=${rows[i + 1].n} failed`);
+      const cvTag = cov ? 'coverage ON' : 'coverage OFF';
+      assert(rows.some((r) => r.pass) && rows.some((r) => !r.pass), `D72.12a setup (${name}, ${fx.arch}, ${cvTag}): the swept range N=${lo}..${hi} contains both a failing and a passing N`, dump);
+      assert(holes.length === 0, `D72.12b ${name} (${fx.arch}, ${cvTag}): pass/fail is monotone in N over ${lo}..${hi} with the ladder active`, holes.join('; ') || dump);
+      assert(rows.some((r) => r.pass && r.via.startsWith('rung')), `D72.12c ${name} (${cvTag}): the sweep includes at least one N that only the ladder passes (so the ladder is really exercised)`, dump);
+      const rec = S72(name, true, cov).rec;
+      const firstPass = rows.find((r) => r.pass)?.n;
+      assert(rec === firstPass, `D72.12d ${name} (${cvTag}): the search's recommendation (${rec}) is the lowest passing N of the sweep (${firstPass})`, dump);
+    }
+  } else {
+    assert(false, 'D72.12 monotonicity sweep with the ladder active', 'rescue helpers are not exported');
+  }
+}
+
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');
