@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BoWFM — black / red concept</title>
+<style>
+  :root { --ink:#111111; --ink2:#555555; --mute:#8c8c8c; --line:#e6e6e6; --soft:#f5f5f5; --red:#d0021b; --redsoft:#fbe6e8; --bg:#ffffff; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:var(--bg); color:var(--ink); font-family:"Segoe UI",Arial,sans-serif; }
+  body { width:1440px; height:900px; overflow:hidden; display:flex; }
+  aside { width:200px; background:var(--ink); color:#fff; padding:22px 16px; display:flex; flex-direction:column; gap:4px; }
+  .logo { font-size:20px; font-weight:700; letter-spacing:.5px; margin-bottom:22px; }
+  .logo span { color:var(--red); }
+  .nav { padding:9px 12px; border-radius:6px; font-size:13px; color:#bdbdbd; }
+  .nav.on { background:var(--red); color:#fff; font-weight:600; }
+  .foot { margin-top:auto; font-size:11px; color:#8c8c8c; line-height:1.5; }
+  main { flex:1; padding:20px 26px; display:flex; flex-direction:column; gap:14px; }
+  header { display:flex; align-items:flex-end; justify-content:space-between; border-bottom:2px solid var(--ink); padding-bottom:10px; }
+  h1 { margin:0; font-size:22px; font-weight:700; }
+  .sub { font-size:12px; color:var(--ink2); margin-top:3px; }
+  .chips { display:flex; gap:8px; }
+  .chip { border:1px solid var(--ink); border-radius:999px; padding:5px 12px; font-size:12px; }
+  .chip.solid { background:var(--ink); color:#fff; }
+  .kpis { display:grid; grid-template-columns:repeat(5,1fr); gap:12px; }
+  .kpi { border:1px solid var(--line); border-top:3px solid var(--ink); border-radius:6px; padding:11px 14px; }
+  .kpi.hot { border-top-color:var(--red); }
+  .kpi .l { font-size:11px; color:var(--ink2); text-transform:uppercase; letter-spacing:.6px; }
+  .kpi .v { font-size:30px; font-weight:700; line-height:1.15; margin-top:3px; }
+  .kpi .n { font-size:11px; color:var(--mute); margin-top:2px; }
+  .grid { flex:1; display:grid; grid-template-columns:1.25fr 1fr; grid-template-rows:1fr 1fr; gap:12px; min-height:0; }
+  .card { border:1px solid var(--line); border-radius:6px; padding:12px 14px 6px; display:flex; flex-direction:column; min-height:0; }
+  .card h2 { margin:0; font-size:14px; font-weight:700; }
+  .card .d { font-size:11px; color:var(--ink2); margin-top:2px; }
+  .lg { display:flex; gap:14px; font-size:11px; color:var(--ink2); margin-top:6px; }
+  .lg i { display:inline-block; width:14px; height:3px; vertical-align:middle; margin-right:5px; background:var(--ink); }
+  .lg i.r { background:var(--red); } .lg i.g { background:#bdbdbd; } .lg i.b { height:9px; width:9px; border-radius:2px; }
+  svg { flex:1; width:100%; min-height:0; }
+  text { font-family:"Segoe UI",Arial,sans-serif; font-size:11px; fill:#555; }
+  .sample { font-size:10px; color:var(--mute); text-align:right; }
+</style>
+</head>
+<body>
+<aside>
+  <div class="logo">Bo<span>WFM</span></div>
+  <div class="nav">Data upload</div>
+  <div class="nav">Calendar &amp; SLA</div>
+  <div class="nav">Shrinkage</div>
+  <div class="nav on">Results</div>
+  <div class="nav">Agent analytics</div>
+  <div class="nav">Export</div>
+  <div class="foot">Backoffice sizing engine<br>Offline · single file</div>
+</aside>
+<main>
+  <header>
+    <div>
+      <h1>Sizing results</h1>
+      <div class="sub">Email &amp; case backoffice · 4-week horizon · 30 replications · 95% confidence</div>
+    </div>
+    <div class="chips"><span class="chip solid">All categories</span><span class="chip">Mon–Fri 08:00–18:00</span><span class="chip">SLA 90% in 24h</span></div>
+  </header>
+
+  <section class="kpis">
+    <div class="kpi hot"><div class="l">Recommended HC</div><div class="v">42</div><div class="n">operational, on the floor</div></div>
+    <div class="kpi"><div class="l">Gross HC</div><div class="v">54</div><div class="n">after 22.4% shrinkage</div></div>
+    <div class="kpi"><div class="l">Workload floor</div><div class="v">39</div><div class="n">analytical minimum</div></div>
+    <div class="kpi"><div class="l">SLA attainment</div><div class="v">93.1%</div><div class="n">CI 91.4 – 94.8 · target 90</div></div>
+    <div class="kpi"><div class="l">Occupancy</div><div class="v">84.6%</div><div class="n">demand ÷ planned capacity</div></div>
+  </section>
+
+  <section class="grid">
+    <div class="card">
+      <h2>Daily volume: arrivals vs. completed</h2>
+      <div class="d">Cases per working day, with end-of-day backlog</div>
+      <div class="lg"><span><i></i>Arrivals</span><span><i class="r"></i>Completed</span><span><i class="g b"></i>Backlog</span></div>
+      <svg id="c1" viewBox="0 0 660 230" preserveAspectRatio="none"></svg>
+    </div>
+    <div class="card">
+      <h2>Headcount search: SLA attainment by team size</h2>
+      <div class="d">Mean of 30 runs with 95% confidence band</div>
+      <div class="lg"><span><i></i>SLA attainment</span><span><i class="g b"></i>95% band</span><span><i class="r"></i>Target 90%</span></div>
+      <svg id="c2" viewBox="0 0 520 230" preserveAspectRatio="none"></svg>
+    </div>
+    <div class="card">
+      <h2>Headcount by category</h2>
+      <div class="d">Operational vs. gross (after shrinkage)</div>
+      <div class="lg"><span><i class="b"></i>Operational HC</span><span><i class="r b"></i>Gross HC</span></div>
+      <svg id="c3" viewBox="0 0 660 230" preserveAspectRatio="none"></svg>
+    </div>
+    <div class="card">
+      <h2>Occupancy by hour of day</h2>
+      <div class="d">Share of planned capacity in use · red = above 90% cap</div>
+      <div class="lg"><span><i class="b"></i>Within cap</span><span><i class="r b"></i>Above cap</span><span><i class="g"></i>Cap 90%</span></div>
+      <svg id="c4" viewBox="0 0 520 230" preserveAspectRatio="none"></svg>
+    </div>
+  </section>
+  <div class="sample">Design concept — illustrative sample numbers, not a real run</div>
+</main>
+
+<script>
+const NS = "http://www.w3.org/2000/svg";
+function el(svg, tag, attrs, txt) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (txt !== undefined) e.textContent = txt;
+  svg.appendChild(e); return e;
+}
+function frame(id, W, H, yMin, yMax, ticks, fmt) {
+  const svg = document.getElementById(id), L = 40, R = 12, T = 10, B = 24;
+  const y = v => T + (H - T - B) * (1 - (v - yMin) / (yMax - yMin));
+  ticks.forEach(t => {
+    el(svg, "line", { x1: L, x2: W - R, y1: y(t), y2: y(t), stroke: "#e6e6e6", "stroke-width": 1 });
+    el(svg, "text", { x: L - 6, y: y(t) + 4, "text-anchor": "end" }, fmt(t));
+  });
+  el(svg, "line", { x1: L, x2: W - R, y1: y(yMin), y2: y(yMin), stroke: "#111", "stroke-width": 1 });
+  return { svg, L, R, T, B, y, x0: L, x1: W - R, H };
+}
+const path = pts => pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+
+// 1 — arrivals vs completed + backlog
+(() => {
+  const arr = [1180,1320,1410,1290,1050,1240,1390,1520,1360,1110,1210,1300,1450,1330,1080,1260,1380,1490,1340,1120];
+  const done = [1100,1250,1330,1340,1180,1190,1310,1400,1420,1230,1190,1270,1370,1380,1190,1220,1320,1400,1410,1230];
+  const f = frame("c1", 660, 230, 0, 1600, [0,400,800,1200,1600], v => v);
+  const step = (f.x1 - f.x0) / arr.length, x = i => f.x0 + step * (i + .5);
+  let bl = 180;
+  arr.forEach((a, i) => {
+    bl = Math.max(0, bl + a - done[i]);
+    el(f.svg, "rect", { x: x(i) - 9, y: f.y(bl), width: 18, height: f.y(0) - f.y(bl), fill: "#d9d9d9", rx: 2 });
+    if (i % 5 === 0) el(f.svg, "text", { x: x(i), y: f.H - 7, "text-anchor": "middle" }, "Wk " + (i / 5 + 1) + " Mon");
+  });
+  el(f.svg, "path", { d: path(arr.map((v, i) => [x(i), f.y(v)])), fill: "none", stroke: "#111", "stroke-width": 2 });
+  el(f.svg, "path", { d: path(done.map((v, i) => [x(i), f.y(v)])), fill: "none", stroke: "#d0021b", "stroke-width": 2 });
+  arr.forEach((v, i) => el(f.svg, "circle", { cx: x(i), cy: f.y(v), r: 2.5, fill: "#111" }));
+  done.forEach((v, i) => el(f.svg, "circle", { cx: x(i), cy: f.y(v), r: 2.5, fill: "#d0021b" }));
+})();
+
+// 2 — SLA vs N with CI band
+(() => {
+  const N = [36,37,38,39,40,41,42,43,44,45,46];
+  const m = [61,68.5,75,80.6,85.2,89.4,93.1,95.4,96.9,97.8,98.4];
+  const hw = [4.6,4.2,3.8,3.3,2.8,2.2,1.7,1.3,1.0,.8,.6];
+  const f = frame("c2", 520, 230, 50, 100, [50,60,70,80,90,100], v => v + "%");
+  const x = i => f.x0 + (f.x1 - f.x0) * (i + .5) / N.length;
+  const up = m.map((v, i) => [x(i), f.y(Math.min(100, v + hw[i]))]), lo = m.map((v, i) => [x(i), f.y(v - hw[i])]).reverse();
+  el(f.svg, "path", { d: path(up.concat(lo)) + " Z", fill: "#d9d9d9" });
+  el(f.svg, "line", { x1: f.x0, x2: f.x1, y1: f.y(90), y2: f.y(90), stroke: "#d0021b", "stroke-width": 2, "stroke-dasharray": "6 4" });
+  el(f.svg, "path", { d: path(m.map((v, i) => [x(i), f.y(v)])), fill: "none", stroke: "#111", "stroke-width": 2 });
+  N.forEach((n, i) => {
+    const pick = n === 42;
+    el(f.svg, "circle", { cx: x(i), cy: f.y(m[i]), r: pick ? 6 : 3, fill: pick ? "#d0021b" : "#111", stroke: "#fff", "stroke-width": 2 });
+    el(f.svg, "text", { x: x(i), y: f.H - 7, "text-anchor": "middle" }, n);
+  });
+  const t = el(f.svg, "text", { x: x(6) - 10, y: f.y(93.1) - 8, "text-anchor": "end" }, "42 agents — first size to clear target");
+  t.setAttribute("style", "fill:#111;font-weight:600");
+})();
+
+// 3 — HC by category (grouped bars)
+(() => {
+  const cat = ["Billing", "Claims", "Complaints", "Onboarding", "Tech support", "Other"];
+  const op = [11, 9, 7, 6, 6, 3], gr = [14.2, 11.6, 9.0, 7.7, 7.7, 3.9];
+  const f = frame("c3", 660, 230, 0, 16, [0,4,8,12,16], v => v);
+  const step = (f.x1 - f.x0) / cat.length;
+  cat.forEach((c, i) => {
+    const cx = f.x0 + step * (i + .5);
+    [[op[i], "#111", -24], [gr[i], "#d0021b", 2]].forEach(([v, col, dx]) => {
+      el(f.svg, "rect", { x: cx + dx, y: f.y(v), width: 22, height: f.y(0) - f.y(v), fill: col, rx: 3 });
+      const t = el(f.svg, "text", { x: cx + dx + 11, y: f.y(v) - 4, "text-anchor": "middle" }, v);
+      t.setAttribute("style", "fill:#111");
+    });
+    el(f.svg, "text", { x: cx, y: f.H - 7, "text-anchor": "middle" }, c);
+  });
+})();
+
+// 4 — occupancy by hour
+(() => {
+  const hrs = ["08","09","10","11","12","13","14","15","16","17"];
+  const occ = [62, 81, 93, 96, 78, 74, 88, 92, 85, 66];
+  const f = frame("c4", 520, 230, 0, 100, [0,25,50,75,100], v => v + "%");
+  const step = (f.x1 - f.x0) / hrs.length;
+  el(f.svg, "line", { x1: f.x0, x2: f.x1, y1: f.y(90), y2: f.y(90), stroke: "#8c8c8c", "stroke-width": 2, "stroke-dasharray": "6 4" });
+  hrs.forEach((h, i) => {
+    const cx = f.x0 + step * (i + .5), v = occ[i];
+    el(f.svg, "rect", { x: cx - 15, y: f.y(v), width: 30, height: f.y(0) - f.y(v), fill: v > 90 ? "#d0021b" : "#111", rx: 3 });
+    const t = el(f.svg, "text", { x: cx, y: f.y(v) - 4, "text-anchor": "middle" }, v);
+    t.setAttribute("style", "fill:#111;stroke:#fff;stroke-width:4;paint-order:stroke");
+    el(f.svg, "text", { x: cx, y: f.H - 7, "text-anchor": "middle" }, h + ":00");
+  });
+})();
+</script>
+</body>
+</html>
