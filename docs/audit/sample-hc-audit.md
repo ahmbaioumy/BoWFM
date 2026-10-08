@@ -7,6 +7,7 @@ Changes audited: Workload Floor toggle (FR-5.13), clock-start derivation (FR-5.2
 Regenerate: `npx tsx scripts/audit-sample-hc.mts <out.jsonl> <csv> BA,BN,WA,WN,PON,FOFF`.
 Guard: `npm run test:audit` re-runs all 24 cells and fails on any difference from the after file
 (options `--jobs`, `--files`, `--cells`); suite D49 in `npm test` pins AJM_Only on every run.
+Known difference (2026-10-08, 1.21.0, P2-9): since 1.21.0 the baseline `docs/audit/sample-hc-after-2026-09-30.jsonl` differs in the 4 infeasible Wall Clock + Arrival (WA) cells, `slaPct` only (AJM_Only 46 -> 32.6, AJM_Simu 45.4 -> 30.2, EGS_Only - With Reduction 45.3 -> 29.9, EGS_Only 45.4 -> 29.8), because the failing uniform audit run now has a shift end. The baseline has not been regenerated pending owner approval, so `npm run test:audit` exits 1 on those 4 cells; no recommended headcount differs.
 
 Cells: BA/BN = Business Time + Arrival / Next Open · WA/WN = Wall Clock + Arrival / Next Open ·
 PON = placement ON · FOFF = Workload Floor OFF (compared with BA). "Tail" = agents on shift in

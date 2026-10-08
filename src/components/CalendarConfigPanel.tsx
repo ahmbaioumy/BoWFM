@@ -247,6 +247,9 @@ export function CalendarConfigPanel({
               >
                 00:00 – 24:00 (Full 24h Day)
               </button>
+              <span className="text-[11px] text-slate-500 basis-full">
+                For a business that never closes, tick 24x7. A 00:00–24:00 day without it is treated as one shift from 00:00.
+              </span>
             </div>
           </div>
 

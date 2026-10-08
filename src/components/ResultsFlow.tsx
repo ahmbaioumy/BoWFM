@@ -221,6 +221,14 @@ function ResultsFlowBody({
 
   const { finalDESResult: des, staffing, boundaryEvidence } = searchOutput;
   const dailyWindow = getDailyWindowLengthHours(calendar);
+  // True when the final (or, if infeasible, last evaluated) run has one shift per agent from opening,
+  // the business day is longer than that shift, and nobody was placed on a later start.
+  const singleShiftNoLateStarts =
+    !calendar.is24x7 &&
+    dailyWindow > labor.dailyProductiveHours + 1e-9 &&
+    !Object.values(des.shiftDistributionUsed ?? {}).some((d) =>
+      d.slaps.some((s) => s.startMinutesFromOpen > 0 && s.agentCount > 0)
+    );
   const primaryHC = searchOutput.primaryDrivenHC || searchOutput.recommendedHC || staffing.operationalHC;
   const primaryStats = searchOutput.primaryStatistical;
   const siloed = searchOutput.queueArchitecture === 'siloed';
@@ -539,6 +547,11 @@ function ResultsFlowBody({
                     {searchOutput.infeasibleReason ||
                       'The simulation engine tested multiple candidate headcounts up to the search cap, but constraints could not be met.'}
                   </p>
+                  {singleShiftNoLateStarts && (
+                    <p className="text-xs text-rose-900 leading-relaxed font-semibold" data-testid="single-shift-infeasible-note">
+                      Raising the headcount cap will not help here: every agent starts at opening time and leaves after their daily productive hours, so work arriving later waits until the next day whatever the headcount. Turn the Minimum Coverage Floor on or enable Shift Placement (Labor &amp; Config), or lengthen the SLA window.
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -632,6 +645,15 @@ function ResultsFlowBody({
               </p>
             </div>
           </div>
+
+          {singleShiftNoLateStarts && !searchOutput.isInfeasible && (
+            <div
+              className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 leading-relaxed"
+              data-testid="single-shift-note"
+            >
+              Every agent in this result starts at opening time and leaves after their daily productive hours, so later business hours have no one on shift. That raises the headcount needed. To staff later hours, turn the Minimum Coverage Floor on or enable Shift Placement (Labor &amp; Config). Results saved with version 1.20 or earlier assumed agents stayed until closing and will differ.
+            </div>
+          )}
 
           {/* DES Sizing Engine Record (matches completed SimulationProgressModal) */}
           {(() => {
@@ -946,8 +968,8 @@ function ResultsFlowBody({
                         ? ` (analytic N_sla = ${searchOutput.shiftPlacement.placementFeasibleFloor})`
                         : ''}
                       {searchOutput.shiftPlacement.winningDistribution
-                        ? ' — the recommended headcount uses a staggered shift-start distribution, not a uniform business-open start.'
-                        : ' — the recommendation used the uniform business-open start (plus the minimal coverage-repair stagger); no staggered distribution was needed to pass.'}
+                        ? ' — the recommended headcount has agents starting at different times, not everyone starting at opening time.'
+                        : ' — the recommendation has everyone starting at opening time (plus the few later starts the coverage floor adds, if it is on); no different start times were needed to pass.'}
                     </>
                   )}
                 </div>
