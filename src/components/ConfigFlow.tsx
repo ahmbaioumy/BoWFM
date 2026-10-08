@@ -196,7 +196,10 @@ export function ConfigFlow({
                 )}
                 <span className="text-xs text-slate-700">
                   <strong>Capacity Basis (M1):</strong> Scheduled daily productive hours ({labor.dailyProductiveHours}h) must be ≤
-                  daily business window ({dailyWindow}h).
+                  daily business window ({dailyWindow}h). On a business day longer than the daily productive
+                  hours, later hours are staffed only if minimum coverage or Shift Placement gives some agents
+                  later starts. A business entered as 00:00–24:00 without the 24x7 option counts as having
+                  opening hours: every agent works one shift from 00:00.
                 </span>
               </div>
               <span
@@ -385,9 +388,10 @@ export function ConfigFlow({
               </div>
             ) : (
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-600">
-                Every agent starts one uniform shift at business open (plus the minimal coverage-repair
-                stagger), exactly as today. Enabling placement also re-spreads the roster across business
-                hours after Req HC is fixed — headcount is never changed by it.
+                Every agent starts one shift at business open (plus the minimal coverage-repair stagger),
+                and each agent's shift ends after the daily productive hours, counted from their start.
+                Enabling placement also re-spreads the roster across business hours after Req HC is
+                fixed — headcount is never changed by it.
               </div>
             )}
           </div>
@@ -1076,8 +1080,10 @@ export function ConfigFlow({
                 <span className="text-[11px] text-slate-500">
                   The queue may never be left with fewer than this many agents on shift while the
                   business is open. On by default at 1 — the recommendation is only ever raised if no
-                  redistribution at the current headcount can satisfy this. Off = no floor (pre-2026
-                  behavior).
+                  redistribution at the current headcount can satisfy this. Off = no floor. With the
+                  floor off and no placed start times, every agent works one shift from opening time and
+                  leaves when it ends, so later hours are unstaffed. Turning the floor off does not lower
+                  headcount: it can raise it, or make a short SLA unreachable.
                 </span>
               </div>
 

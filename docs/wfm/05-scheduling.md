@@ -6,8 +6,10 @@ still out of scope. It does now cross the line for one narrow, deliberate reason
 determines whether *how many* is even achievable at all, not just whether it's comfortable.
 
 If every agent starts one uniform shift at business open and `dailyProductiveHours` is
-shorter than the business window, a persistent backlog exhausts every agent's daily budget
-in lockstep — leaving the tail of the window with **zero available agents**, every day,
+shorter than the business window, every agent's shift ends at the same moment
+(`dailyProductiveHours` after open; since 2026-10-08 the simulator enforces that end on every
+non-24x7 run, with or without a start distribution — only a 24x7 run without placed start times
+has no shift end) — leaving the tail of the window with **zero available agents**, every day,
 *regardless of headcount*. No amount of "how many" fixes a "when" problem. The opt-in
 **deadline-coverage shift placement** (`labor.shiftPlacementEnabled`, off by default — see
 PRD §6 Stage 3a and `project_context.md` §5) exists specifically to close that gap: it lets

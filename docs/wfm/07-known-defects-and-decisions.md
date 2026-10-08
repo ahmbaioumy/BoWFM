@@ -325,6 +325,12 @@ forecast CSV, and exported queue timeline:
   shift end. This is why staggering starts LATER only ever removes early capacity without
   adding real late capacity in the current simulator — the late capacity was already there.
   Tracked as PRD §11 P0-4 (shift-end enforcement + real 24×7 multi-start).
+  **Resolved 2026-10-08 (PRD 1.21.0, P2-9) for every non-24×7 run without a start
+  distribution:** fixed-shift mode is now on for all non-24×7 runs, so a run with no distribution
+  is one cohort at offset 0 whose agents leave `dailyProductiveHours` after open (flag
+  `DESResult.fixedShifts`; suite D71). Earlier fixes covered runs that passed a distribution
+  (2026-08-28). **Still open for 24×7 without a distribution** (agents stay on around the clock;
+  PRD §10 L21).
 - **The "never worse" guarantee has a narrow, confirmed exception:** `pickPlacementOrUniform`
   guards the per-N choice, but `placementFeasibleFloor` (N_sla) separately raises the
   search's *starting* N, and when that raised start passes immediately, the walk-down is
@@ -874,6 +880,8 @@ unchanged. Results (same seeds; N_min identical everywhere): `AJM_Only` 12->7 / 
 built-in samples unchanged; fair vs legacy assignment identical in all 18 re-measured scenarios (the old
 "+1 from fairness" was this artefact). One suite fixture (D33: 9h shift, 14h window) now needs +1 head with
 coverage on (22 vs 21): one seat must move to a late cohort, which is the honest cost of fixed shifts.
+(Since 2026-10-08, P2-9: with coverage OFF the same fixture rises 21 -> 28, because a run with no start
+distribution now also ends each shift after 9h; coverage OFF can therefore exceed coverage ON.)
 Side fixes: the binding label reports `min_coverage` when the path that decided N-1 (repair, else uniform)
 failed coverage alone; the search evaluates repair first when uniform is structurally unable to pass.
 Known caveat: on real files the forced staggered layout costs some SLA, so their label remains the SLA gate.

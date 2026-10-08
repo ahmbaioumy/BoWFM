@@ -1033,3 +1033,20 @@ Plan: `~/.claude/plans/plan-for-fixing-this-precious-thunder.md`. Base `5338acc`
 | F-3 | minor | Part-day note said "some agents"; with open shifts it is all agents | Reworded |
 
 Not re-run after the rework: the full sizing run in the browser. The rework changed strings only; page load, lint and the full suite (1,283, 0 failed) were re-run and the new labels are present in `BoWFM.html`.
+
+---
+
+# FINDINGS — Engine shift end for runs without placed starts (P2-9) — review round 1 (2026-10-08)
+
+Checkpoint `c59dd89`; build `e2a6dda` (PRD 1.21.0). Tier 3. Rework NOT yet done — stopped at usage limit.
+
+Passed with evidence: tester (all criteria; planner file 47 with coverage on, 48 with coverage off; equal-length day, 24x7 and explicit rosters identical; sync = async; real page clean; 1,331 checks, 0 failed). Auditor: 12 approved pins changed exactly as approved; engine diff limited to flag, lookup, result field, invariants; no frozen decision touched.
+
+| ID | Reviewer | Severity | Finding | Status |
+|---|---|---|---|---|
+| E-1 | challenger | major | Coverage OFF + Shift Placement ON on the planner's file recommends 48, but 47 passes every gate with placed starts (32@0/15@300, CI low 80.8). The placement builder in `hc-search.ts:556-612` never tries that roster and the walk stops at the first fail. Search weakness, not physics; PRD wording that explains the rise as "evening unstaffed" is wrong for placement-ON runs. Fix is in `hc-search.ts` (outside approved scope) | OPEN — user decision |
+| E-2 | challenger + user-side | major | When no headcount can reach the SLA with a single shift, Results says "Increase userMaxHC", which cannot help (`hc-search.ts:2788`, `3561`; `ResultsFlow.tsx:535-540`). No Results text explains a higher coverage-off number or the remedy | OPEN |
+| E-3 | auditor | major | `npm run test:audit` now fails on the 4 infeasible WA cells (slaPct 46→32.6, 45.4→30.2, 45.3→29.9, 45.4→29.8); baseline not regenerated and no doc says so | OPEN — regenerate baseline or record |
+| E-4 | user-side | major | Nothing on screen says results from earlier versions differ with coverage off | OPEN |
+| E-5 | user-side | major | Coverage-floor warning is last in small grey text; "floor" also names the Workload Floor | OPEN |
+| E-6 | minors | minor | ConfigFlow sentences lack a 24x7 qualifier; "byte-for-byte unchanged" line; off-state note mentions the repair stagger when coverage is off; D71.7c CI-gate test is a constructed case; stale history lines PRD:1308, project_context:1007; boundary rationale does not name the failing category | Backlog |

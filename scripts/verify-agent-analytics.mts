@@ -25,6 +25,7 @@ import {
   buildAgentInsights,
   computeAgentAnalytics,
   sortRowsByCases,
+  utilisationReadsLowByDesign,
 } from '../src/utils/agent-analytics';
 import { buildSampleDataset } from '../src/utils/sample-data';
 import { DEFAULT_CALENDAR, DEFAULT_CATEGORIES, DEFAULT_LABOR, DEFAULT_SIM_PARAMS, DEFAULT_SLA } from '../src/utils/default-config';
@@ -121,7 +122,11 @@ console.log('\n--- Suite AA: agent analytics ---');
   assert(a.rows.every((r, i) => approx(r.utilisationPct, fair[i].utilPct, 0.01)), 'AA.5 fixture check: on this uniform, budget-exhausting run scheduled-based utilisation equals the engine on-shift busy/available (not a general identity)', a.rows.map((r, i) => `${r.utilisationPct.toFixed(2)}/${fair[i].utilPct.toFixed(2)}`).slice(0, 3).join(' '));
   assert(a.rows.every((r) => approx(r.availableMin, r.busyMin + r.idleMin) && r.scheduledMin >= r.availableMin - 1e-9 && r.occupancyPct >= r.utilisationPct - 1e-9), 'AA.6 available = busy+idle; scheduled >= available; occupancy >= utilisation');
   assert(a.rows.every((r) => r.casesHandedOver <= r.casesTouched && r.casesTouched >= 0), 'AA.7 touched >= handed over');
-  assert(a.rows.some((r) => r.occupancyPct - r.utilisationPct > 0.5), 'AA.8 occupancy and utilisation differ where the daily budget is exhausted before shift end');
+  // Updated 2026-10-08 (P2-9: non-24x7 runs without a start distribution now end each agent's shift dailyProductiveHours after
+  // open). Was 'occupancy and utilisation differ where the daily budget is exhausted before shift end' (some agent > 0.5 points
+  // apart). This default uniform fixture (08:00-18:00, 7.5 h, adherence 1.0, no distribution) is now a fixed-shift run: scheduled
+  // is capped at the agent's own 450-min shift and adherence 1.0 loses no productive time, so occupancy == utilisation.
+  assert(a.rows.every((r) => Math.abs(r.occupancyPct - r.utilisationPct) < 0.5), 'AA.8 uniform default fixture is a fixed-shift run at adherence 1.0: occupancy == utilisation for every agent', a.rows.map((r) => `${r.occupancyPct.toFixed(1)}/${r.utilisationPct.toFixed(1)}`).join(' '));
   assert(a.rows.every((r) => r.cohortStart === '08:00' && !r.isLateShift) && a.earliestCohortStart === '08:00', 'AA.9 uniform run: one 08:00 cohort, nobody flagged late');
   // Definition change (work share): matrix cells are fractional work share, not finisher counts.
   assert(a.matrix.every((row, i) => approx(row.reduce((x, y) => x + y, 0), a.rows[i].workShare, 1e-6)) && approx(a.rows.reduce((s, r) => s + r.workShare, 0), des.completedCases, 1e-6), 'AA.10 matrix row sums == work share; total work share == completed cases');
@@ -162,7 +167,8 @@ console.log('\n--- Suite AA: agent analytics ---');
 
   // Determinism + deterministic sort.
   assert(JSON.stringify(computeAgentAnalytics({ des, calendar: cal, labor: lab })) === JSON.stringify(a), 'AA.21 identical inputs give byte-identical output');
-  const tie = sortRowsByCases([{ ...a.rows[3], casesCompleted: 5 }, { ...a.rows[1], casesCompleted: 5 }, { ...a.rows[2], casesCompleted: 9 }]);
+  // sortRowsByCases orders by workShare (not casesCompleted), so the test sets workShare; casesCompleted is left as it is.
+  const tie = sortRowsByCases([{ ...a.rows[3], workShare: 5 }, { ...a.rows[1], workShare: 5 }, { ...a.rows[2], workShare: 9 }]);
   assert(tie.map((r) => r.agentId).join(',') === '2,1,3', 'AA.22 bar-chart sort: cases desc, ties by agent id asc');
 
   // Trend band.
@@ -257,7 +263,9 @@ console.log('\n--- Suite AA: agent analytics ---');
 
   // ---- Follow-ups: run facts, notes section, scheduled-minute pins ----
   const lastDataDay = formatDate24(liv[liv.length - 1].start);
-  assert(la.staggered === true && a.staggered === false, 'AA.40 staggered flag: true for the shift-placement run, false for the uniform run');
+  // Updated 2026-10-08 (P2-9): was a.staggered === false for the uniform run. The default non-24x7 uniform run is now a fixed-shift
+  // run (des.fixedShifts), so the flag is true for it too; the false case moved to the 24x7 fixture below (AA.46).
+  assert(la.staggered === true && a.staggered === true && ld.fixedShifts === true && des.fixedShifts === true, 'AA.40 staggered flag: true for the shift-placement run AND for the non-24x7 uniform run (fixed shifts, P2-9)');
 
   const expectedDrain = la.allDates.filter((d) => d > lastDataDay);
   assert(expectedDrain.length >= 1 && JSON.stringify(la.drainDates) === JSON.stringify(expectedDrain) && la.drainDates.every((d) => la.dates.includes(d)), 'AA.41 drainDates lists exactly the active dates after the last data day', `${la.drainDates} vs ${expectedDrain} (last data day ${lastDataDay})`);
@@ -278,8 +286,11 @@ console.log('\n--- Suite AA: agent analytics ---');
   const nUni = buildAgentAnalyticsNotes(a, lab);
   const nFilt = buildAgentAnalyticsNotes(lf, mkLab(1.0));
   const nGold = buildAgentAnalyticsNotes(goldPooled, mkLab(1.0));
-  assert((noteOf(nStag, 'Scheduled (min)') ?? '').includes('fixed shift') && (noteOf(nStag, 'Scheduled (min)') ?? '').includes('540') && (noteOf(nUni, 'Scheduled (min)') ?? '').includes('business close') && !(noteOf(nUni, 'Scheduled (min)') ?? '').includes('each agent worked a fixed shift') && !/shift placement (on|off)/i.test(noteOf(nStag, 'Scheduled (min)') ?? '') && !/shift placement (on|off)/i.test(noteOf(nUni, 'Utilisation % vs Occupancy %') ?? ''), 'AA.44 Scheduled note follows what the run did (fixed shift + 540 min vs business close), not the Shift Placement switch', `${noteOf(nStag, 'Scheduled (min)')} || ${noteOf(nUni, 'Scheduled (min)')}`);
-  assert(noteOf(nStag, 'Utilisation % vs Occupancy %') !== noteOf(nUni, 'Utilisation % vs Occupancy %') && (noteOf(nUni, 'Utilisation % vs Occupancy %') ?? '').includes('not an error') && noteOf(nStag, 'On-Shift Days') !== undefined, 'AA.44b utilisation note differs by mode; off-mode note says it is not an error; On-Shift Days note present');
+  // Updated 2026-10-08 (P2-9): the default uniform fixture is a fixed-shift run, so its Scheduled note now says fixed shift with the
+  // 450-min figure (7.5 h) instead of 'business close'. The open-case wording ('around the clock', 'not an error') is pinned on the
+  // 24x7 fixture below (AA.46-AA.46e).
+  assert((noteOf(nStag, 'Scheduled (min)') ?? '').includes('fixed shift') && (noteOf(nStag, 'Scheduled (min)') ?? '').includes('540') && (noteOf(nUni, 'Scheduled (min)') ?? '').includes('fixed shift') && (noteOf(nUni, 'Scheduled (min)') ?? '').includes('450') && !(noteOf(nUni, 'Scheduled (min)') ?? '').includes('business close') && !/shift placement (on|off)/i.test(noteOf(nStag, 'Scheduled (min)') ?? '') && !/shift placement (on|off)/i.test(noteOf(nUni, 'Utilisation % vs Occupancy %') ?? ''), 'AA.44 Scheduled note follows what the run did (fixed shift + 540 min for the long-day run, fixed shift + 450 min for the default uniform run), not the Shift Placement switch', `${noteOf(nStag, 'Scheduled (min)')} || ${noteOf(nUni, 'Scheduled (min)')}`);
+  assert(noteOf(nStag, 'Utilisation % vs Occupancy %') === noteOf(nUni, 'Utilisation % vs Occupancy %') && !(noteOf(nUni, 'Utilisation % vs Occupancy %') ?? '').includes('not an error') && (noteOf(nUni, 'Utilisation % vs Occupancy %') ?? '').startsWith('Normally the same number') && noteOf(nStag, 'On-Shift Days') !== undefined, 'AA.44b utilisation note is the same fixed-shift note for the uniform and shift-placement runs (no "not an error" caveat); On-Shift Days note present');
   const drainNote = noteOf(nStag, 'Part-day after the data ends');
   assert(!!drainNote && la.drainDates.every((d) => drainNote.includes(d)) && noteOf(nFilt, 'Part-day after the data ends') === undefined && (noteOf(nUni, 'Part-day after the data ends') !== undefined) === (a.drainDates.length > 0), 'AA.44c part-day note only when drainDates is non-empty, and it names the date(s)', drainNote ?? '');
   assert(noteOf(nGold, 'Category filter') !== undefined && noteOf(nStag, 'Category filter') === undefined && noteOf(buildAgentAnalyticsNotes(cf, lab), 'Category filter') === undefined && !(noteOf(nGold, 'Category filter') ?? '').includes('whole time on shift'), 'AA.44d category note only when pooledCategoryFilter; does not claim Available is the whole time on shift');
@@ -287,6 +298,27 @@ console.log('\n--- Suite AA: agent analytics ---');
   const goldRows = goldPooled.rows.filter((r) => fullByAgent.has(r.agentId));
   assert(goldRows.length > 0 && goldRows.every((r) => { const f = fullByAgent.get(r.agentId)!; return r.availableMin < f.availableMin - 1e-6 && Math.abs(r.idleMin - f.idleMin) < 1e-6; }), 'AA.44f category filter on a pooled run: availableMin strictly below unfiltered, idleMin equal (pins the Category filter note)', goldRows.map((r) => `${r.agentId}: ${r.availableMin.toFixed(1)} vs ${fullByAgent.get(r.agentId)!.availableMin.toFixed(1)}, idle ${r.idleMin.toFixed(1)} vs ${fullByAgent.get(r.agentId)!.idleMin.toFixed(1)}`).join(' | '));
   assert(![...nStag, ...nUni, ...nGold].some((r) => /budget|staggered|in queue|drain|horizon/i.test(r.Note)), 'AA.44e notes avoid internal jargon (budget, staggered, in queue, drain, horizon)');
+
+  // ---- 24x7 fixture without a start distribution (added 2026-10-08, P2-9): the one run that still has NO fixed shift end ----
+  // Moved here from the default uniform fixture, which is now a fixed-shift run. 7 days round the clock, 3 cases/hour, AHT 30, 4 agents,
+  // 8 h productive, adherence 1.0, no shiftDistribution: agents stay on around the clock, so Scheduled runs to the end of each day
+  // (~1440 min on a full day) while Available is only the time in the queue; on 13 Oct occupancy is 41-45% vs utilisation 33.3% (busy / 1440).
+  const CAL247: CalendarConfig = { is24x7: true, workingDays: [0, 1, 2, 3, 4, 5, 6], dailyOpenHour: 0, dailyOpenMinute: 0, dailyCloseHour: 24, dailyCloseMinute: 0, holidays: [] };
+  const LAB247: LaborConfig = { dailyProductiveHours: 8, adherencePct: 1.0, workingDaysPerWeek: 5, offDaysPerWeek: 2, contractualHoursSource: 'derived', shifts: [] };
+  const SLA247: SLAPolicyConfig = { ...SLA, primaryWindow: 24, primaryUnit: 'hours', clockBasis: 'wall_clock', minCoverageEnabled: false };
+  const iv247: StandardInterval[] = [];
+  for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) { const st = new Date(2026, 9, 12 + d, h, 0); iv247.push({ intervalIndex: iv247.length, start: st, end: new Date(st.getTime() + 3600000), volume: 3, category: 'General' }); }
+  const des247 = runBackofficeDES({ operationalHC: 4, intervals: iv247, openingWIP: [], categories: [{ ...cat[0], ahtMinutes: 30 }], calendar: CAL247, labor: LAB247, sla: SLA247, seed: 7, queueArchitecture: 'pooled' });
+  const a247 = computeAgentAnalytics({ des: des247, calendar: CAL247, labor: LAB247 });
+  const n247 = buildAgentAnalyticsNotes(a247, LAB247);
+  assert(des247.fixedShifts === false && a247.staggered === false && !des247.shiftDistributionUsed, 'AA.46 24x7 run without a start distribution: no fixed shifts (fixedShifts false, staggered false)', `fixedShifts=${des247.fixedShifts} staggered=${a247.staggered}`);
+  assert(utilisationReadsLowByDesign(a247, LAB247, CAL247) === true && utilisationReadsLowByDesign(a, lab, cal) === false && utilisationReadsLowByDesign(la, mkLab(1.0), LBIZ) === false, 'AA.46b utilisationReadsLowByDesign: true for the 24x7 no-distribution run, false for the fixed-shift runs');
+  const full247 = computeAgentAnalytics({ des: des247, calendar: CAL247, labor: LAB247, filter: { fromDate: '2026-10-13', toDate: '2026-10-13' } });
+  assert(full247.rows.length === 4 && full247.rows.every((r) => r.scheduledMin > 1300 && r.scheduledMin <= 1440 + 1e-6 && r.occupancyPct - r.utilisationPct > 5), 'AA.46c 24x7 no-distribution: Scheduled runs around the clock (1300-1440 min on a full day) and occupancy sits >5 points above utilisation', full247.rows.map((r) => `${r.scheduledMin.toFixed(0)} ${r.occupancyPct.toFixed(1)}/${r.utilisationPct.toFixed(1)}`).join(' | '));
+  const sch247 = noteOf(n247, 'Scheduled (min)') ?? '';
+  const ut247 = noteOf(n247, 'Utilisation % vs Occupancy %') ?? '';
+  assert(sch247.includes('around the clock') && !sch247.includes('each agent worked a fixed shift') && sch247.includes('only a round-the-clock business without placed start times has no shift end') && ut247.includes('around the clock') && ut247.includes('not an error') && !/shift placement (on|off)/i.test(sch247 + ut247), 'AA.46d 24x7 no-distribution notes: say agents stay on around the clock, it is the only case with no shift end, and "not an error"', `${sch247} || ${ut247}`);
+  assert(!n247.some((r) => /budget|staggered|in queue|drain|horizon/i.test(r.Note)), 'AA.46e 24x7 notes avoid internal jargon (budget, staggered, in queue, drain, horizon)');
 
   // Pins left open by review: exact scheduled per full day at adherence 0.8, sums, export rounding, drain part-day cap.
   const ld8 = runLong(0.8);

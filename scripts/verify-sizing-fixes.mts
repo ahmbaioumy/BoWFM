@@ -2077,8 +2077,14 @@ console.log('\n--- Suite D33: Phase 3 — coverage repair (redistribution before
     // uniform 9h shifts 'covered' a 14h window because agents with unused budget counted as present until close. Fixed
     // shifts cannot cover 14h from one start, so one seat moves to a late cohort and stops serving the morning peak:
     // coverage costs exactly one extra head here (22 vs 21).
-    searchWithCoverage.recommendedHC === (searchNoCoverage.recommendedHC ?? -1) + 1,
-    'D33.7 coverage costs exactly ONE extra head here (a 9h shift cannot cover a 14h window; one seat moves to a late cohort)',
+    // Updated 2026-10-08 (P2-9: non-24x7 runs without a start distribution now end each agent's shift
+    // dailyProductiveHours after open). Was 'coverage ON = coverage OFF + 1' (22 vs 21). With coverage OFF there is no
+    // late cohort any more, so every agent works ONE 9h shift from 08:00 and the 17:00-22:00 evening is unstaffed: the
+    // uniform-only answer rises 21 -> 28 and now EXCEEDS the coverage-ON answer (22, which keeps a late cohort that
+    // serves the evening). Pinned explicitly: ON = 22, OFF = 28, OFF >= ON.
+    searchWithCoverage.recommendedHC === 22 && searchNoCoverage.recommendedHC === 28 &&
+      (searchNoCoverage.recommendedHC ?? -1) >= (searchWithCoverage.recommendedHC ?? Infinity),
+    'D33.7 coverage ON = 22, coverage OFF = 28 (OFF >= ON: one shift from open leaves the evening unstaffed, a late cohort serves it)',
     `withCoverage=${searchWithCoverage.recommendedHC} withoutCoverage=${searchNoCoverage.recommendedHC}`
   );
 
@@ -3992,9 +3998,23 @@ console.log('\n--- Suite D52: roster polish, siloed per-queue parallel search --
       operationalHC: hc, intervals: iv52, openingWIP: [], categories: cats52, calendar: cal52, labor: labor52Off, sla: sla52,
       baseSeed: 42, replications: 4, queueArchitecture: 'siloed',
     });
+    // Updated 2026-10-08 (P2-9: non-24x7 runs without a start distribution now end each agent's shift
+    // dailyProductiveHours after open). The sweep used to pass no distribution and reach a passing HC at 20-30; with one
+    // 8h shift from 08:00 on this 08:00-20:00 day, cases arriving just before shift end wait until next morning and
+    // attainment plateaus at 95.2% with category B failing at every HC (see D52.3b). To keep this assertion's purpose --
+    // observe BOTH passing and failing headcounts -- the sweep now gives every HC a roster that can pass: the
+    // coverage-repair distribution (most agents at offset 0, one late starter per category at +240 min), built by
+    // buildCoverageRepairDistribution from the same per-category workload the search uses. Expected: fail at 4..16, pass at 20+.
+    const catWorkload52 = new Map<string, number>();
+    for (const iv of iv52) catWorkload52.set(iv.category, (catWorkload52.get(iv.category) || 0) + iv.volume * (cats52.find((c) => c.name === iv.category)?.ahtMinutes ?? 0));
+    const evalWithRoster52 = (hc: number) => (hcNs as any).evaluateCandidateStatistical({
+      operationalHC: hc, intervals: iv52, openingWIP: [], categories: cats52, calendar: cal52, labor: labor52Off, sla: sla52,
+      baseSeed: 42, replications: 4, queueArchitecture: 'siloed',
+      shiftDistribution: hcNs.buildCoverageRepairDistribution({ n: hc, calendar: cal52, labor: labor52Off, minAgentsPerInterval: 1, queueArchitecture: 'siloed', categoryWorkloadMinutes: catWorkload52 }) ?? undefined,
+    });
     let allAgree = true; let sawFail = false; let sawPass = false; let keysOk = true;
     for (const hc of [4, 8, 12, 16, 20, 30]) {
-      const r = evalAt(hc);
+      const r = evalWithRoster52(hc);
       const cp = r.categoryPasses as Record<string, boolean> | undefined;
       if (!cp) { allAgree = false; keysOk = false; break; }
       const allTrue = Object.values(cp).every(Boolean);
@@ -4004,6 +4024,24 @@ console.log('\n--- Suite D52: roster polish, siloed per-queue parallel search --
       if (allTrue) sawPass = true; else sawFail = true;
     }
     assert(allAgree && keysOk && sawFail && sawPass, 'D52.3 categoryPasses (keys = categories) all-true <=> passesCategorySLA, across passing and failing HCs', `agree=${allAgree} keys=${keysOk} fail=${sawFail} pass=${sawPass}`);
+
+    // D52.3b (added 2026-10-08, P2-9) -- records the single-shift fact. With NO distribution every agent works one 8h shift
+    // from 08:00 on a 12h day, so cases that arrive in the last 4h wait for the next morning: no headcount from 4 to 60
+    // passes, overall attainment plateaus at ~95.2% (95.1-95.4 CI) and category B keeps failing while A passes.
+    // Before the change the same sweep (agents stayed on to close) reached a passing HC at 20-30.
+    {
+      let anyPass = false; let bAlwaysFailsFrom30 = true; let aPassesFrom30 = true; let plateauOk = true;
+      for (let hc = 4; hc <= 60; hc += 4) {
+        const r = evalAt(hc);
+        if (r.passesAllConstraints || r.passesCategorySLA) anyPass = true;
+        if (hc >= 30) {
+          if (r.categoryPasses.B !== false) bAlwaysFailsFrom30 = false;
+          if (r.categoryPasses.A !== true) aPassesFrom30 = false;
+          if (Math.abs(r.primaryStats.achievedPctMean - 95.2) > 0.15) plateauOk = false;
+        }
+      }
+      assert(!anyPass && bAlwaysFailsFrom30 && aPassesFrom30 && plateauOk, 'D52.3b single shift, no distribution: no HC from 4 to 60 passes; attainment plateaus at ~95.2% (B fails, A passes from HC 30)', `anyPass=${anyPass} bFails=${bAlwaysFailsFrom30} aPasses=${aPassesFrom30} plateau=${plateauOk}`);
+    }
   }
 
   // D52.4 — the parallel k-search control (pure helper, fake evaluators).
@@ -4677,8 +4715,13 @@ console.log('\n--- Suite D62: G1 planning horizon from demand data only ---');
       fs += c.firstStartTime ? Math.round((c.firstStartTime.getTime() - H0.getTime()) / 1000) : 0;
       cs += c.completeTime ? Math.round((c.completeTime.getTime() - H0.getTime()) / 1000) : 0;
     }
-    assert(r.totalCases === 543 && r.completedCases === 543 && r.primaryAchievedPct === 100 && r.rawOccupancyPct === 72.4 && r.boAsaMeanMinutes === 0 && approx(r.totalHandlingMinutes, 16290, 0.01), 'D62.27 control: in-horizon backlog headline numbers identical to the pre-change engine', JSON.stringify({ t: r.totalCases, p: r.primaryAchievedPct, o: r.rawOccupancyPct, h: r.totalHandlingMinutes }));
-    assert(fs === 102067875 && cs === 103045275, 'D62.28 control: every case start/complete time identical to the pre-change engine (digest)', `fs=${fs} cs=${cs}`);
+    // Re-pinned 2026-10-08 (P2-9: non-24x7 runs without a start distribution now end each agent's shift dailyProductiveHours
+    // after open). This default 08:00-18:00 / 7.5 h calendar has no distribution, so each agent now leaves 450 min after open and
+    // cases arriving in the last 2.5 h wait for the next morning. Totals / completed / SLA 100% / occupancy 72.4% / handling 16290
+    // are unchanged (demand and planned capacity are the same); boAsaMeanMinutes moves 0 -> 25.3 (mean first-start wait is no
+    // longer zero) and the start/complete digests move 102067875 / 103045275 -> 110536781 / 114332981.
+    assert(r.totalCases === 543 && r.completedCases === 543 && r.primaryAchievedPct === 100 && r.rawOccupancyPct === 72.4 && approx(r.boAsaMeanMinutes, 25.3, 0.05) && approx(r.totalHandlingMinutes, 16290, 0.01), 'D62.27 control: in-horizon backlog headline numbers (totals/SLA/occupancy/handling unchanged; ASA mean 25.3 min under fixed shifts, was 0)', JSON.stringify({ t: r.totalCases, p: r.primaryAchievedPct, o: r.rawOccupancyPct, a: r.boAsaMeanMinutes, h: r.totalHandlingMinutes }));
+    assert(fs === 110536781 && cs === 114332981, 'D62.28 control: case start/complete time digest under fixed shifts (was 102067875 / 103045275 before P2-9)', `fs=${fs} cs=${cs}`);
     assert((r.overdueAtStartCount ?? 0) === 0 && r.caseResults.every((c) => !c.overdueAtStart), 'D62.29 control: in-horizon backlog is never flagged overdue at start');
   }
 
@@ -4937,7 +4980,8 @@ console.log('\n--- Suite D64: F2 24x7 park resumes when capacity exists ---');
     assert(pcts.every((p, i) => i === 0 || p >= pcts[i - 1] - 1e-9), 'D64.11 SLA % is non-decreasing in headcount for N = 14..17 (before the fix 14 -> 100%, 16 -> 98%)', `SLA% by N=14..17: ${pcts.map((p) => p.toFixed(1)).join(', ')}`);
   }
 
-  // (f) business-hours digest (Mon-Fri default calendar, uniform and staggered) identical before/after the fix
+  // (f) business-hours digest (Mon-Fri default calendar, uniform and staggered). The staggered digest (D64.12b) is identical before/after the
+  // D64 fix and before/after P2-9; the uniform one (D64.12a) moved on 2026-10-08 (see below).
   {
     const digest = (des: any): number => {
       let h = 2166136261;
@@ -4951,7 +4995,11 @@ console.log('\n--- Suite D64: F2 24x7 park resumes when capacity exists ---');
     for (let d = 0; d < 5; d++) for (const h of [8, 10, 12, 14]) { const s = new Date(2026, 9, 12 + d, h, 0); iv.push({ intervalIndex: iv.length, start: s, end: new Date(s.getTime() + 1800000), volume: 1, category: 'General' } as StandardInterval); }
     const mk = (offsets: number[] | null) => runBackofficeDES({ operationalHC: 3, intervals: iv, openingWIP: [], categories: catF2, calendar: DEFAULT_CALENDAR, labor: { ...DEFAULT_LABOR, adherencePct: 0.9 }, sla: slaF2, seed: 7, queueArchitecture: 'pooled', shiftDistribution: offsets ? stagF2(offsets) : undefined });
     const dU = digest(mk(null)), dS = digest(mk([0, 120, 240]));
-    assert(dU === 1141821764, 'D64.12a business-hours uniform run digest pinned (measured on the unchanged engine)', `digest=${dU}`);
+    // Re-pinned 2026-10-08 (P2-9: non-24x7 runs without a start distribution now end each agent's shift dailyProductiveHours
+    // after open). This uniform run (default 08:00-18:00 calendar, 7.5 h, adherence 0.9, no distribution) was 1141821764 on the
+    // pre-P2-9 engine, where agents stayed on to close; now each agent leaves 450 min after open (shift end is not shortened by
+    // adherence, decision 11), so cases arriving late wait for the next morning and the first-start / complete times move.
+    assert(dU === 3096667861, 'D64.12a business-hours uniform run digest pinned (fixed shifts, P2-9; was 1141821764 when agents stayed to close)', `digest=${dU}`);
     assert(dS === 147910604, 'D64.12b business-hours staggered 0/2/4 h run digest pinned (measured on the unchanged engine)', `digest=${dS}`);
   }
 
@@ -5071,11 +5119,16 @@ console.log('\n--- Suite D65: F3 statistics describe the adopted roster ---');
     const a: any = searchOptimalHC(baseOf(noImp));
     const aa: any = await searchOptimalHCAsync(baseOf(noImp));
     assert(a.rosterPolish?.status === 'no_improvement', 'D65.5a no_improvement scenario (placement ON, 95/2h) really is no_improvement', `status=${a.rosterPolish?.status}`);
-    assert(dg(a) === '733df309dc766f59' && dg(aa) === dg(a), 'D65.5b no_improvement: full result identical to today (pre) and sync = async', `sync ${dg(a)} async ${dg(aa)}`);
+    // Re-pinned 2026-10-08 (P2-9): digest 733df309dc766f59 -> 4f9350ef4421701d. The recommended HC is unchanged (12); only the
+    // `boundaryEvidence` block (the "one fewer agent" run, which used to have no shift end) and the new `fixedShifts` field on the
+    // result differ.
+    assert(dg(a) === '4f9350ef4421701d' && dg(aa) === dg(a), 'D65.5b no_improvement: full result pinned (P2-9: only boundaryEvidence + fixedShifts differ from the pre-change digest 733df309dc766f59) and sync = async', `sync ${dg(a)} async ${dg(aa)}`);
     const off: Scn = { intervals: iv1, categories: cat1, labor: laborOff65, sla: sla65, seed: 42, userMaxHC: 40 };
     const o: any = searchOptimalHC(baseOf(off));
     const oa: any = await searchOptimalHCAsync(baseOf(off));
-    assert(o.rosterPolish === undefined && dg(o) === '9038b551a950a83b' && dg(oa) === dg(o), 'D65.6 placement OFF: full result identical to today (pre) and sync = async', `sync ${dg(o)} async ${dg(oa)}`);
+    // Re-pinned 2026-10-08 (P2-9): digest 9038b551a950a83b -> dd646445fac9906d. The recommended HC is unchanged (9); only the
+    // `boundaryEvidence` block and the new `fixedShifts` field on the result differ.
+    assert(o.rosterPolish === undefined && dg(o) === 'dd646445fac9906d' && dg(oa) === dg(o), 'D65.6 placement OFF: full result pinned (P2-9: only boundaryEvidence + fixedShifts differ from the pre-change digest 9038b551a950a83b) and sync = async', `sync ${dg(o)} async ${dg(oa)}`);
   }
   // (i) placement stays opt-in
   assert(!DEFAULT_LABOR.shiftPlacementEnabled, 'D65.7 default labor config: shiftPlacementEnabled is OFF', `got ${String(DEFAULT_LABOR.shiftPlacementEnabled)}`);

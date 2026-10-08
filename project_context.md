@@ -75,7 +75,7 @@ npm run dev               # dev server on :3000
 | Command | What it does |
 |---|---|
 | `npm run dev` | Vite dev server with HMR |
-| `npm test` | Four suites (1,283 checks: 174 + 858 + 87 + 164 trusted-source) + artifact freshness |
+| `npm test` | Four suites (1,331 checks: 174 + 901 + 92 + 164 trusted-source) + artifact freshness |
 | `npm run lint` | `tsc --noEmit` typecheck |
 | `npm run build:standalone` | Produces `BoWFM.html` — **the actual deliverable** |
 | `npm run check:artifact` | Fails if `BoWFM.html` is missing or older than `src/` / build inputs |
@@ -171,8 +171,8 @@ Bo_4Final-main/
 ├── scripts/
 │   ├── build-standalone.mts      ← inlines everything into BoWFM.html
 │   ├── verify-fixes.mts          ← legacy regression suite (174 tests)
-│   ├── verify-sizing-fixes.mts   ← sizing-chain suite (858 tests)
-│   ├── verify-agent-analytics.mts ← export-timestamp + agent-analytics suite (87 tests)
+│   ├── verify-sizing-fixes.mts   ← sizing-chain suite (901 tests)
+│   ├── verify-agent-analytics.mts ← export-timestamp + agent-analytics suite (92 tests)
 │   ├── verify-trusted-source.mts ← ground-truth benchmark runner (164 checks; authored under TZ Asia/Dubai, warns but runs on any TZ)
 │   └── check-artifact-freshness.mts ← BoWFM.html mtime gate
 └── src/
@@ -332,8 +332,11 @@ single presence function the coverage sampler uses: an agent is present iff
 `dayOpen + startOffset <= t < dayOpen + startOffset + shiftLength` (`shiftLength =
 dailyProductiveHours x 60`, un-adhered; uniform = offset 0). Budget and busy state play no part;
 budget still caps work and dispatch is unchanged. A uniform shift shorter than the open day is
-therefore a structural coverage failure that only staggered starts fix. A `CoverageCheck` marker
-event fires at the uniform shift end so the sampler sees the drop. In the search, `planCoverageRepair`
+therefore a structural coverage failure that only staggered starts fix. Since P2-9 (2026-10-08) every
+non-24x7 run, with or without a start distribution, takes the fixed-shift path (real `ShiftEnd` events;
+a run without a distribution is one cohort at offset 0), so the sampler sees the drop at the shift end
+without help; the old `CoverageCheck` marker (`SYS_COVERAGE_END`, uniform shift end) is now scheduled only for
+24x7 without a distribution. In the search, `planCoverageRepair`
 (shared by `searchOptimalHC` and `searchOptimalHCAsync`) evaluates coverage repair FIRST when
 uniform is structurally unable to pass (non-24x7, floor on, shift < window) and reports a failing
 repair as that N's result without evaluating uniform; `coverageRepairReasons` records per-N repair
@@ -471,10 +474,30 @@ constraint, an in-progress case is handed back to the live queue immediately (no
 `nextOpen(now)` on every calendar since DES-8, i.e. immediately on 24×7) so a still-on-shift colleague
 picks it up the same day. D30/D31 suites (11 assertions) pin: mid-day cutoff genuinely
 enforced, a shift ending exactly at close is NOT cut off early, invariants hold, and a
-genuinely interrupted case is completed same-day by a different agent. **Scoped to non-24×7**
-— `is24x7` calendars still have zero staggering (`getValidSlapStarts` returns `[0]`) and are
-completely unaffected; real 24×7 multi-start (circular day grid, shifts wrapping midnight) is
-tracked as its own follow-up, not yet implemented.
+genuinely interrupted case is completed same-day by a different agent. (Originally scoped to
+non-24×7; real 24×7 multi-start with non-wrapping shifts was delivered later, see the PRD.)
+
+**2026-10-08 — every agent leaves at the end of their shift, with or without a start distribution
+(P2-9, PRD 1.21.0).** Until now a run with no `shiftDistribution` (coverage floor off, headcount
+too small to stagger, the "one fewer agent" evidence run) used the legacy single-`SYS_OPEN` path:
+no `ShiftEnd`, agents available until business close, only their daily productive time capped the
+work. `des-engine.ts`: `staggeredMode = (!!shiftDistribution || !calendar.is24x7) && operationalHC > 0`
+(the name is historical: it means fixed-shift mode); with no distribution `agentSlapStartMinutes` stays
+all zero, i.e. one cohort at offset 0, and `shiftDistribution?.[key]` is read optionally. 24x7
+without a distribution keeps the legacy path byte-for-byte (midnight spill-over logic). The result
+carries `DESResult.fixedShifts` (= the mode flag); `shiftDistributionUsed` still only echoes an input
+distribution. `verifyAgentTimelineInvariants` gates check #8 on `fixedShifts` and adds #9 (no busy or
+idle slice past the agent's own `open + offset + dailyProductiveHours x 60`). `agent-analytics.ts`
+reads `des.fixedShifts ?? !!des.shiftDistributionUsed`. No change to `hc-search.ts`; the audit run at
+a failing N and the N-1 evidence run now also have a shift end (the evidence run used to contradict
+the search). Measured (same seeds): coverage ON recommended HC unchanged everywhere (planner file
+`EGS_Only` 47, samples, D65 12 / 9); coverage OFF rises (planner file 46 -> 48, D33 fixture 21 -> 28,
+support pooled 23 -> 28, healthcare pooled 28 -> 31 / siloed 25 -> 27) and can exceed the coverage-ON
+figure (D33 28 vs 22); a short SLA can become unreachable with one shift (D52 fixture plateaus at
+95.2%). Pins re-derived in `verify-sizing-fixes.mts` (D33.7, D52.3 + new D52.3b, D62.27/.28,
+D64.12a, D65.5b/.6) and `verify-agent-analytics.mts` (AA.8/.22/.40/.44/.44b + AA.46 series). Saved
+results from earlier versions will not reproduce for coverage-off runs on a day longer than the
+productive hours.
 
 ### Stage 4 — Operational HC → Extra OFF Roster Uplift → Gross HC / FTE
 `hc-search.ts` `calculateStaffingRequirement` / `computeExtraOffPct`.
@@ -752,6 +775,9 @@ the day, not leaving early. Counting "budget remaining" as presence made every s
 `(1 - adherence) x shiftLength` minutes early, so coverage repair always failed and real-file
 recommendations inflated 30–40%. Presence is `dayOpen + startOffset <= t < dayOpen +
 startOffset + dailyProductiveHours*60`; adherence still reduces daily productive time.
+Since 2026-10-08 dispatch obeys the same window on every non-24x7 run, with or without a start
+distribution (`fixedShifts` on the result; suite D71); 24x7 runs without a distribution keep agents on
+around the clock.
 
 **Never reintroduce budget-as-presence.**
 
@@ -867,16 +893,16 @@ Keep full precision through the chain. Compare floats with a tolerance, never `=
 ### 9.1 Four suites plus the freshness gate, all must be green
 
 ```bash
-npm test              # four suites — 1,283 checks (174 + 858 + 87 + 164) + artifact freshness
+npm test              # four suites — 1,331 checks (174 + 901 + 92 + 164) + artifact freshness
 npm run test:sizing   # sizing-chain suite only (faster)
 ```
 
 | Suite | Tests | Covers |
 |---|---|---|
 | `scripts/verify-fixes.mts` | 174 | Legacy regression — CSV/date parsing, calendar arithmetic, CRN consistency, occupancy semantics, artifact integrity, analytical infeasibility diagnosis, 24x7 midnight budget accounting. **Treat as append-only.** |
-| `scripts/verify-sizing-fixes.mts` | 858 | Sizing chain — `D1` working-day counting, `D3` apportionment monotonicity, `D7` staffing-chain integrity, `D9` offline enforcement, `D20`-`D26` deadline-coverage shift placement (Stage 3a: valid-slap enumeration, no-regression, greedy monotonicity/optimality, I1/I2 invariants under staggering, seed determinism, positive control, I4 occupancy-ceiling regression guard), `D27` day-open telemetry off-by-one, `D28` fast-path/full-path attainment agreement, `D29` I5 per-agent stagger-offset compliance (check #8), `D30`/`D31` shift-end enforcement + in-flight case handover, `D32`/`D33` minimum-coverage floor + flag-independent redistribution repair, `D34` N_sla walk-down safety-net fix, `D35` adherence/capacity conflation closed-form pin, `D36` 24×7 coverage-gate regression fix, `D37` real 24×7 multi-start (staggering, shift-end, coverage repair), `D38` "exact minimum" wording pin (source-text based — the message is unreachable dead code), `D39` empirical monotonicity sweep for the uniform-only predicate (N=1..25, no violation found), `D40` extra-OFF coverage-ratio fix (ratio table sweep + integer-exactness cases — see §6.4a), `D41` non-blocking DQ warnings for zero off-days / override-vs-horizon scale / calendar-open days with no uploaded rows, `D47` Workload Floor toggle, `D48` clock-start derivation, `D49` pinned HC of `test_files/AJM_Only.csv`, `D50`/`D51`/`D52` roster polish at fixed HC (pooled / siloed guard / per-queue search), `D53` Results use run-time settings, `D54` number fields keep what is typed, `D55`-`D61` (G12) tests that protect the frozen sizing decisions: dispatch order + priority tie-break + parked-first, business-calendar `latestSafeStart`, CI gates (primary / per-category / occupancy / ASA use the bound, not the mean), CRN, unfinished-in-denominator, Gross HC + harmonic shrinkage, volume rounding — each shown red under its own mutation (see §11) |
+| `scripts/verify-sizing-fixes.mts` | 901 | Sizing chain — `D1` working-day counting, `D3` apportionment monotonicity, `D7` staffing-chain integrity, `D9` offline enforcement, `D20`-`D26` deadline-coverage shift placement (Stage 3a: valid-slap enumeration, no-regression, greedy monotonicity/optimality, I1/I2 invariants under staggering, seed determinism, positive control, I4 occupancy-ceiling regression guard), `D27` day-open telemetry off-by-one, `D28` fast-path/full-path attainment agreement, `D29` I5 per-agent stagger-offset compliance (check #8), `D30`/`D31` shift-end enforcement + in-flight case handover, `D32`/`D33` minimum-coverage floor + flag-independent redistribution repair, `D34` N_sla walk-down safety-net fix, `D35` adherence/capacity conflation closed-form pin, `D36` 24×7 coverage-gate regression fix, `D37` real 24×7 multi-start (staggering, shift-end, coverage repair), `D38` "exact minimum" wording pin (source-text based — the message is unreachable dead code), `D39` empirical monotonicity sweep for the uniform-only predicate (N=1..25, no violation found), `D40` extra-OFF coverage-ratio fix (ratio table sweep + integer-exactness cases — see §6.4a), `D41` non-blocking DQ warnings for zero off-days / override-vs-horizon scale / calendar-open days with no uploaded rows, `D47` Workload Floor toggle, `D48` clock-start derivation, `D49` pinned HC of `test_files/AJM_Only.csv`, `D50`/`D51`/`D52` roster polish at fixed HC (pooled / siloed guard / per-queue search), `D53` Results use run-time settings, `D54` number fields keep what is typed, `D55`-`D61` (G12) tests that protect the frozen sizing decisions: dispatch order + priority tie-break + parked-first, business-calendar `latestSafeStart`, CI gates (primary / per-category / occupancy / ASA use the bound, not the mean), CRN, unfinished-in-denominator, Gross HC + harmonic shrinkage, volume rounding — each shown red under its own mutation (see §11); `D71` (P2-9, 2026-10-08) fixed shifts on every non-24x7 run: a run with no distribution equals an explicit single cohort at offset 0, nobody works past their own shift end (adherence does not shorten it), 24x7-without-distribution / equal-length-day / explicit-distribution controls unchanged, determinism, monotone pass/fail sweep, CI-gate rejection, `fixedShifts` flag |
 | `scripts/audit-compare.mts` (`npm run test:audit`, opt-in, ~30 min) | 24 cells | All four `test_files/` samples × 6 settings, diffed against `docs/audit/sample-hc-after-2026-09-30.jsonl`; exits 1 on any difference |
-| `scripts/verify-agent-analytics.mts` | 87 | `EX` export timestamps == on-screen formatter (fixed UTC+4 TZ, midnight-crossing, real engine rows, static no-`toISOString` guard); `AA` agent analytics (reconciles to `completedCases`/`totalHandlingMinutes`/`agentFairness`, date/category/agent filters, determinism, late cohorts, scheduled-minute pins, run facts `staggered`/`drainDates`/`pooledCategoryFilter`, the three-section export and the Notes wording AA.40-AA.45); `AW` work share (split case 0.75/0.25, totals == finished, slice-date attribution, avg handle) + single-agent-cover insight fixtures |
+| `scripts/verify-agent-analytics.mts` | 92 | `EX` export timestamps == on-screen formatter (fixed UTC+4 TZ, midnight-crossing, real engine rows, static no-`toISOString` guard); `AA` agent analytics (reconciles to `completedCases`/`totalHandlingMinutes`/`agentFairness`, date/category/agent filters, determinism, late cohorts, scheduled-minute pins, run facts `staggered`/`drainDates`/`pooledCategoryFilter`, the three-section export and the Notes wording AA.40-AA.45, a 24x7 no-distribution fixture for the "around the clock" case AA.46-AA.46e); `AW` work share (split case 0.75/0.25, totals == finished, slice-date attribution, avg handle) + single-agent-cover insight fixtures |
 | `scripts/verify-trusted-source.mts` (`npm run test:trusted-source`) | 164 | Hand-derived ground truth in `trusted-source-validation.json` (see §9.2); **part of `npm test` since 2026-10-06**. Authored under `Asia/Dubai`; a different host timezone only prints a warning and the run continues (all 164 verified under UTC, America/New_York, Asia/Tokyo, Pacific/Auckland, Europe/London) |
 | `scripts/check-artifact-freshness.mts` | gate | Fails if `BoWFM.html` is missing or older than `src/` / build inputs (`npm run check:artifact`) |
 
@@ -977,6 +1003,7 @@ Work down the chain in order — the fault is almost always upstream of where it
 
 | Defect | Impact when broken |
 |---|---|
+| **A run with no start distribution had no shift end: agents stayed available until business close** (`des-engine.ts` `staggeredMode` + optional `shiftDistribution?.[key]`, `DESResult.fixedShifts`, invariant check #9; `ConfigFlow.tsx` + `agent-analytics.ts` / `AgentAnalyticsPanel.tsx` wording; suite D71; PRD P2-9, 1.21.0; 2026-10-08) | With minimum coverage off (or a headcount too small to stagger, or in the "one fewer agent" evidence run) agents took cases in the evening after their shift should have ended. Planner file (`EGS_Only`, 08:00-22:00, 9 h): coverage OFF recommended 46, honest answer 48; D33 fixture 21 vs 28; support pooled 23 vs 28; healthcare pooled 28 vs 31 / siloed 25 vs 27. The evidence run showed 46 agents passing at 83.3% while the search rejected 46 at 77.2% (now 76.7%, a fail). Coverage-ON recommendations are unchanged (47 on the planner file). 24x7 without a distribution deliberately keeps agents on around the clock (PRD L21). |
 | **Agent Analytics gave one generic explanation for every run; part-days, category filter and shift-placement mode were unlabelled** (`agent-analytics.ts` `staggered`/`drainDates`/`pooledCategoryFilter` + `buildAgentAnalyticsNotes` + `utilisationReadsLowByDesign`, `buildAgentAnalyticsExport(a, labor)` third "Notes" section, `AgentAnalyticsPanel.tsx`; AA.40-AA.45; PRD 1.20.4; 2026-10-07) | The CSV had no legend; the panel did not say whether the run used fixed shifts; without them Utilisation read ~50% with no amber explanation; a part-day after the data ends (e.g. 2026-11-01 on EGS_Only) showed one more day and fewer minutes unlabelled; a category filter on a shared pool gave per-category Busy/Occupancy next to all-time Idle and an Available smaller than the full shift, with no note. Now the panel pill ("Shifts: fixed length" / "Shifts: open until close": describes the run, not the Shift Placement switch, since minimum coverage applies an unconditional repair stagger), a mode-specific line (amber only when the run has no fixed shifts and the business day is longer than the productive hours), conditional part-day and category notes, and a Notes section in the export all come from one wording function. Display/export only: no number, column or section order changed; HC, search and engine untouched. Still open: a true shift end for runs without shift placement (PRD P2-9, needs approval). |
 | **Agent Analytics "Scheduled (min)" ran to business close for the earliest cohort** (`agent-analytics.ts` row loop + `Cell.busyAll`, `AgentAnalyticsPanel.tsx` help text; AA.32b/AA.33-AA.39; 1.20.3; 2026-10-07) | With shift placement on, only agents labelled "late" had their scheduled tail capped at their own shift. EGS_Only.csv (08:00-22:00, 9 productive hours): Agent-1..32 read 26,340 scheduled (31 x 840 + 300) instead of 17,040, so Utilisation showed ~50% instead of ~77%, and the late-vs-early insight line, team utilisation, utilisation CV and Jain figures were skewed. Now every agent is capped at `dailyProductiveHours` from their own start whenever `des.shiftDistributionUsed` is set (cap uses all-category busy + idle so a category filter cannot bring the tail back). Without shift placement Scheduled still runs to close (PRD L20). Display only: HC, search and Results occupancy unchanged. |
 | **Stale results after data edits: demand data / opening backlog now flagged** (G6 + H9; `run-inputs.ts` fingerprints, `App.tsx` capture at run start + memos, `ResultsFlow.tsx` banner, `Sidebar.tsx` "Outdated" marker; D70; 2026-10-07) | After a run, editing/deleting/importing backlog or changing a column mapping left old headcounts beside new data with no warning (browser-confirmed: Support 27 / 34 unchanged after a mapping change). Now the run keeps two content fingerprint strings (demand, backlog; names not ids) and the Results banner names "Data changed since this run (demand data, opening backlog)"; the sidebar shows "Outdated". Content comparison: change-and-revert clears it. Results are not cleared. No engine change, no numbers change. Open: SR-a exports carry no stale note. |
