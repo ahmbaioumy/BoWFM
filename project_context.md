@@ -1155,6 +1155,34 @@ server-side AI capability contradicting the offline contract.
 Full register with IDs in `docs/wfm/07-known-defects-and-decisions.md`; prioritised as forward
 requirements in `PRD.md` §11. Summary:
 
+**Pending after the 2026-10-07 / 10-08 work (1.20.3 → 1.22.0) — status as of 2026-10-08:**
+
+- **Not pushed.** `main` is 8 commits ahead of `origin/main` (engine shift end 1.21.0, search
+  rescue ladder 1.22.0, their checkpoints and review records). Left local by owner decision.
+- **Audit baseline not refreshed.** `npm run test:audit` exits 1: the 4 infeasible "WA" cells of
+  `docs/audit/sample-hc-after-2026-09-30.jsonl` differ in `slaPct` only (46 → 32.6, 45.4 → 30.2,
+  45.3 → 29.9, 45.4 → 29.8) since 1.21.0. The other 20 cells, including all Shift Placement ON
+  cells, are identical. Regenerate only with owner approval.
+- **P1-7 (PRD L24) — roster polish can leave a hairline SLA margin** that does not reproduce on
+  fresh arrivals (measured before 1.22.0: planner file, coverage OFF, 48 with the polished roster
+  passed 3 of 20 fresh seeds). Polish has no confirmation block; the rescue ladder does.
+- **P1-8 (PRD L25) — per-category gate is hairline on low-volume categories** (support sample,
+  coverage ON, N=27: 7 of 20 fresh seeds). Unchanged by 1.21.0 / 1.22.0.
+- **PRD L26 — the rescue ladder gives every queue the same late share in siloed runs.** It can
+  miss a rescue; it cannot accept a failing roster.
+- **PRD L21 / L22 — 24x7 without placed start times keeps agents on around the clock**, and a
+  00:00–24:00 day entered without the 24x7 option is one shift from 00:00.
+- **Run time with Shift Placement ON** rose (planner config +8%; up to about double when the
+  ladder finds nothing). Accepted; stated in the Labor & Config help.
+- **Small follow-ups (FINDINGS.md S-2 … S-4, E-6):** no cancel-mid-ladder test; code comments in
+  `hc-search.ts` still cite the removed "PRD P1-6 / L23" (resolvable via `docs/wfm/07`); the
+  "Phase 3: Roster Coverage Polish" progress message can sit unchanged for ~50 s; test D71.7c is
+  a constructed CI-gate case; the boundary rationale does not name the failing category.
+- **Agent Analytics:** utilisation under a category filter on a shared pool is "share of shift
+  spent on that category" (explained on screen, not changed — FINDINGS UI-2).
+- **Housekeeping, not product:** `.claude/settings.local.json` has uncommitted local changes (an
+  earlier version was committed by a checkpoint and is on GitHub); `mockups/` is untracked.
+
 - **P0** — the hardcoded invariants panel; sync/async search divergence; boundary evidence
   sourced from a single-seed run rather than the CI decision that actually rejected N−1;
   Stage 3a labor-model correction and mandatory coverage floor (PRD §11 P0-4) — **fully
