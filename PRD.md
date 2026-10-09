@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | **Status** | Draft — as-built specification |
-| **Version** | 1.22.0 |
-| **Date** | 2026-10-08 |
+| **Version** | 1.22.1 |
+| **Date** | 2026-10-09 |
 | **Owner** | _(unassigned)_ |
 | **Product** | Backoffice WFM Sizing Engine |
 | **Artifact** | `BoWFM.html` — single self-contained offline HTML file (~648 KB) |
@@ -652,6 +652,23 @@ and the Audit breach list.
   17:00-22:00 and finishes N cases started by others"). Display-only: engine and recommended HC
   are unchanged (measured on EGS_Only.csv: rec HC 51; Agent-51 finished 733 vs 338 but work
   share 334 vs 346, avg handle 35.0 min for all).
+  **1.22.1 (2026-10-09) — Utilisation % is hidden from this panel and its export; the calculation is
+  retained.** One constant, `SHOW_UTILISATION = false` in `src/utils/agent-analytics.ts`, gates every
+  user-visible trace: the table column (header, rows, team footer; 14 columns instead of 15), the amber
+  series, legend entry and "occupancy / utilisation" label in the occupancy chart (the chart is now
+  "Occupancy per agent", one blue bar with an occupancy-only label), the amber mode note, the
+  utilisation sentences in the help tooltip (a standalone "Scheduled = ..." definition stays), the
+  help line, the "Their utilisation is ..." sentence in the late-coverage insight, the "utilisation CV
+  ..., Jain's index ..." part of the fairness insight (it now ends at "cases CV ..."), and in
+  `wfm_agent_analytics.csv` the `Utilisation %` column and the "Utilisation % vs Occupancy %" note row
+  (the Category-filter note says "Occupancy therefore reads lower"). `Scheduled (min)`, its note,
+  and the export's three sections are unchanged. `buildAgentInsights`, `buildAgentAnalyticsNotes` and
+  `buildAgentAnalyticsExport` take an optional last argument `showUtilisation` (default
+  `SHOW_UTILISATION`); with `true` their output is as before 1.22.1. `utilisationPct`, `utilCv`,
+  `utilJain` and `utilisationReadsLowByDesign` are still computed. Reason: on fixed-shift runs
+  utilisation equals occupancy, so the column added nothing. The one case where they differ (a 24x7
+  run without a shift-start distribution, L20/L21) is no longer visible; see §10 L27 and §11 P2-10.
+  The description below is the retained (flag = true) behaviour.
   **Occupancy = busy / available; utilisation = busy / scheduled.** Scheduled is the agent's
   own shift: on every run whose business has opening and closing hours (since 1.21.0; before it,
   only runs that passed a start distribution) every agent, whichever cohort, is scheduled for
@@ -1388,6 +1405,7 @@ Behaviours a user must understand to interpret results correctly.
 | **L24** | **Roster polish can leave a hairline SLA margin that does not always reproduce on fresh arrivals** (1.22.0, found while reviewing P1-6). The Stage 3b polish adopts a re-spread roster as long as the CI gate passes on the search's own arrival sets, so the adopted roster can sit within a fraction of a point of the target. Measured: planner file, coverage OFF, Shift Placement ON, headcount 48 (the 1.21.0 answer with its polished roster) passes the unchanged gate on 3 of 6 fresh seeds. The ladder's confirmation block (Stage 3a) protects rescued rosters only; the polish does not use it. | The headcount is still the lowest one the search's gate accepted, but a re-run with another seed can differ by one agent on these hairline cases. Treat a polished roster's SLA margin as indicative. Backlog: §11 P1-7. |
 | **L25** | **The per-category gate on low-volume categories can be hairline with the coverage floor ON** (1.22.0, unchanged by this release). Support sample, coverage ON, headcount 27: the unchanged gate (including each category's own target) passes on only 7 of 20 fresh seeds. A category with few cases per replication has a wide confidence interval, so its verdict flips with the arrival seed. | The recommendation is reproducible for a given seed and settings, but one agent more or fewer is within the noise of a low-volume category. Backlog: §11 P1-8. |
 | **L26** | **The ladder applies one late share to every queue in a siloed run** (1.22.0). Each category gets the same share (25, 30, ... %) of its own seats starting late; a category with too few seats for a late starter stays at opening. A better split between queues (for example more late starters in the queue with the evening work) is not tried. | A siloed run can miss a rescue that a per-queue split would find and then keeps the higher headcount it had before 1.22.0; it can never accept a roster that fails the gate. |
+| **L27** | **Utilisation % is hidden in Agent Analytics and its export** (1.22.1, 2026-10-09). `SHOW_UTILISATION = false` in `src/utils/agent-analytics.ts` hides the column, chart series, mode note, definitions, insight wording and the export column and note row; the calculation is kept. | On fixed-shift runs it equalled occupancy, so nothing is lost. A 24x7 run without a shift-start distribution (L20/L21) is the one case where utilisation read lower than occupancy; that difference is no longer shown anywhere. Set the constant to `true` and rebuild to restore. |
 
 ---
 
@@ -1569,6 +1587,12 @@ by an unrelated metric; ASA censoring measured only to horizon end; and two inde
 **P2-8 — Restore Headline Hiring FTE (M4) UI when a clean FTE product story exists.**
 Engine still computes `fteNet` / `fteGross*`. UI hides M4 so Manual Override is only the
 Workload HC agent-hours denominator (Option B). Re-expose FTE only without dual-role confusion.
+
+**P2-10 — Decide the future of Utilisation % in Agent Analytics: redefine it, or remove it.** It is
+hidden behind `SHOW_UTILISATION` (1.22.1, L27) because it equals occupancy on fixed-shift runs. Either
+give it a distinct meaning (for example against a denominator that differs from occupancy's) or delete
+the retained code (`utilisationPct`, `utilCv`, `utilJain`, `utilisationReadsLowByDesign`, the gated
+panel and export branches, and the tests that cover them).
 
 ### Modelling fidelity gaps
 

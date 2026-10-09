@@ -175,7 +175,7 @@ console.log('\n--- Suite AA: agent analytics ---');
   assert(a.trend.length === a.dates.length && a.trend.every((p) => p.min <= p.avg + 1e-9 && p.avg <= p.max + 1e-9 && p.agents > 0), 'AA.23 daily trend: min <= avg <= max for every date');
 
   // Insights are computed, not canned.
-  const ins = buildAgentInsights(a);
+  const ins = buildAgentInsights(a, {}, true); // showUtilisation = true: keeps the retained utilisation wording covered (hidden by default, 2026-10-09)
   assert(ins.length >= 3 && ins.some((t) => t.includes('Most loaded')) && ins.some((t) => t.includes('Jain')), 'AA.24 insights include load extremes and fairness metrics');
   assert(buildAgentInsights(cf).join('|') !== ins.join('|'), 'AA.25 insights change with the filter (computed from the filtered data)');
   assert(buildAgentInsights(computeAgentAnalytics({ des, calendar: cal, labor: lab, filter: { agentIds: [], category: 'nope' } }))[0].startsWith('No agents'), 'AA.26 empty selection yields a plain "No agents" message');
@@ -251,7 +251,7 @@ console.log('\n--- Suite AA: agent analytics ---');
   const l9day = computeAgentAnalytics({ des: ld9, calendar: LBIZ, labor: mkLab(0.9), filter: { fromDate: '2026-10-07', toDate: '2026-10-07' } });
   assert(l9day.rows.every((r) => approx(r.scheduledMin, 540, 1e-6)), 'AA.36 adherence 0.9 staggered: scheduled is still 540 per full day', l9day.rows.map((r) => r.scheduledMin.toFixed(1)).join(' '));
   assert(l9.rows.some((r) => r.occupancyPct - r.utilisationPct > 0.5), 'AA.36b adherence 0.9 staggered: budget ends before the shift, so occupancy > utilisation for some agent (legitimate gap kept)', l9.rows.map((r) => `${r.occupancyPct.toFixed(1)}/${r.utilisationPct.toFixed(1)}`).join(' '));
-  const lateUtilTxt = buildAgentInsights(lf).find((t) => t.includes('late-coverage')) ?? '';
+  const lateUtilTxt = buildAgentInsights(lf, {}, true).find((t) => t.includes('late-coverage')) ?? '';
   const um = /Their utilisation is ([\d.]+)% vs ([\d.]+)%/.exec(lateUtilTxt);
   assert(!!um && Math.abs(Number(um[1]) - Number(um[2])) < 5, 'AA.37 insight: late vs earlier-start utilisation differ by < 5 points (adherence 1.0, full days)', lateUtilTxt);
   const gold = computeAgentAnalytics({ des: ld, calendar: LBIZ, labor: mkLab(1.0), filter: { category: 'Gold', ...FULL } });
@@ -282,10 +282,10 @@ console.log('\n--- Suite AA: agent analytics ---');
   assert(JSON.stringify(ex3.sections.slice(0, 2)) === JSON.stringify(buildAgentAnalyticsExport(la, mkLab(1.0)).sections.slice(0, 2)) && ex.sections.length === 3, 'AA.43b summary and matrix sections are deterministic and the uniform export also carries the notes section');
 
   const noteOf = (rows: Array<{ Item: string; Note: string }>, item: string) => rows.find((r) => r.Item === item)?.Note;
-  const nStag = buildAgentAnalyticsNotes(la, mkLab(1.0));
-  const nUni = buildAgentAnalyticsNotes(a, lab);
-  const nFilt = buildAgentAnalyticsNotes(lf, mkLab(1.0));
-  const nGold = buildAgentAnalyticsNotes(goldPooled, mkLab(1.0));
+  const nStag = buildAgentAnalyticsNotes(la, mkLab(1.0), true); // showUtilisation = true: retained utilisation notes stay covered
+  const nUni = buildAgentAnalyticsNotes(a, lab, true);
+  const nFilt = buildAgentAnalyticsNotes(lf, mkLab(1.0), true);
+  const nGold = buildAgentAnalyticsNotes(goldPooled, mkLab(1.0), true);
   // Updated 2026-10-08 (P2-9): the default uniform fixture is a fixed-shift run, so its Scheduled note now says fixed shift with the
   // 450-min figure (7.5 h) instead of 'business close'. The open-case wording ('around the clock', 'not an error') is pinned on the
   // 24x7 fixture below (AA.46-AA.46e).
@@ -293,7 +293,7 @@ console.log('\n--- Suite AA: agent analytics ---');
   assert(noteOf(nStag, 'Utilisation % vs Occupancy %') === noteOf(nUni, 'Utilisation % vs Occupancy %') && !(noteOf(nUni, 'Utilisation % vs Occupancy %') ?? '').includes('not an error') && (noteOf(nUni, 'Utilisation % vs Occupancy %') ?? '').startsWith('Normally the same number') && noteOf(nStag, 'On-Shift Days') !== undefined, 'AA.44b utilisation note is the same fixed-shift note for the uniform and shift-placement runs (no "not an error" caveat); On-Shift Days note present');
   const drainNote = noteOf(nStag, 'Part-day after the data ends');
   assert(!!drainNote && la.drainDates.every((d) => drainNote.includes(d)) && noteOf(nFilt, 'Part-day after the data ends') === undefined && (noteOf(nUni, 'Part-day after the data ends') !== undefined) === (a.drainDates.length > 0), 'AA.44c part-day note only when drainDates is non-empty, and it names the date(s)', drainNote ?? '');
-  assert(noteOf(nGold, 'Category filter') !== undefined && noteOf(nStag, 'Category filter') === undefined && noteOf(buildAgentAnalyticsNotes(cf, lab), 'Category filter') === undefined && !(noteOf(nGold, 'Category filter') ?? '').includes('whole time on shift'), 'AA.44d category note only when pooledCategoryFilter; does not claim Available is the whole time on shift');
+  assert(noteOf(nGold, 'Category filter') !== undefined && noteOf(nStag, 'Category filter') === undefined && noteOf(buildAgentAnalyticsNotes(cf, lab, true), 'Category filter') === undefined && !(noteOf(nGold, 'Category filter') ?? '').includes('whole time on shift'), 'AA.44d category note only when pooledCategoryFilter; does not claim Available is the whole time on shift');
   const fullByAgent = new Map(la.rows.map((r) => [r.agentId, r]));
   const goldRows = goldPooled.rows.filter((r) => fullByAgent.has(r.agentId));
   assert(goldRows.length > 0 && goldRows.every((r) => { const f = fullByAgent.get(r.agentId)!; return r.availableMin < f.availableMin - 1e-6 && Math.abs(r.idleMin - f.idleMin) < 1e-6; }), 'AA.44f category filter on a pooled run: availableMin strictly below unfiltered, idleMin equal (pins the Category filter note)', goldRows.map((r) => `${r.agentId}: ${r.availableMin.toFixed(1)} vs ${fullByAgent.get(r.agentId)!.availableMin.toFixed(1)}, idle ${r.idleMin.toFixed(1)} vs ${fullByAgent.get(r.agentId)!.idleMin.toFixed(1)}`).join(' | '));
@@ -310,7 +310,7 @@ console.log('\n--- Suite AA: agent analytics ---');
   for (let d = 0; d < 7; d++) for (let h = 0; h < 24; h++) { const st = new Date(2026, 9, 12 + d, h, 0); iv247.push({ intervalIndex: iv247.length, start: st, end: new Date(st.getTime() + 3600000), volume: 3, category: 'General' }); }
   const des247 = runBackofficeDES({ operationalHC: 4, intervals: iv247, openingWIP: [], categories: [{ ...cat[0], ahtMinutes: 30 }], calendar: CAL247, labor: LAB247, sla: SLA247, seed: 7, queueArchitecture: 'pooled' });
   const a247 = computeAgentAnalytics({ des: des247, calendar: CAL247, labor: LAB247 });
-  const n247 = buildAgentAnalyticsNotes(a247, LAB247);
+  const n247 = buildAgentAnalyticsNotes(a247, LAB247, true);
   assert(des247.fixedShifts === false && a247.staggered === false && !des247.shiftDistributionUsed, 'AA.46 24x7 run without a start distribution: no fixed shifts (fixedShifts false, staggered false)', `fixedShifts=${des247.fixedShifts} staggered=${a247.staggered}`);
   assert(utilisationReadsLowByDesign(a247, LAB247, CAL247) === true && utilisationReadsLowByDesign(a, lab, cal) === false && utilisationReadsLowByDesign(la, mkLab(1.0), LBIZ) === false, 'AA.46b utilisationReadsLowByDesign: true for the 24x7 no-distribution run, false for the fixed-shift runs');
   const full247 = computeAgentAnalytics({ des: des247, calendar: CAL247, labor: LAB247, filter: { fromDate: '2026-10-13', toDate: '2026-10-13' } });
@@ -319,6 +319,19 @@ console.log('\n--- Suite AA: agent analytics ---');
   const ut247 = noteOf(n247, 'Utilisation % vs Occupancy %') ?? '';
   assert(sch247.includes('around the clock') && !sch247.includes('each agent worked a fixed shift') && sch247.includes('only a round-the-clock business without placed start times has no shift end') && ut247.includes('around the clock') && ut247.includes('not an error') && !/shift placement (on|off)/i.test(sch247 + ut247), 'AA.46d 24x7 no-distribution notes: say agents stay on around the clock, it is the only case with no shift end, and "not an error"', `${sch247} || ${ut247}`);
   assert(!n247.some((r) => /budget|staggered|in queue|drain|horizon/i.test(r.Note)), 'AA.46e 24x7 notes avoid internal jargon (budget, staggered, in queue, drain, horizon)');
+
+  // ---- Utilisation hidden by default (SHOW_UTILISATION = false, 2026-10-09): default builder output must not mention it ----
+  const hiddenInsights = [...buildAgentInsights(sa), ...buildAgentInsights(lf), ...buildAgentInsights(a), ...buildAgentInsights(la)];
+  const hiddenNotes = [...buildAgentAnalyticsNotes(la, mkLab(1.0)), ...buildAgentAnalyticsNotes(goldPooled, mkLab(1.0)), ...buildAgentAnalyticsNotes(a, lab), ...buildAgentAnalyticsNotes(a247, LAB247)];
+  const hiddenEx = buildAgentAnalyticsExport(la, mkLab(1.0));
+  const hiddenEx247 = buildAgentAnalyticsExport(a247, LAB247);
+  assert(hiddenEx.sections[0].rows.length > 0 && hiddenEx.sections[0].rows.every((r) => !('Utilisation %' in r)) && hiddenEx247.sections[0].rows.every((r) => !('Utilisation %' in r)), 'AA.47a default export summary rows have no "Utilisation %" column (fixed-shift and 24x7 runs)');
+  assert(hiddenNotes.every((r) => !/utilis/i.test(r.Item) && !/utilis/i.test(r.Note)), 'AA.47b default notes: no row Item or Note text mentions utilisation', hiddenNotes.filter((r) => /utilis/i.test(r.Item + r.Note)).map((r) => r.Item).join(' | '));
+  assert(hiddenInsights.length > 0 && hiddenInsights.every((t) => !/utilis/i.test(t)) && hiddenInsights.some((t) => t.includes('late-coverage') && t.endsWith('.')) && hiddenInsights.some((t) => t.startsWith('Fairness') && t.includes('cases CV') && t.endsWith('.')), 'AA.47c default insights: no line mentions utilisation; late-coverage and fairness lines still present and end with a full stop', hiddenInsights.filter((t) => /utilis/i.test(t)).join(' | '));
+  assert(hiddenEx.sections.length === 3 && hiddenEx.sections[0].rows.every((r) => 'Scheduled (min)' in r) && hiddenNotes.some((r) => r.Item === 'Scheduled (min)'), 'AA.47d default export still has exactly 3 sections and keeps the Scheduled (min) column and note');
+
+  const shownEx = buildAgentAnalyticsExport(la, mkLab(1.0), true);
+  assert(shownEx.sections.length === 3 && shownEx.sections[0].rows.every((r, i) => r['Utilisation %'] === Math.round(la.rows[i].utilisationPct * 10) / 10) && shownEx.sections[2].rows.some((r) => r.Item === 'Utilisation % vs Occupancy %'), 'AA.47e showUtilisation = true restores the export column and the note row (retained code stays covered)');
 
   // Pins left open by review: exact scheduled per full day at adherence 0.8, sums, export rounding, drain part-day cap.
   const ld8 = runLong(0.8);
