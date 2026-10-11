@@ -1083,3 +1083,13 @@ Auditor: pass. Only the 45 approved assertions changed; D73 covers all four poli
 | S-4 | minor | "Phase 3: Roster Coverage Polish" message static ~50 s in the page; not touched by this change, not compared with the old page | Backlog |
 | S-5 | info | Existing weaknesses logged as PRD L24 / P1-7 (polish hairline margin) and L25 / P1-8 (thin-category gate) | Open, owner decision |
 | S-6 | info | `npm run test:audit` still differs in the 4 WA cells (from P2-9); PON cells identical; baseline not regenerated | Open, owner decision |
+
+---
+
+# 2026-10-11 — three small items inside the last 6% of the weekly limit
+
+- Step 1: the other session finished "Utilisation % hidden" change (PRD 1.22.1) verified and committed (`c80268b`): lint clean, `npm test` green, test counts corrected to 1,498.
+- Step 2 (J1 + part of J4, docs only, `a1596df`): `CLAUDE.md` decision 2 and the Code Conventions bullet now name `pickNextCase` / `compareByUrgency` as real dispatch; `project_context.md` §3.2 (git repository exists, local commits only), §6 heading (eleven decisions), §6.2 and the troubleshooting row. Left open: PRD §7 still lists ten decisions (the eleventh, min-coverage presence, is not in the PRD); `project_context.md:346` still says "ten frozen decisions"; rest of the J4 sweep; J2.
+- Step 3 (H3: UI-9, UI-10) on `fix/h3-results-truth`: search-history Primary SLA cell coloured by the confidence lower bound against the engine floor (`historyPrimaryPasses`, `src/utils/results-display.ts`) with a "CI low" line; the engine note `infeasibleAdjacentWarning` is shown under the headline SLA card ("Why this card is below target: …") and the card / category figure turn amber instead of red in that case. Suite D74 (6 checks). `npm test` 1,504 green (174 + 1,069 + 97 + 164). PRD v1.22.2.
+- Tester: PASS, no blocker or major. Samples 31/40, 27/34, 31/39 unchanged, zero console errors. Every history row of the three samples: colour agrees with the primary gate (green beside "Fail" only where another gate failed, e.g. a category at 79.5%). Helper cases correct incl. equality and fallback. Mutation (median always) → D74.1, D74.2, D74.4 fail. Scope: 7 allowed files, no engine file.
+- Open minors: H3-a the below-target note was not reproduced in the browser (no sample triggers it); its text and amber styling are checked by code-text test only. H3-b history layout with the extra line checked through the page structure, not by eye. H3-c amber is keyed on the presence of the warning only. Auditor and challenger not run (budget).
