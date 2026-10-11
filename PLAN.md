@@ -1658,3 +1658,44 @@ Order chosen (about 5 points left before the reset on 12 Oct):
    - Tests: pure helpers with checks in a new suite (next free number after D74); browser check by tester. Scope: `src/components/ResultsFlow.tsx`, `src/components/RunFlow.tsx`, one small helper under `src/utils/` (may extend `results-display.ts`), test file (append), `PRD.md`, `project_context.md`, `docs/wfm/07`, rebuilt `BoWFM.html`.
    - Acceptance: an agent with zero cases never shows a category it was not assigned; warning texts appear at 1 and at 10 replications and disappear at 30; samples 31/40, 27/34, 31/39; zero console errors; `npm test` green; `check:artifact` passes.
 3. **After the reset, in this order:** thin SLA margins (decision framed in step 1) → 24x7 minimum coverage (F1 + G8, owner design decision) → H4 → H10 / H8 → G7 numbers (the other session chose "explain, do not change" — confirm with owner before touching) → F4–F7, G9, G10 → J2, rest of J4, G13, F9, minor backlog, never-audited areas.
+
+---
+
+# BUILD PLAN — P1-7 / L24: roster polish confirmed on fresh simulated days
+
+Owner decision 2026-10-11: confirm EACH polish step. No usage cap ("until the limit is finished"); meter 95%. Every step is committed on `fix/p1-7-polish-confirm` so a stop loses nothing; merge only after review.
+
+**Task:** a polished roster (shift start times re-arranged after the headcount is chosen) may be adopted only if it also passes the unmodified gate on the confirmation block (fresh case sets), not only on the case sets the search already used.
+**End user:** the WFM planner. **Tier 3** (engine acceptance logic). Reviewers: `tester` + `auditor`; final `challenger` if the limit allows.
+**Skills:** `wfm-engine-testing` (fail-first), `wfm-sizing-simulation` (builder reads before touching the search).
+
+**Facts (investigator):** polish evaluates each candidate on `precomputedCaseSets` only — pooled binary search `createRosterKSearch` (`hc-search.ts:~1370`, called `~3112`, evaluation `~3098-3118`), siloed `createParallelRosterKSearch` (`~3104`, final combined re-evaluation `~1436-1486`); async copy `~3908-3939`. The confirmation block exists per search (`createConfirmationBlock` `~740`, built at `~2828` sync / `~3535` async, seed from `deriveConfirmationBaseSeed` `~731`) and is used only by the rescue ladder (`createRescueSearch` `~914`, stages via `resolveRescueEvaluation` `~880-905`). After F3, `adoptedPolishEvaluation` makes the statistics describe the adopted roster. Polish runs at fixed N: headcount cannot change.
+
+**Design:**
+1. A polish candidate counts as passing only if (a) it passes the gate on the primary case sets as today AND (b) it passes the same unmodified gate on the confirmation block (full R, the `confirm` stage inputs from `resolveRescueEvaluation`). The confirmation run is done only for candidates that pass (a) (cost control), and its result is cached per roster vector.
+2. Pooled: the binary search uses the combined verdict, so it settles on the largest move count whose roster passes both. Siloed: each per-queue search uses the combined verdict and the final combined vector must pass both; otherwise the existing fallback applies.
+3. If no polish step passes both, the unpolished roster is kept (it already passed the search; when it came from the rescue ladder it already passed confirmation).
+4. If the confirmation block does not exist for a run (builder states when), behaviour is unchanged for that run and this is documented.
+5. The statistics and history row keep describing the adopted roster on the PRIMARY sets (F3 behaviour unchanged); the confirmation result is not shown as the headline figure.
+6. Sync and async edited identically through shared helpers — no third copy of any logic. Deterministic: no new randomness beyond the existing derived confirmation seed. Common Random Numbers kept (frozen decision 9); CI gate strengthened, not weakened (decision 8). N_min floor, occupancy ceiling, presence rule untouched.
+
+**Steps (builder `sonnet-executor`, fail-first):**
+1. Tests first, shown red on today code — new suite (next free number after D75) in `scripts/verify-sizing-fixes.mts`: (a) unit level on the polish search helpers with injected evaluators: candidate passes primary but fails confirmation → not adopted, previous passing step (or unpolished) kept; passes both → adopted; confirmation evaluator is called only for candidates that pass primary; cached per vector; (b) a real small fixture where today polish adopts a roster that fails the confirmation gate (search for one with the existing D50 / D72 fixtures; if none can be found in reasonable time, say so and rely on (a) plus a constructed case clearly labelled as constructed); (c) recommended headcount identical before and after on the fixture(s); (d) sync and async give identical output; (e) same seed twice → identical output.
+2. Implement in `hc-search.ts` (both searches).
+3. `npm run lint`, `npm run build:standalone`, `npm test` once. Report for the three built-in samples: recommended / gross (must stay 31/40, 27/34, 31/39 unless the sample uses Shift Placement and a polish is now rejected — headcount still must not change), whether the adopted roster changed, and run time before vs after.
+4. Docs: `PRD.md` (remove L24 and P1-7, describe the rule in the search section, version bump), `project_context.md` (§5 search behaviour, §11 open items and recently fixed), `docs/wfm/07` entry; rebuild `BoWFM.html`; `npm run check:artifact`.
+
+**Scope lock:** `src/utils/hc-search.ts` (polish blocks and their helpers only), `scripts/verify-sizing-fixes.mts` (append; an existing expected value may change ONLY if it pins a polished roster that now fails confirmation — each such change justified line by line), `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`, rebuilt `BoWFM.html`. No UI file, no other engine file.
+
+**Acceptance:**
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | A polish that fails on fresh days is not adopted | New tests (a)/(b); tester own fixture: adopted roster passes the unmodified gate on at least 8 of 10 fresh seeds (the D72.7b standard) where the old build roster did not |
+| 2 | Headcount never changes because of this | Recommended and gross identical before / after on samples and fixtures |
+| 3 | Good polishes still adopted | A fixture where the polished roster passes both is still adopted (coverage improvement kept) |
+| 4 | Sync = async, deterministic | Deep-equal outputs; two runs same seed identical |
+| 5 | Run-time cost stated | Before / after timing on a Shift Placement run |
+| 6 | No regression | lint clean; `npm test` green; samples in the browser; zero console errors |
+| 7 | Mutation proof | Remove the confirmation condition in a scratch copy → new tests fail |
+| 8 | Docs and artifact | PRD / project_context / docs 07; `npm run check:artifact` passes |
+| 9 | Scope respected | Only scope-lock files changed |
