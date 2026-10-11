@@ -12,6 +12,7 @@ import {
   buildAgentAnalyticsNotes,
   buildAgentInsights,
   computeAgentAnalytics,
+  SHOW_UTILISATION,
   sortRowsByCases,
   utilisationReadsLowByDesign,
 } from '../utils/agent-analytics';
@@ -27,11 +28,15 @@ interface Props {
 const r1 = (n: number) => (Math.round(n * 10) / 10).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const shortDate = (d: string) => d.slice(5); // MM-DD
 
+const DEFINITIONS_UTILISATION =
+  'When agents work fixed shifts, occupancy and utilisation are the SAME number for any agent-day where the agent\'s daily productive hours are not used up before the shift ends; they differ only on days when they are (for example when adherence is below 100%). ' +
+  'When agents have no fixed shift end, utilisation is measured against their whole day and reads lower when the day is longer than the daily productive hours; this is expected, and occupancy is the figure to judge workload. ';
+
 const DEFINITIONS =
   'Available = busy + idle minutes while the agent is on shift and ready for work. Occupancy = busy / available. ' +
-  'Utilisation = busy / scheduled. Scheduled = the minutes the agent was on the plan to work. For a business with opening and closing hours (the normal case) that is the agent\'s own shift: the daily productive hours from their start time (e.g. 9 h = 540 min per full day). The exception is a round-the-clock (24x7) business with no placed start times: there agents stay on all day, so Scheduled counts their whole day. ' +
-  'When agents work fixed shifts, occupancy and utilisation are the SAME number for any agent-day where the agent\'s daily productive hours are not used up before the shift ends; they differ only on days when they are (for example when adherence is below 100%). ' +
-  'When agents have no fixed shift end, utilisation is measured against their whole day and reads lower when the day is longer than the daily productive hours; this is expected, and occupancy is the figure to judge workload. ' +
+  (SHOW_UTILISATION ? 'Utilisation = busy / scheduled. ' : '') +
+  'Scheduled = the minutes the agent was on the plan to work. For a business with opening and closing hours (the normal case) that is the agent\'s own shift: the daily productive hours from their start time (e.g. 9 h = 540 min per full day). The exception is a round-the-clock (24x7) business with no placed start times: there agents stay on all day, so Scheduled counts their whole day. ' +
+  (SHOW_UTILISATION ? DEFINITIONS_UTILISATION : '') +
   'The date range can include a part-day after the data ends, while leftover backlog is cleared; that day counts as a day on shift with only the minutes actually on shift. ' +
   'Work share = for each finished case, the agent\'s busy minutes on it / all agents\' busy minutes on it (a case split 30/10 min is 0.75/0.25); it sums to the number of finished cases. ' +
   'Finished = whole cases the agent closed (finisher credit; overstates agents who only resume cases others parked). Touched = cases the agent worked on, including split cases. ' +
@@ -94,16 +99,24 @@ function OccUtilChart({ a }: { a: AgentAnalytics }) {
   const padTop = 26;
   const plotW = W - labelW - 96;
   const H = padTop + rows.length * rowH + 20;
-  const maxV = Math.max(100, ...rows.map((r) => Math.max(r.occupancyPct, r.utilisationPct)));
+  const maxV = Math.max(100, ...rows.map((r) => (SHOW_UTILISATION ? Math.max(r.occupancyPct, r.utilisationPct) : r.occupancyPct)));
   const x = (v: number) => labelW + (v / maxV) * plotW;
   return (
     <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} style={{ minWidth: W, maxWidth: 'none' }} role="img" aria-labelledby={`${id}t ${id}d`}>
-      <title id={`${id}t`}>Occupancy and utilisation per agent</title>
-      <desc id={`${id}d`}>{`Two bars per agent. Team occupancy ${r1(a.team.occupancyPct)}%, team utilisation ${r1(a.team.utilisationPct)}%.`}</desc>
+      <title id={`${id}t`}>{SHOW_UTILISATION ? 'Occupancy and utilisation per agent' : 'Occupancy per agent'}</title>
+      <desc id={`${id}d`}>
+        {SHOW_UTILISATION
+          ? `Two bars per agent. Team occupancy ${r1(a.team.occupancyPct)}%, team utilisation ${r1(a.team.utilisationPct)}%.`
+          : `One bar per agent. Team occupancy ${r1(a.team.occupancyPct)}%.`}
+      </desc>
       <rect x={labelW} y={4} width={9} height={9} className="fill-blue-500" />
       <text x={labelW + 13} y={13} className="fill-slate-600 text-[11px]">Occupancy</text>
-      <rect x={labelW + 90} y={4} width={9} height={9} className="fill-amber-500" />
-      <text x={labelW + 103} y={13} className="fill-slate-600 text-[11px]">Utilisation</text>
+      {SHOW_UTILISATION && (
+        <>
+          <rect x={labelW + 90} y={4} width={9} height={9} className="fill-amber-500" />
+          <text x={labelW + 103} y={13} className="fill-slate-600 text-[11px]">Utilisation</text>
+        </>
+      )}
       {[0, 25, 50, 75, 100].filter((t) => t <= maxV).map((t) => (
         <g key={t}>
           <line x1={x(t)} x2={x(t)} y1={padTop - 2} y2={H - 6} className="stroke-slate-200" strokeWidth={1} />
@@ -118,11 +131,13 @@ function OccUtilChart({ a }: { a: AgentAnalytics }) {
             <rect x={labelW} y={y + 2} width={Math.max(0, x(r.occupancyPct) - labelW)} height={10} className="fill-blue-500">
               <title>{`${r.agentLabel} occupancy ${r1(r.occupancyPct)}%`}</title>
             </rect>
-            <rect x={labelW} y={y + 13} width={Math.max(0, x(r.utilisationPct) - labelW)} height={10} className="fill-amber-500">
-              <title>{`${r.agentLabel} utilisation ${r1(r.utilisationPct)}%`}</title>
-            </rect>
-            <text x={x(Math.max(r.occupancyPct, r.utilisationPct)) + 4} y={y + 17} className="fill-slate-700 text-[11px]">
-              {`${r1(r.occupancyPct)} / ${r1(r.utilisationPct)}`}
+            {SHOW_UTILISATION && (
+              <rect x={labelW} y={y + 13} width={Math.max(0, x(r.utilisationPct) - labelW)} height={10} className="fill-amber-500">
+                <title>{`${r.agentLabel} utilisation ${r1(r.utilisationPct)}%`}</title>
+              </rect>
+            )}
+            <text x={x(SHOW_UTILISATION ? Math.max(r.occupancyPct, r.utilisationPct) : r.occupancyPct) + 4} y={SHOW_UTILISATION ? y + 17 : y + 11} className="fill-slate-700 text-[11px]">
+              {SHOW_UTILISATION ? `${r1(r.occupancyPct)} / ${r1(r.utilisationPct)}` : `${r1(r.occupancyPct)}%`}
             </text>
           </g>
         );
@@ -287,12 +302,14 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
           <p className="text-xs text-slate-500 mt-1 flex items-start gap-1.5">
             <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-slate-400" />
             <span title={DEFINITIONS}>
-              Per-agent workload, occupancy and utilisation for the filtered range. Hover for full definitions.
+              {SHOW_UTILISATION ? 'Per-agent workload, occupancy and utilisation for the filtered range.' : 'Per-agent workload and occupancy for the filtered range.'} Hover for full definitions.
             </span>
           </p>
-          <p className={amberMode ? 'text-xs mt-1.5 px-2 py-1 rounded bg-amber-50 border border-amber-200 text-amber-800' : 'text-xs mt-1.5 text-slate-500'} data-testid="agent-analytics-mode-note">
-            {modeNote}
-          </p>
+          {SHOW_UTILISATION && (
+            <p className={amberMode ? 'text-xs mt-1.5 px-2 py-1 rounded bg-amber-50 border border-amber-200 text-amber-800' : 'text-xs mt-1.5 text-slate-500'} data-testid="agent-analytics-mode-note">
+              {modeNote}
+            </p>
+          )}
           {categoryNote !== '' && (
             <p className="text-xs mt-1.5 text-slate-500" data-testid="agent-analytics-category-note">{categoryNote}</p>
           )}
@@ -384,7 +401,7 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
               <th className={th} title="Busy + idle minutes while on shift and ready for work">Available (min)</th>
               <th className={th}>Idle (min)</th>
               <th className={th} title="Busy / available">Occupancy %</th>
-              <th className={th} title="Busy / scheduled time. Scheduled = the minutes the agent was on the plan to work: when agents work fixed shifts, the agent's own shift (daily productive hours from their start); when agents have no fixed shift end, their whole day (so it reads low when the day is longer than the daily productive hours; expected). With fixed shifts it differs from occupancy only on days when the daily productive hours are used up before the shift ends. Shifts are fixed whenever the business has opening and closing hours; only a round-the-clock business without placed start times has no shift end.">Utilisation %</th>
+              {SHOW_UTILISATION && <th className={th} title="Busy / scheduled time. Scheduled = the minutes the agent was on the plan to work: when agents work fixed shifts, the agent's own shift (daily productive hours from their start); when agents have no fixed shift end, their whole day (so it reads low when the day is longer than the daily productive hours; expected). With fixed shifts it differs from occupancy only on days when the daily productive hours are used up before the shift ends. Shifts are fixed whenever the business has opening and closing hours; only a round-the-clock business without placed start times has no shift end.">Utilisation %</th>}
               <th className={th} title="Busy minutes on finished-case work / work share">Avg handle (min)</th>
               <th className={th} title="Work share / days on shift">Cases/day</th>
               <th className={th} title="Busy slices that resumed a parked case">Resumes</th>
@@ -407,7 +424,7 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
                 <td className={td}>{r1(r.availableMin)}</td>
                 <td className={td}>{r1(r.idleMin)}</td>
                 <td className={td}>{r1(r.occupancyPct)}%</td>
-                <td className={td}>{r1(r.utilisationPct)}%</td>
+                {SHOW_UTILISATION && <td className={td}>{r1(r.utilisationPct)}%</td>}
                 <td className={td}>{num(r.avgHandleMin)}</td>
                 <td className={td}>{num(r.casesPerDay)}</td>
                 <td className={td}>{r.resumes}</td>
@@ -415,7 +432,7 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
               </tr>
             ))}
             {a.rows.length === 0 && (
-              <tr><td colSpan={15} className="py-6 text-center text-slate-400">No agents match the active filters.</td></tr>
+              <tr><td colSpan={SHOW_UTILISATION ? 15 : 14}className="py-6 text-center text-slate-400">No agents match the active filters.</td></tr>
             )}
           </tbody>
           {a.rows.length > 0 && (
@@ -429,7 +446,7 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
                 <td className={td}>{r1(a.team.availableMin)}</td>
                 <td className={td}>{r1(a.team.availableMin - a.team.busyMin)}</td>
                 <td className={td}>{r1(a.team.occupancyPct)}%</td>
-                <td className={td}>{r1(a.team.utilisationPct)}%</td>
+                {SHOW_UTILISATION && <td className={td}>{r1(a.team.utilisationPct)}%</td>}
                 <td className={td} colSpan={4}>avg {r1(a.team.casesMean)} cases (work share) / agent</td>
               </tr>
             </tfoot>
@@ -442,7 +459,10 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
         <ChartFrame title="Cases per agent (work share)" desc="Work share = each finished case split between agents by minutes worked. Sorted high to low; dashed line = team average.">
           <div className="max-h-[36rem] overflow-auto"><CasesBarChart a={a} /></div>
         </ChartFrame>
-        <ChartFrame title="Occupancy and utilisation per agent" desc="Blue = occupancy, amber = utilisation. Labels show occupancy / utilisation.">
+        <ChartFrame
+          title={SHOW_UTILISATION ? 'Occupancy and utilisation per agent' : 'Occupancy per agent'}
+          desc={SHOW_UTILISATION ? 'Blue = occupancy, amber = utilisation. Labels show occupancy / utilisation.' : 'Blue = occupancy.'}
+        >
           <div className="max-h-[36rem] overflow-auto"><OccUtilChart a={a} /></div>
         </ChartFrame>
         <ChartFrame title="Cases per agent per date" desc="Work share (cases). Darker = more; light grey = not on shift that day.">

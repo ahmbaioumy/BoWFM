@@ -75,7 +75,7 @@ npm run dev               # dev server on :3000
 | Command | What it does |
 |---|---|
 | `npm run dev` | Vite dev server with HMR |
-| `npm test` | Four suites (1,493 checks: 174 + 1,063 + 92 + 164 trusted-source) + artifact freshness |
+| `npm test` | Four suites (1,498 checks: 174 + 1,063 + 97 + 164 trusted-source) + artifact freshness |
 | `npm run lint` | `tsc --noEmit` typecheck |
 | `npm run build:standalone` | Produces `BoWFM.html` — **the actual deliverable** |
 | `npm run check:artifact` | Fails if `BoWFM.html` is missing or older than `src/` / build inputs |
@@ -933,7 +933,7 @@ Keep full precision through the chain. Compare floats with a tolerance, never `=
 ### 9.1 Four suites plus the freshness gate, all must be green
 
 ```bash
-npm test              # four suites — 1,493 checks (174 + 1,063 + 92 + 164) + artifact freshness
+npm test              # four suites — 1,498 checks (174 + 1,063 + 97 + 164) + artifact freshness
 npm run test:sizing   # sizing-chain suite only (faster)
 ```
 
@@ -1154,6 +1154,14 @@ server-side AI capability contradicting the offline contract.
 
 Full register with IDs in `docs/wfm/07-known-defects-and-decisions.md`; prioritised as forward
 requirements in `PRD.md` §11. Summary:
+
+**Utilisation % hidden (PRD 1.22.1, 2026-10-09; PRD L27 / P2-10).** `SHOW_UTILISATION = false` in
+`src/utils/agent-analytics.ts` hides it from `AgentAnalyticsPanel.tsx` (column, chart series, mode note,
+definitions, help line) and from the text builders `buildAgentInsights`, `buildAgentAnalyticsNotes`,
+`buildAgentAnalyticsExport` (optional last arg `showUtilisation`, default the constant). All
+calculation (`utilisationPct`, `utilCv`, `utilJain`, `utilisationReadsLowByDesign`) is kept. To restore:
+set the constant to `true`, `npm run build:standalone`. Suite AA.47a-d pin the hidden default;
+older utilisation checks pass `true` explicitly; AA.47e pins the restored export.
 
 **Pending after the 2026-10-07 / 10-08 work (1.20.3 → 1.22.0) — status as of 2026-10-08:**
 

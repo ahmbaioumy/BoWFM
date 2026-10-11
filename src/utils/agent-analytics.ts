@@ -58,6 +58,9 @@ import {
 } from './calendar';
 import { computeAgentFairnessMetrics } from './des-engine';
 
+/** Utilisation is hidden from the UI and exports (2026-10-09) — equals occupancy on fixed shifts. Flip to true to restore. */
+export const SHOW_UTILISATION: boolean = false;
+
 export interface AgentAnalyticsFilter {
   /** Inclusive 'YYYY-MM-DD'; null/undefined = from the first active date. */
   fromDate?: string | null;
@@ -587,7 +590,7 @@ const r1 = (n: number) => Math.round(n * 10) / 10;
 const signed = (n: number) => `${n >= 0 ? '+' : '-'}${Math.abs(r1(n))}%`;
 
 /** Plain-language insights, computed from the (already filtered) analytics. */
-export function buildAgentInsights(a: AgentAnalytics, opts: { bandPct?: number } = {}): string[] {
+export function buildAgentInsights(a: AgentAnalytics, opts: { bandPct?: number } = {}, showUtilisation: boolean = SHOW_UTILISATION): string[] {
   const band = opts.bandPct ?? 15;
   const out: string[] = [];
   const rows = a.rows;
@@ -639,8 +642,8 @@ export function buildAgentInsights(a: AgentAnalytics, opts: { bandPct?: number }
     const lateUtil = pct(late.reduce((s, r) => s + r.busyMin, 0), late.reduce((s, r) => s + r.scheduledMin, 0));
     const earlyUtil = pct(early.reduce((s, r) => s + r.busyMin, 0), early.reduce((s, r) => s + r.scheduledMin, 0));
     out.push(
-      `${late.length} late-coverage agent${late.length === 1 ? '' : 's'} (start ${starts}; ${r1(shareHc)}% of headcount) did ${r1(shareBusy)}% of the team's work in the last ${a.lateWindowMin} minutes of the business day. ` +
-        `Their utilisation is ${r1(lateUtil)}% vs ${r1(earlyUtil)}% for earlier-start agents.`
+      `${late.length} late-coverage agent${late.length === 1 ? '' : 's'} (start ${starts}; ${r1(shareHc)}% of headcount) did ${r1(shareBusy)}% of the team's work in the last ${a.lateWindowMin} minutes of the business day.` +
+        (showUtilisation ? ` Their utilisation is ${r1(lateUtil)}% vs ${r1(earlyUtil)}% for earlier-start agents.` : '')
     );
   } else if (rows.length > 1) {
     out.push('All selected agents start at the same time, so there is no late-coverage cohort to compare.');
@@ -650,7 +653,9 @@ export function buildAgentInsights(a: AgentAnalytics, opts: { bandPct?: number }
   if (rows.length > 1) {
     out.push(
       `Fairness over this range (on work share): cases max/min ${fm.casesMaxMinRatio === null ? 'n/a (an agent has 0)' : fm.casesMaxMinRatio.toFixed(2)}, ` +
-        `cases CV ${fm.casesCv.toFixed(3)}, utilisation CV ${fm.utilCv.toFixed(3)}, Jain's index ${fm.utilJain.toFixed(3)} (1 = perfectly even).`
+        (showUtilisation
+          ? `cases CV ${fm.casesCv.toFixed(3)}, utilisation CV ${fm.utilCv.toFixed(3)}, Jain's index ${fm.utilJain.toFixed(3)} (1 = perfectly even).`
+          : `cases CV ${fm.casesCv.toFixed(3)}.`)
     );
   }
   return out;
@@ -662,7 +667,7 @@ const hoursText = (h: number) => `${Math.round(h * 10) / 10}`;
  * Plain-language notes for the current run. Single source of wording for the panel and the export.
  * Rows that do not apply to the run (part-day after the data ends, category filter) are omitted.
  */
-export function buildAgentAnalyticsNotes(a: AgentAnalytics, labor: LaborConfig): Array<{ Item: string; Note: string }> {
+export function buildAgentAnalyticsNotes(a: AgentAnalytics, labor: LaborConfig, showUtilisation: boolean = SHOW_UTILISATION): Array<{ Item: string; Note: string }> {
   const hours = hoursText(labor.dailyProductiveHours);
   const mins = Math.round(labor.dailyProductiveHours * 60);
   const out: Array<{ Item: string; Note: string }> = [];
@@ -672,12 +677,14 @@ export function buildAgentAnalyticsNotes(a: AgentAnalytics, labor: LaborConfig):
       ? `The minutes the agent was on the plan to work. In this run each agent worked a fixed shift: the daily productive hours counted from their start time (${hours} h = ${mins} min per full day).`
       : `The minutes the agent was on the plan to work. In this run the business is open around the clock and agents had no fixed shift end, so agents stay on around the clock and this counts their whole day. Shifts are fixed whenever the business has opening and closing hours; only a round-the-clock business without placed start times has no shift end.`,
   });
-  out.push({
-    Item: 'Utilisation % vs Occupancy %',
-    Note: a.staggered
-      ? `Normally the same number. They differ only on days when an agent's daily productive hours are used up before their shift ends, which happens when adherence is below 100%.`
-      : `In this run the business is open around the clock and agents had no fixed shift end, so utilisation is measured against their whole day, so it reads low when the day is longer than the daily productive hours (${hours} h). This is expected, not an error. Use Occupancy to judge workload; do not size from this column.`,
-  });
+  if (showUtilisation) {
+    out.push({
+      Item: 'Utilisation % vs Occupancy %',
+      Note: a.staggered
+        ? `Normally the same number. They differ only on days when an agent's daily productive hours are used up before their shift ends, which happens when adherence is below 100%.`
+        : `In this run the business is open around the clock and agents had no fixed shift end, so utilisation is measured against their whole day, so it reads low when the day is longer than the daily productive hours (${hours} h). This is expected, not an error. Use Occupancy to judge workload; do not size from this column.`,
+    });
+  }
   out.push({
     Item: 'On-Shift Days',
     Note: `The number of dates on which the agent was on shift for any time in the range shown. The simulation puts every agent on shift every open day; rest days are added later in the headcount chain, not here.`,
@@ -691,7 +698,7 @@ export function buildAgentAnalyticsNotes(a: AgentAnalytics, labor: LaborConfig):
   if (a.pooledCategoryFilter) {
     out.push({
       Item: 'Category filter',
-      Note: `On a shared pool, Busy counts only the selected category's work. Idle is all of the agent's idle time, and Available is that Busy plus Idle, so it is smaller than the agent's full time on shift. Occupancy and Utilisation therefore read lower than the unfiltered figures, and per-category figures do not add up to them.`,
+      Note: `On a shared pool, Busy counts only the selected category's work. Idle is all of the agent's idle time, and Available is that Busy plus Idle, so it is smaller than the agent's full time on shift. ${showUtilisation ? 'Occupancy and Utilisation therefore read lower' : 'Occupancy therefore reads lower'} than the unfiltered figures, and per-category figures do not add up to them.`,
     });
   }
   return out;
@@ -709,7 +716,7 @@ export function utilisationReadsLowByDesign(a: AgentAnalytics, labor: LaborConfi
 }
 
 /** Export tables (rounded at the presentation boundary only). */
-export function buildAgentAnalyticsExport(a: AgentAnalytics, labor: LaborConfig): {
+export function buildAgentAnalyticsExport(a: AgentAnalytics, labor: LaborConfig, showUtilisation: boolean = SHOW_UTILISATION): {
   sections: Array<{ title: string; rows: Array<Record<string, unknown>> }>;
 } {
   const rd = (n: number | null) => (n === null ? '' : Math.round(n * 10) / 10);
@@ -730,7 +737,7 @@ export function buildAgentAnalyticsExport(a: AgentAnalytics, labor: LaborConfig)
     'Idle (min)': rd(r.idleMin),
     'Scheduled (min)': rd(r.scheduledMin),
     'Occupancy %': rd(r.occupancyPct),
-    'Utilisation %': rd(r.utilisationPct),
+    ...(showUtilisation ? { 'Utilisation %': rd(r.utilisationPct) } : {}),
     'Avg Handle (min per case of work share)': rd(r.avgHandleMin),
     'On-Shift Days': r.onShiftDays,
     'Cases per Day': rd(r.casesPerDay),
@@ -747,7 +754,7 @@ export function buildAgentAnalyticsExport(a: AgentAnalytics, labor: LaborConfig)
     sections: [
       { title: `Agent summary - ${scope}`, rows: summary },
       { title: 'Work share (cases) per agent per date (blank = not on shift)', rows: matrix },
-      { title: 'Notes - how to read this file', rows: buildAgentAnalyticsNotes(a, labor) },
+      { title: 'Notes - how to read this file', rows: buildAgentAnalyticsNotes(a, labor, showUtilisation) },
     ],
   };
 }
