@@ -1718,3 +1718,39 @@ Owner decision 2026-10-11: confirm EACH polish step. No usage cap ("until the li
 **Acceptance 1, revised:** the adopted roster is never worse than the unpolished roster on fresh days: tester measures both on 10 fresh seeds (pass count and SLA lower bound) — adopted >= unpolished; and on the old build shows a case where the adopted roster was worse.
 
 **Scope lock addition:** `src/types/wfm.ts` (one optional result field).
+
+---
+
+# OWNER DECISIONS 2026-10-11 and work order after the weekly reset
+
+Owner principles (saved to memory): BoWFM is a SIZING tool, not a roster tool — it returns the minimum staff that really achieves the KPIs; extra staff for schedule rules is added outside the tool. Occupancy / utilisation are per agent; per queue only for dedicated queues, never for a pooled queue.
+
+## Headcount-changing items — order approved ("no-answer cases first"); one item at a time, each with before/after headcounts on the three samples and the audit fixtures, owner approves each merge
+
+| # | Item | Decision | Plan (Tier 3 each: plan → challenger → builder fail-first → tester + auditor) | Proof |
+|---|---|---|---|---|
+| 1 | Spread layout (F1 + G8, HC-14, L28 / P1-9) | When the coverage-repair layout fails the SLA or the answer-time target, try spreading the same agents across the shift starts before declaring infeasible — on EVERY calendar. Minimum Coverage stays ON by default. | First re-reproduce on today code (P1-6 rescue ladder and P2-9 shift end shipped since the audit). Third layout = house-monotone split of the surplus across the cover starts; sync + async through one shared helper; fix the misleading "increase max HC" advice and the label (HC-18, P2-A3). Reverses documented design D33 (surplus at offset 0) — update docs/wfm/07. | 24x7, flat demand, 6 h SLA, coverage ON → an answer near the coverage-OFF headcount with coverage >= 1; support sample with 60-minute answer-time target → about 34 not 46; every sample / audit cell that changes listed |
+| 2 | Reliable minimum for thin categories (L25 / P1-8) | A headcount counts only if it also passes on fresh random draws. Expected +0 to +1 agent where a small category sits on the line. | Measure first (three samples, 20 fresh seeds at N, N+1) and show the owner. Reuse the confirmation block: a candidate N that passes the primary gate must pass the unmodified gate on the confirmation block. Decide with the challenger whether this applies to all gates or only per-category; closes P1-7-a too. Run-time measured. | Support sample: recommended N passes at least 8 of 10 fresh seeds (was 7 of 20); before/after headcounts for all samples |
+| 3 | Per-category answer-time targets (H4, L30 / P1-10) | Business requirement: DIFFERENT target per category → the sizing must obey them. | Wire `cat.boAsaTarget` into the gate (upper confidence bound per category vs its own target; a category without a value uses the global one). Reliability rule of item 2 applies. UI text states the rule. | A category with a tighter target raises headcount in a fixture; without per-category values results identical to today |
+| 4 | Drain period (G9, DES-10) | Run until the last deadline (working days), then judge each case; no case failed before its deadline. | `des-engine.ts` drain end = latest case deadline through `calendar.ts` (no hand-rolled dates); occupancy denominator unchanged (planned horizon — frozen decision 3). | 8 post-horizon holidays → same headcount as without (8, not 12); samples unchanged |
+| 5 | Backlog order (G10, DES-7) | Backlog queues by deadline with new cases; only a truly part-worked case (remaining < full handling time) keeps in-progress priority. | `compareByUrgency` / parked flag at injection; G1 overdue-at-start rule unchanged. | Probe: new-case SLA no longer depressed (was 93.3%); before/after headcounts |
+| 6 | Rounding ties (F4, HC-1 + HC-5) | Exact .5 always rounds UP; result independent of category order. | Tolerance (1e-9) on the single Gross `round` and the `N_min` ceiling; decision 7 otherwise unchanged. | 10 agents at 20% → 13 in any category order; 123.75 h case → `N_min` 2 |
+
+## Decided, no engine change
+- Gate rounding (F6): LEAVE AS IS (owner). Record in PRD as accepted.
+- Agent table with a category filter on a POOLED run (G7 / UI-2, L29): occupancy and available time show a dash with a short note; dedicated queues keep per-queue figures; team and per-agent figures unchanged. Display only, Tier 2.
+- CSV mid-cell quotes (IS3-a, P2-12): LEAVE AS IS.
+- Late-start rescue gap (L26): leave until measured.
+- Minimum Coverage default: stays ON.
+
+## Housekeeping approved
+- Regenerate the long audit-test baseline (tests only) — after item 1, so it is regenerated once.
+- Move `vite`, `@vitejs/plugin-react`, `@tailwindcss/vite` to devDependencies (G13); prove `BoWFM.html` is byte-identical or functionally identical after rebuild.
+- Push local `main` to GitHub — approved 2026-10-11.
+- Audit the never-audited areas (`docs/wfm/*`, sidebar and reset dialog, personal data in a sample file): report first, no fixes without owner OK.
+
+## Still to ask the owner
+- F7 (HC-3): fractional per-category value floored before the gross-up — supervisor re-reads the code before asking.
+
+## No decision needed (build between the items above)
+- Settings-import validation, error boundary, leave-page warning, Sensitivity matrix kept (P1-11); calendar guards (P1-12); "outdated" note on exports (P2-13); rest of the stale-text sweep; minor backlog.
