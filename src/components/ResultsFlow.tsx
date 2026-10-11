@@ -19,6 +19,7 @@ import {
   StandardInterval,
 } from '../types/wfm';
 import { exportToExcelCSV } from '../utils/csv-parser';
+import { idleAgentCategoryLabel } from '../utils/results-display';
 import { AgentAnalyticsPanel } from './AgentAnalyticsPanel';
 import { formatDateTime24, getCalendarWorkingDaysInHorizon, getDailyWindowLengthHours } from '../utils/calendar';
 import { resolveClockStartPolicy, verifyAgentTimelineInvariants } from '../utils/des-engine';
@@ -354,7 +355,9 @@ function ResultsFlowBody({
       }
 
       if (!agentCat) {
-        agentCat = siloed && categories.length > 0 ? categories[i % categories.length].name : 'Pooled';
+        agentCat = siloed
+          ? idleAgentCategoryLabel(des.agentFairness?.perAgent.find((r) => r.agentId === i)?.category)
+          : 'Pooled';
       }
 
       let maxBusyAnyDay = 0;

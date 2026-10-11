@@ -1093,3 +1093,33 @@ Auditor: pass. Only the 45 approved assertions changed; D73 covers all four poli
 - Step 3 (H3: UI-9, UI-10) on `fix/h3-results-truth`: search-history Primary SLA cell coloured by the confidence lower bound against the engine floor (`historyPrimaryPasses`, `src/utils/results-display.ts`) with a "CI low" line; the engine note `infeasibleAdjacentWarning` is shown under the headline SLA card ("Why this card is below target: …") and the card / category figure turn amber instead of red in that case. Suite D74 (6 checks). `npm test` 1,504 green (174 + 1,069 + 97 + 164). PRD v1.22.2.
 - Tester: PASS, no blocker or major. Samples 31/40, 27/34, 31/39 unchanged, zero console errors. Every history row of the three samples: colour agrees with the primary gate (green beside "Fail" only where another gate failed, e.g. a category at 79.5%). Helper cases correct incl. equality and fallback. Mutation (median always) → D74.1, D74.2, D74.4 fail. Scope: 7 allowed files, no engine file.
 - Open minors: H3-a the below-target note was not reproduced in the browser (no sample triggers it); its text and amber styling are checked by code-text test only. H3-b history layout with the extra line checked through the page structure, not by eye. H3-c amber is keyed on the presence of the warning only. Auditor and challenger not run (budget).
+
+---
+
+# H5 + H11 display fixes — verification, 2026-10-11
+
+- Build on `fix/h5-h11-display`: idle agent in a separated-queue run shows the engine-assigned category (`des.agentFairness.perAgent[].category`) or "No cases handled"; replication note on the Run screen at 1 and at 2–29. Suite D75 (10 checks). `npm test` 1,514 green (174 + 1,079 + 97 + 164). PRD v1.22.3.
+- Tester: PASS. Samples 31/40, 27/34, 31/39; zero console errors; notes appear at 10 and 1, gone at 30; run at 10 completes; helper cases correct; mutation → D75.1–3 fail; scope 8 allowed files, no engine file.
+- Open minors: H5-a idle-agent label not seen on screen (no idle agent produced in the browser); logic covered by helper checks only. Auditor and challenger not run (Tier 1, budget).
+
+# Decision framing — thin SLA margins (investigator, read-only, 2026-10-11)
+
+- Correction: the record says 7 of 20 fresh seeds PASS at N=27 on the support sample (13 fail), not 7 fail. L24 sample recorded inconsistently (3 of 6 in PRD, 3 of 20 in project_context).
+- P1-7 / L24: polish evaluates every step on the SAME case sets the search used (`hc-search.ts:3090-3130` sync, `:3908-3939` async); the confirmation block (`createConfirmationBlock` `:740`, built `:2828` / `:3535`, used by `createRescueSearch` `:914`) is never passed to it. Headcount unaffected (polish runs at fixed N).
+- P1-8 / L25: per-category gate uses the same CI rule on few cases → verdict flips with the seed; headcount can be 1 low or 1 high by chance.
+- L26: rescue ladder gives every queue the same late share; can only make headcount too HIGH; no measurement recorded.
+- OWNER DECISIONS 2026-10-11: P1-7 → **confirm each polish step** on the confirmation block. P1-8 → owner asked for the best option → supervisor recommendation adopted: **flag thin categories in Results now (display only); stricter fresh-days check later after measurement**. L26 → leave as is until measured.
+
+---
+
+# P1-7 / L24 roster polish confirmed on fresh days — verification, 2026-10-11
+
+- Plan failed its challenge (absolute rule would reject every polish when the headcount itself is marginal; per-queue verdicts; monotonicity; leakage into statistics) → RELATIVE rule: polish adopted only if not worse than the unpolished roster on the confirmation block.
+- Build on `fix/p1-7-polish-confirm`: helpers `polishNotWorseOnConfirmation`, `polishConfirmPasses`, `pooledPolishFallbackOrder`, `mergePolishConfirmation`, `summarizePolishConfirmation` shared by both searches; optional result field `polishConfirmation { baselinePasses, adoptedPasses, evaluations }`. Suite D76 (32 checks). `npm test` 1,546 green (174 + 1,111 + 97 + 164). PRD v1.23.0; L24 and P1-7 removed; new open item P1-7-a.
+- Tester: PASS. OLD vs NEW engine, three samples, Shift Placement OFF and ON: recommended / gross identical (31/40, 27/34, 31/39), adopted rosters identical, no measurable slowdown (2 extra evaluations). Sync = async; deterministic. Fresh days (10 seeds): adopted 10/10, unpolished 10/10 on claims and healthcare. Mutation (rule always true) → D76.1a, 1b, 1f, 1g, 1i fail. Browser: zero console errors. Scope: 7 allowed files.
+- Auditor: PASS, no blocker or major. Rule equals the plan; sync and async call the same helpers; pooled fallback deterministic; confirmation results separate from displayed statistics; headcount path untouched.
+- Open minors: P1-7-a headcount marginal when the unpolished roster itself fails on fresh days (not changed here). P1-7-b no REAL case found where the rule rejects a polish (builder and tester both looked) — reject branches proven on constructed cases only; real-fixture checks stay green under the mutation. P1-7-c cap detection (ASA / occupancy / coverage) in the baseline-fails branch matches message prefixes and fails OPEN if a message is reworded; `passesCoverage` boolean exists and should be used; pin the prefixes with a test. P1-7-d `adoptedPasses` falls back to the baseline verdict if the adopted vector has no confirmation evaluation (field not displayed). P1-7-e siloed fresh-day comparison not run. P1-7-f healthcare: adopted roster mean SLA on fresh days 86.2% vs unpolished 86.7% (both pass 10/10) — polish optimises coverage, not SLA. P1-7-g an accidental edit of the RESULTS line in the test file was restored by the supervisor (space after the colon).
+- Final challenger not run (limit).
+
+- P1-7-c CLOSED 2026-10-11 (`fix/p1-7c-cap-signal`): the polish rule reads explicit booleans (`passesCoverage`, `passesBoAsaCap`, `passesOccupancyCap`, set where the matching failure message is pushed) instead of message prefixes. Suite D77 (11 checks). One existing check edited with reason: D76.1i fed a bare reason string, which the new rule correctly ignores; it now passes the flag. Full `npm test` 1,556 green (174 + 1,121 + 97 + 164), lint clean, artifact fresh. No reviewer run (limit); supervisor ran the full suite. Remaining prefix reader: `hc-search.ts:~1030` coverage-only repair check (fails closed) — open item P1-7-h.
+- NEXT after the weekly reset (owner decisions already given): thin-category flag in Results (display only; threshold to be measured first), then 24x7 minimum coverage (F1 + G8, owner design decision), H4, H10 / H8, G7 numbers (confirm with owner), F4–F7, G9, G10, J2, rest of J4, G13, F9, minor backlog, never-audited areas.

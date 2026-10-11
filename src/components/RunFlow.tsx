@@ -17,6 +17,7 @@ import {
   SearchProgressState,
 } from '../types/wfm';
 import { getDailyWindowLengthHours } from '../utils/calendar';
+import { replicationsNote } from '../utils/results-display';
 import {
   CheckCircle2,
   XCircle,
@@ -328,6 +329,11 @@ export function RunFlow({
                 <span className="text-[11px] text-slate-400 block">
                   Runs 30+ seeds to compute {sla.confidenceLevelPct ?? 95}% Confidence Interval for Primary SLA.
                 </span>
+                {replicationsNote(simParams.replications) && (
+                  <span className="text-[11px] text-amber-700 block font-medium">
+                    {replicationsNote(simParams.replications)}
+                  </span>
+                )}
               </div>
 
               {/* Max Headcount Search Ceiling (userMaxHC) */}
