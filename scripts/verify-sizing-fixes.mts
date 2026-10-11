@@ -6737,6 +6737,19 @@ console.log('\n--- Suite D73: P1-6 replacement fixtures for the roster-polish pa
   console.log(`  (D73 elapsed ${((Date.now() - t0) / 1000).toFixed(1)}s)`);
 }
 
+// ─── SUITE D74: Results screen tells the truth (UI-9 / UI-10, display only) ───
+{
+  console.log('\n=== SUITE D74: history colour follows the CI gate; engine explanation is shown ===');
+  const { historyPrimaryPasses: hpp, representativeTone: rt } = await import('../src/utils/results-display');
+  assert(hpp({ primaryPct: 96.0, primaryCiLow: 94.1 }, 95, 95) === false, 'D74.1 median above target but CI low below floor -> fail colour', '');
+  assert(hpp({ primaryPct: 92, primaryCiLow: 90.5 }, 90, 95) === true, 'D74.2 median below policy target but CI low >= slack floor -> pass colour', '');
+  assert(hpp({ primaryPct: 96 }, 95, 95) === true && hpp({ primaryPct: 94 }, 95, 95) === false, 'D74.3 missing primaryCiLow falls back to median >= policy target', '');
+  assert(hpp({ primaryPct: 90, primaryCiLow: 95 }, 95, 95) === true, 'D74.4 boundary: CI low equal to floor passes (same >= as engine passesPrimaryCI)', '');
+  assert(rt(94, 95, true) === 'amber' && rt(94, 95, false) === 'bad' && rt(95, 95, true) === 'ok', 'D74.5 representative tone: amber only when below target with an engine explanation', '');
+  const rf74 = readFileSync(join(resolve(import.meta.dirname, '..'), 'src', 'components', 'ResultsFlow.tsx'), 'utf-8');
+  assert(rf74.includes('infeasibleAdjacentWarning') && rf74.includes('historyPrimaryPasses'), 'D74.6 ResultsFlow renders infeasibleAdjacentWarning and uses historyPrimaryPasses', '');
+}
+
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');

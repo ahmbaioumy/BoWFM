@@ -24,6 +24,7 @@ import { formatDateTime24, getCalendarWorkingDaysInHorizon, getDailyWindowLength
 import { resolveClockStartPolicy, verifyAgentTimelineInvariants } from '../utils/des-engine';
 import { buildBreachExportRows, buildCaseExportRows, buildSliceExportRows } from '../utils/export-rows';
 import { clampConfidenceLevelPct, effectivePrimaryTarget } from '../utils/hc-search';
+import { historyPrimaryPasses, representativeTone } from '../utils/results-display';
 import {
   Users,
   CheckCircle2,
@@ -237,6 +238,7 @@ function ResultsFlowBody({
   const primaryStats = searchOutput.primaryStatistical;
   const siloed = searchOutput.queueArchitecture === 'siloed';
   const primarySizingFloor = effectivePrimaryTarget(sla.primaryPct, sla);
+  const headlineTone = representativeTone(des.primaryAchievedPct, primarySizingFloor, !!searchOutput.infeasibleAdjacentWarning);
   const slackOn = sla.slaAcceptanceSlackEnabled === true;
   const primaryTargetLabel = slackOn
     ? `sizing floor ${primarySizingFloor}% (policy ${sla.primaryPct}%)`
@@ -812,13 +814,23 @@ function ResultsFlowBody({
                                 <td className="py-1.5 px-3">
                                   <span
                                     className={
-                                      item.primaryPct >= sla.primaryPct
+                                      historyPrimaryPasses(item, primarySizingFloor, sla.primaryPct)
                                         ? 'text-emerald-700 font-semibold'
                                         : 'text-rose-600'
+                                    }
+                                    title={
+                                      Number.isFinite(item.primaryCiLow)
+                                        ? `Colour follows the 95% CI lower bound (${item.primaryCiLow}%) against the sizing floor (${primarySizingFloor}%), not the median.`
+                                        : undefined
                                     }
                                   >
                                     {item.primaryPct}%
                                   </span>
+                                  {Number.isFinite(item.primaryCiLow) && (
+                                    <span className="block text-[10px] font-normal text-slate-400">
+                                      CI low {item.primaryCiLow}%
+                                    </span>
+                                  )}
                                 </td>
                                 <td className="py-1.5 px-3 text-slate-600">
                                   {item.occupancyPct}%
@@ -1009,11 +1021,16 @@ function ResultsFlowBody({
               <div className="mt-2 w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
                 <div
                   className={`h-full ${
-                    des.primaryAchievedPct >= primarySizingFloor ? 'bg-emerald-500' : 'bg-rose-500'
+                    headlineTone === 'ok' ? 'bg-emerald-500' : headlineTone === 'amber' ? 'bg-amber-500' : 'bg-rose-500'
                   }`}
                   style={{ width: `${Math.min(100, des.primaryAchievedPct)}%` }}
                 />
               </div>
+              {searchOutput.infeasibleAdjacentWarning && (
+                <p className="mt-2 text-[10px] leading-snug text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5" data-testid="infeasible-adjacent-note">
+                  Why this card is below target: {searchOutput.infeasibleAdjacentWarning}
+                </p>
+              )}
               {(des.overdueAtStartCount ?? 0) > 0 && (
                 <p className="mt-2 text-[10px] leading-snug text-amber-700" data-testid="overdue-at-start-note">
                   {des.overdueAtStartCount} opening-backlog {des.overdueAtStartCount === 1 ? 'case was' : 'cases were'} already overdue when the plan starts. They are worked first and counted as workload, but are not part of the SLA % above.
@@ -1150,7 +1167,11 @@ function ResultsFlowBody({
                         <td className="py-2.5 px-3 text-right font-sans">
                           <span
                             className={`font-mono font-bold ${
-                              primaryPassed ? 'text-emerald-600' : 'text-rose-600'
+                              primaryPassed
+                                ? 'text-emerald-600'
+                                : representativeTone(achievedPrimary, targetPrimary, !!searchOutput.infeasibleAdjacentWarning) === 'amber'
+                                  ? 'text-amber-600'
+                                  : 'text-rose-600'
                             }`}
                           >
                             {achievedPrimary}%
