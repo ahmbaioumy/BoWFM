@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft — as-built specification |
-| **Version** | 1.22.3 |
+| **Version** | 1.23.0 |
 | **Date** | 2026-10-11 |
 | **Owner** | _(unassigned)_ |
 | **Product** | Backoffice WFM Sizing Engine |
@@ -880,6 +880,25 @@ remains reported as `shiftPlacement.placementFeasibleFloor` for diagnostics only
 to seed or gate the search. This is the property the feature actually
 guarantees: enabling it never makes the recommendation worse.
 
+**Roster polish is checked on fresh days against the unpolished roster (1.23.0, 2026-10-11; P1-7, closes L24).**
+Stage 3b (Shift Placement ON) re-spreads start times at the fixed headcount. A polish step that passes the
+gate on the search's own arrival sets is now also evaluated (full replications, unmodified gate) on the
+confirmation block (fresh arrival sets) and counts only if it is **not worse than the unpolished roster
+there**. The unpolished roster is evaluated on that block once per search (the baseline), when the first
+polish step passes the primary gate. If the baseline passes the confirmation gate, the candidate must pass
+it too. If the baseline fails it, the candidate's overall SLA confidence lower bound must be at least the
+baseline's (1e-9) and no category that passes for the baseline may fail for the candidate; a BO ASA,
+occupancy or coverage limit the baseline satisfies must stay satisfied. Pooled: after the binary search the
+chosen step must satisfy the rule, else the largest already-evaluated passing step that does, else no
+polish. Siloed: the confirmation verdicts are merged per queue with the primary ones, so one failing queue
+loses only its own polish; the combined vector is confirmed by the same rule and the existing fallback
+applies. Confirmation results live in their own map (never in the displayed statistics, history row or
+headline figures, which keep describing the adopted roster on the primary sets). Cost: one baseline plus
+one run per distinct primary-passing vector (2 extra full-replication runs on the test fixtures, about
+0.1–0.2 s). The recommended headcount does not change. Result field `polishConfirmation`
+(`baselinePasses`, `adoptedPasses`, `evaluations`) is filled by both searches; no screen shows it yet.
+(`polishNotWorseOnConfirmation`, `mergePolishConfirmation`, `hc-search.ts`; suite D76.)
+
 **Rescue ladder: more start-time rosters are tried before a headcount is rejected (1.22.0,
 2026-10-08; P1-6, closes L23).** Until 1.21.0 a headcount N that failed with everyone starting at
 opening got at most the coverage-repair roster (when the floor is on) and the one roster the analytic
@@ -1324,7 +1343,7 @@ comment. Nothing else.
 
 ## 9. Validation and quality
 
-### 9.1 Automated test suites — 1,514 checks (174 + 1,079 + 97 + 164 trusted-source)
+### 9.1 Automated test suites — 1,546 checks (174 + 1,111 + 97 + 164 trusted-source)
 
 | Suite | Tests | Covers |
 |---|---|---|
@@ -1405,7 +1424,6 @@ Behaviours a user must understand to interpret results correctly.
 | **L20** | **Agent Analytics "Scheduled (min)" runs to the end of each day for a 24×7 run without placed start times** (1.20.3; narrowed in 1.21.0). Every run whose business has opening and closing hours now has a shift end, so Scheduled is the agent's own shift there. Only a 24×7 run with no start distribution keeps agents on around the clock, so Scheduled runs to the end of each day and Utilisation reads low when the day is longer than the productive hours (e.g. 33% against 41-45% occupancy on a full day of the 4-agent, 8-productive-hour fixture AA.46). The panel and the export state this (amber note, Notes section); the number itself is unchanged. A part-day after the data ends keeps the minutes actually on shift (it is labelled, not scaled to a full shift). | Display only; sizing, recommended HC and Results occupancy are unaffected. Place start times (Shift Placement or minimum coverage) to get per-shift utilisation; read occupancy (busy / available) when the pill says "Shifts: around the clock". |
 | **L21** | **24×7 runs without placed start times keep agents on around the clock** (1.21.0, P2-9 left this case on the old model by decision). The simulator has no shift end there: an agent is limited only by the daily productive time and the midnight spill-over rules. With minimum coverage on, the coverage-repair stagger usually places starts, so this mostly affects 24×7 runs with the floor off or a headcount too small to stagger. | Recommended headcount for those runs can be lower than a real roster would need. Turn minimum coverage on or enable Shift Placement to get fixed shifts on a 24×7 calendar. |
 | **L22** | **A business entered as 00:00–24:00 without the 24×7 option gets one shift from 00:00** (1.21.0). It counts as having opening hours, so every agent works one shift of the daily productive hours from 00:00 and the rest of the day is unstaffed unless minimum coverage or Shift Placement gives some agents later starts. Tick the 24×7 option for a round-the-clock business. | The Capacity Basis note on the Labor page says so. Headcount for such a business can be higher than for the same business entered as 24×7. |
-| **L24** | **Roster polish can leave a hairline SLA margin that does not always reproduce on fresh arrivals** (1.22.0, found while reviewing P1-6). The Stage 3b polish adopts a re-spread roster as long as the CI gate passes on the search's own arrival sets, so the adopted roster can sit within a fraction of a point of the target. Measured: planner file, coverage OFF, Shift Placement ON, headcount 48 (the 1.21.0 answer with its polished roster) passes the unchanged gate on 3 of 6 fresh seeds. The ladder's confirmation block (Stage 3a) protects rescued rosters only; the polish does not use it. | The headcount is still the lowest one the search's gate accepted, but a re-run with another seed can differ by one agent on these hairline cases. Treat a polished roster's SLA margin as indicative. Backlog: §11 P1-7. |
 | **L25** | **The per-category gate on low-volume categories can be hairline with the coverage floor ON** (1.22.0, unchanged by this release). Support sample, coverage ON, headcount 27: the unchanged gate (including each category's own target) passes on only 7 of 20 fresh seeds. A category with few cases per replication has a wide confidence interval, so its verdict flips with the arrival seed. | The recommendation is reproducible for a given seed and settings, but one agent more or fewer is within the noise of a low-volume category. Backlog: §11 P1-8. |
 | **L26** | **The ladder applies one late share to every queue in a siloed run** (1.22.0). Each category gets the same share (25, 30, ... %) of its own seats starting late; a category with too few seats for a late starter stays at opening. A better split between queues (for example more late starters in the queue with the evening work) is not tried. | A siloed run can miss a rescue that a per-queue split would find and then keeps the higher headcount it had before 1.22.0; it can never accept a roster that fails the gate. |
 | **L27** | **Utilisation % is hidden in Agent Analytics and its export** (1.22.1, 2026-10-09). `SHOW_UTILISATION = false` in `src/utils/agent-analytics.ts` hides the column, chart series, mode note, definitions, insight wording and the export column and note row; the calculation is kept. | On fixed-shift runs it equalled occupancy, so nothing is lost. A 24x7 run without a shift-start distribution (L20/L21) is the one case where utilisation read lower than occupancy; that difference is no longer shown anywhere. Set the constant to `true` and rebuild to restore. |
@@ -1538,15 +1556,7 @@ removed dependency. It is unreferenced and does not reach the artifact, but it a
 server-side AI capability that directly contradicts the offline contract. *Rationale: a
 compliance reviewer reading the manifest would reasonably conclude the product calls out.*
 
-**P1-7 — Give the roster polish the same two-block confirmation the rescue ladder has.** The Stage 3b
-polish adopts a re-spread roster once the CI gate passes on the search's own arrival sets, so the
-adopted roster can sit on a hairline margin that does not reproduce on fresh arrivals (§10 L24: planner
-file, coverage OFF, headcount 48 with its polished roster passes 3 of 6 fresh seeds). Candidate
-approach: require a polished step to pass the unchanged gate on the confirmation block too (the
-block already exists per search), keeping the previous step when it does not. This changes which
-roster is shown, not the headcount; needs approval because it touches the polish in `hc-search.ts` (sync
-and async together). *Rationale: a planner who re-runs with another seed should not see a roster whose
-SLA margin was a coin flip.*
+**P1-7-a — When the unpolished roster itself fails on fresh days, the headcount is marginal.** The 1.23.0 polish check (§4 search) guarantees a polish is never worse than the unpolished roster on fresh arrival sets, but it does not change the headcount. `polishConfirmation.baselinePasses === false` marks runs where even the unpolished roster misses the unchanged gate on the confirmation block (same family as P1-8); nothing in the UI shows it yet. *Rationale: the planner should be told when a recommendation is a hairline call.*
 
 **P1-8 — Decide how a low-volume category's own target should be gated.** The per-category gate uses the
 same CI rule as the overall gate, but a category with few cases per replication has a wide interval, so

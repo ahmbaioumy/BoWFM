@@ -680,6 +680,13 @@ export interface HCSearchOutput {
   };
   /** Stage 3b roster polish. Present only when shift placement is ON and a HC was recommended. */
   rosterPolish?: RosterPolishResult;
+  /**
+   * P1-7: the polish was checked on the confirmation block (fresh case sets) against the unpolished roster.
+   * `baselinePasses` = the unpolished roster passes the unmodified gate there (false = headcount marginal on fresh days, open item P1-7-a);
+   * `adoptedPasses` = the roster kept (adopted polish, or the unpolished one) passes it; `evaluations` = extra full-R runs spent.
+   * Present only when a polish candidate passed the primary gate. Not shown in the UI.
+   */
+  polishConfirmation?: { baselinePasses: boolean; adoptedPasses: boolean; evaluations: number };
 }
 
 export interface SensitivityScenario {

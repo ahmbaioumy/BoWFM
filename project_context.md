@@ -75,7 +75,7 @@ npm run dev               # dev server on :3000
 | Command | What it does |
 |---|---|
 | `npm run dev` | Vite dev server with HMR |
-| `npm test` | Four suites (1,514 checks: 174 + 1,079 + 97 + 164 trusted-source) + artifact freshness |
+| `npm test` | Four suites (1,546 checks: 174 + 1,111 + 97 + 164 trusted-source) + artifact freshness |
 | `npm run lint` | `tsc --noEmit` typecheck |
 | `npm run build:standalone` | Produces `BoWFM.html` — **the actual deliverable** |
 | `npm run check:artifact` | Fails if `BoWFM.html` is missing or older than `src/` / build inputs |
@@ -536,7 +536,7 @@ assertions: ladder unit checks, stage rules, acceptance machine incl. a real scr
 case, confirmation block, measured rescues, never-worse sweep, OFF controls, determinism, sync = async,
 monotonicity) and D73 (polish paths re-hosted on scan-found fixtures); 45 pins in D50/D51/D52/D65
 re-pinned with dated notes. Saved Shift-Placement-ON results from earlier versions may not reproduce.
-Open follow-ups: PRD L24/L25/L26, P1-7, P1-8.
+Open follow-ups: PRD L25/L26, P1-8, P1-7-a.
 
 ### Stage 4 — Operational HC → Extra OFF Roster Uplift → Gross HC / FTE
 `hc-search.ts` `calculateStaffingRequirement` / `computeExtraOffPct`.
@@ -725,6 +725,13 @@ effect while being unsustainable in a repeating period.
 > Off only lowers HC when `N_min > N_occ` (agent-hours override). Tests: `D47.*`.
 
 ### 6.4b Roster polish never moves HC (Stage 3b, 2026-09-30)
+*P1-7 / L24 (1.23.0, 2026-10-11):* a polish step that passes the primary gate is also evaluated (full R, unmodified gate) on the
+confirmation block and counts only if NOT WORSE than the unpolished roster there (baseline evaluated once, lazily, at the first primary
+pass): baseline passes -> candidate must pass; baseline fails -> overall SLA CI lower bound >= baseline (1e-9), no baseline-passing category
+fails, no baseline-satisfied cap broken. Pooled: after the binary search, chosen k must satisfy it else largest evaluated passing k that
+does, else 0 (`pooledPolishFallbackOrder`). Siloed: confirmation verdicts AND-merged per queue (`mergePolishConfirmation`). Rule =
+`polishNotWorseOnConfirmation`; both searches call the same helpers; results in their own map, never in displayed statistics; result field
+`polishConfirmation`. Tests: D76.
 *Looks like:* placement ON should spread shifts across the day.
 *Actually:* the spread is applied **after** `recommendedHC` is final, and only as far as every CI
 gate still passes at that same N (binary search over a one-agent-at-a-time path toward the
@@ -933,7 +940,7 @@ Keep full precision through the chain. Compare floats with a tolerance, never `=
 ### 9.1 Four suites plus the freshness gate, all must be green
 
 ```bash
-npm test              # four suites — 1,514 checks (174 + 1,079 + 97 + 164) + artifact freshness
+npm test              # four suites — 1,546 checks (174 + 1,111 + 97 + 164) + artifact freshness
 npm run test:sizing   # sizing-chain suite only (faster)
 ```
 
@@ -1043,6 +1050,7 @@ Work down the chain in order — the fault is almost always upstream of where it
 
 | Defect | Impact when broken |
 |---|---|
+| **Roster polish could be adopted on arrival sets it had already seen and be worse on fresh days** (`hc-search.ts` polish blocks; D76; PRD L24, P1-7; 1.23.0, 2026-10-11) | A polished roster passed the gate only on the search's own sets (planner file, coverage OFF, 48 with polish passed 3 of 6 fresh seeds). Now every primary-passing polish step is also evaluated on the confirmation block and kept only if not worse than the unpolished roster there. Headcount and gross HC unchanged on all fixtures; adopted rosters unchanged where they pass; cost 2 extra full-R runs (~0.1-0.2 s) on the fixtures |
 | **Results screen contradicted the engine: history Primary SLA coloured by median vs policy target (not the CI-lower-vs-floor gate), and `infeasibleAdjacentWarning` was never rendered while the representative run showed red under a Verified banner** (`ResultsFlow.tsx`, `utils/results-display.ts`; PRD 1.22.2; suite D74) | Display only: a valid recommendation looked failed (or a failed row looked green). No HC or number changed. |
 | **Idle siloed agents were labelled with a guessed category (`index % categories`); no warning for a low replication count** (`ResultsFlow.tsx`, `RunFlow.tsx`, `utils/results-display.ts`; PRD 1.22.3; suite D75) | Display only: label now the engine-assigned category or "No cases handled"; amber note under 30 replications. No HC changed. |
 | **With Shift Placement ON a headcount was rejected after only one alternative roster, so the search could recommend more agents than needed** (`hc-search.ts` `buildRescueLadder` / `rescueScreenInputs` / `resolveRescueEvaluation` / `createRescueSearch` / `createConfirmationBlock` / `deriveConfirmationBaseSeed` + one identical loop each in `evaluateN` and `evaluateAsync`; `ConfigFlow.tsx` Shift Placement help sentence; suites D72 + D73, 45 pins in D50/D51/D52/D65 re-pinned; PRD P1-6 / L23, 1.22.0; 2026-10-08) | Planner file (`EGS_Only`, 08:00-22:00, 9 h) with coverage OFF recommended 48 although 46 at opening + 1 five hours later passes the gate at 47 (the analytic roster put nobody at opening and scored 78.2%); D33 fixture coverage ON 22 vs 21; suite fixtures 9 vs 7, 17 vs 14, 19 vs 18, 29 vs 18, 12 vs 9. Now a fixed ladder of simple rosters is tried before rejecting N and one is accepted only if it passes the unchanged full-R gate on two disjoint replication blocks (the unconfirmed version accepted a support-sample 27 that held on 7 of 21 fresh seeds). Planner's own configuration stays 47 (identical result, +8% runs); support coverage OFF stays 28; Shift Placement OFF digest-identical everywhere. Saved Shift-Placement-ON results from earlier versions may not reproduce. Open: roster polish hairline margin (PRD L24, P1-7), per-category gate on thin categories (L25, P1-8), one late share for all siloed queues (L26). Audit: see the `test:audit` note in §9. |
@@ -1173,9 +1181,9 @@ older utilisation checks pass `true` explicitly; AA.47e pins the restored export
   `docs/audit/sample-hc-after-2026-09-30.jsonl` differ in `slaPct` only (46 → 32.6, 45.4 → 30.2,
   45.3 → 29.9, 45.4 → 29.8) since 1.21.0. The other 20 cells, including all Shift Placement ON
   cells, are identical. Regenerate only with owner approval.
-- **P1-7 (PRD L24) — roster polish can leave a hairline SLA margin** that does not reproduce on
-  fresh arrivals (measured before 1.22.0: planner file, coverage OFF, 48 with the polished roster
-  passed 3 of 20 fresh seeds). Polish has no confirmation block; the rescue ladder does.
+- **P1-7-a — unpolished roster itself fails on fresh days = marginal headcount.** The 1.23.0 polish check keeps a polish no worse than the
+  unpolished roster on the confirmation block, but never changes HC; `polishConfirmation.baselinePasses === false` marks the hairline runs
+  (same family as P1-8). No UI shows it yet.
 - **P1-8 (PRD L25) — per-category gate is hairline on low-volume categories** (support sample,
   coverage ON, N=27: 7 of 20 fresh seeds). Unchanged by 1.21.0 / 1.22.0.
 - **PRD L26 — the rescue ladder gives every queue the same late share in siloed runs.** It can

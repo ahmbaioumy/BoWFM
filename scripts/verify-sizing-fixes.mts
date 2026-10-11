@@ -6769,8 +6769,113 @@ console.log('\n--- Suite D73: P1-6 replacement fixtures for the roster-polish pa
   assert(runf75.includes('replicationsNote('), 'D75.10 RunFlow shows the replication note', '');
 }
 
+// ─── SUITE D76: P1-7 / L24 roster polish must not be worse than the unpolished roster on fresh simulated days ───
+{
+  console.log('\n=== SUITE D76: polish confirmation (relative rule on the confirmation block) ===');
+  const h = hcNs as any;
+  const mkEv = (o: { orgOk?: boolean; cats?: Record<string, boolean>; lo?: number; reasons?: string[] }): any => ({
+    passesOrgGates: o.orgOk ?? true, categoryPasses: o.cats ?? { A: true }, failingReasons: o.reasons ?? [], primaryStats: { ci95Low: o.lo ?? 90 },
+  });
+  const rule = h.polishNotWorseOnConfirmation as (b: any, c: any) => boolean;
+  assert(typeof rule === 'function' && typeof h.mergePolishConfirmation === 'function' && typeof h.pooledPolishFallbackOrder === 'function', 'D76.0 polish confirmation API exported', '');
+  // The rule, one case per branch (injected evaluations).
+  assert(rule(mkEv({}), mkEv({ orgOk: false })) === false, 'D76.1a baseline passes + candidate fails org gates -> rejected', '');
+  assert(rule(mkEv({}), mkEv({ cats: { A: false } })) === false, 'D76.1b baseline passes + a category fails for the candidate -> rejected', '');
+  assert(rule(mkEv({}), mkEv({ lo: 80 })) === true, 'D76.1c baseline passes + candidate passes (lower bound irrelevant once both pass) -> adopted', '');
+  const badBase = mkEv({ orgOk: false, lo: 80, cats: { A: true, B: false }, reasons: ['Primary SLA 90% CI [x] lower bound < 90%'] });
+  assert(rule(badBase, mkEv({ orgOk: false, lo: 81, cats: { A: true, B: false } })) === true, 'D76.1d baseline fails + candidate lower bound better -> adopted', '');
+  assert(rule(badBase, mkEv({ orgOk: false, lo: 80 - 5e-10, cats: { A: true, B: false } })) === true, 'D76.1e baseline fails + equal within 1e-9 -> adopted', '');
+  assert(rule(badBase, mkEv({ orgOk: false, lo: 79, cats: { A: true, B: false } })) === false, 'D76.1f baseline fails + candidate lower bound worse -> rejected', '');
+  assert(rule(badBase, mkEv({ orgOk: false, lo: 85, cats: { A: false, B: false } })) === false, 'D76.1g baseline fails + a category that passed for the baseline fails for the candidate -> rejected', '');
+  assert(rule(badBase, mkEv({ orgOk: false, lo: 85, cats: { A: true, B: true } })) === true, 'D76.1h baseline fails + a failing category improves -> adopted', '');
+  assert(rule(badBase, mkEv({ orgOk: false, lo: 85, cats: { A: true, B: false }, reasons: ['Occupancy 90% CI [1%, 2%] upper bound > cap 80%'] })) === false, 'D76.1i a cap the baseline satisfied (occupancy) becomes violated -> rejected', '');
+  assert(rule(mkEv({ orgOk: false, lo: 80, reasons: ['BO ASA 90% CI x'] }), mkEv({ orgOk: false, lo: 81, reasons: ['BO ASA 90% CI x'] })) === true, 'D76.1j a cap violated by both stays neutral -> adopted on lower bound', '');
+  // Siloed merge: two queues, only B fails confirmation -> only B is charged.
+  const prim: any = { passes: true, passesOrgGates: true, categoryPasses: { A: true, B: true }, reasons: [], slaPct: 95 };
+  const base2 = mkEv({ cats: { A: true, B: true } });
+  const m1 = h.mergePolishConfirmation(prim, base2, mkEv({ cats: { A: true, B: false } }));
+  assert(m1.categoryPasses.A === true && m1.categoryPasses.B === false && m1.passesOrgGates === true && m1.passes === false, 'D76.2a only the queue that fails confirmation loses its verdict (A keeps, B charged)', JSON.stringify(m1));
+  const m2 = h.mergePolishConfirmation(prim, base2, mkEv({ orgOk: false }));
+  assert(m2.passesOrgGates === false && m2.passes === false, 'D76.2b org-gate confirmation failure is an org failure', JSON.stringify(m2));
+  const m3 = h.mergePolishConfirmation(prim, base2, mkEv({ cats: { A: true, B: true } }));
+  assert(m3.passes === true && JSON.stringify(m3.categoryPasses) === JSON.stringify(prim.categoryPasses), 'D76.2c both pass confirmation -> primary verdict unchanged', JSON.stringify(m3));
+  // Drive the real parallel search with merged verdicts: B fails confirmation at its full target, A is unaffected.
+  {
+    const totals = { A: 4, B: 4 };
+    const ps = h.createParallelRosterKSearch(totals);
+    const evalV = (v: Record<string, number>) => {
+      const primary: any = { passes: true, passesOrgGates: true, categoryPasses: { A: true, B: true }, reasons: [], slaPct: 95 };
+      return h.mergePolishConfirmation(primary, base2, mkEv({ cats: { A: true, B: v.B <= 2 } }));
+    };
+    for (let v = ps.next(); v !== null; v = ps.next()) ps.record(v, evalV(v));
+    const res = ps.result();
+    assert(res.bestVector.A === 4 && res.bestVector.B === 2, 'D76.2d two queues, only B fails confirmation above 2 -> A keeps all 4 moves, B stops at 2', JSON.stringify(res.bestVector));
+  }
+  // Pooled non-monotone: primary passes at 8, 4, 2; confirmation rejects 8 and 4 -> falls back to 2 (not 0, not 4).
+  {
+    const ks = h.createRosterKSearch(8);
+    for (let k = ks.next(); k !== null; k = ks.next()) ks.record(k, { passes: k <= 6, reasons: [], slaPct: 90 });
+    const sr = ks.result();
+    const order: number[] = h.pooledPolishFallbackOrder(sr);
+    assert(sr.bestK === 6 && JSON.stringify(order) === JSON.stringify([6, 4]), 'D76.3a pooled fallback order: chosen k first, then the smaller already-evaluated primary-passing k (failed k=8, 7 never offered)', `bestK=${sr.bestK} order=${JSON.stringify(order)}`);
+    const accepts = (okKs: number[]) => order.find((k) => okKs.includes(k)) ?? 0;
+    assert(accepts([6, 4]) === 6 && accepts([4]) === 4 && accepts([]) === 0, 'D76.3b first order entry accepted by the rule wins: 6 if it satisfies it, else the largest evaluated k that does (4), else 0', '');
+  }
+
+  // Real fixtures with Shift Placement ON (found by a scan at the pre-change build; recorded before-values pinned below).
+  const cal76: CalendarConfig = { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 20 };
+  const labor76: LaborConfig = { ...LABOR, dailyProductiveHours: 8, shiftPlacementEnabled: true, shiftSlapMinutes: 30 };
+  const mkIv76 = (cats: Array<[string, (hh: number) => number]>): StandardInterval[] => {
+    const out: StandardInterval[] = [];
+    for (let day = 0; day < 5; day++) for (let hh = 8; hh < 20; hh++) for (let m = 0; m < 60; m += 30) for (const [category, vf] of cats) {
+      out.push({ intervalIndex: out.length, start: new Date(2026, 2, 2 + day, hh, m), end: new Date(2026, 2, 2 + day, hh, m + 30), volume: vf(hh), category });
+    }
+    return out;
+  };
+  const mkSla76 = (pct: number, w: number): SLAPolicyConfig => ({
+    primaryPct: pct, primaryWindow: w, primaryUnit: 'hours', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes',
+    asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'next_open',
+    occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 90, minCoverageEnabled: true,
+  });
+  const c1: CategoryConfig[] = [{ id: 'c1', name: 'General', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 }];
+  const c2: CategoryConfig[] = [{ id: 'A', name: 'A', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 }, { id: 'B', name: 'B', ahtMinutes: 25, shrinkagePct: 0.1, priority: 2 }];
+  const rs76 = (d: ShiftDistributionByCategory | undefined) => (d ? Object.keys(d).sort().map((k) => `${k === '__POOLED__' ? '' : k + '='}${d[k].slaps.map((s) => `${s.startMinutesFromOpen}:${s.agentCount}`).join(' ')}`).join(' | ') : 'uniform');
+  const fixtures76: Array<{ label: string; intervals: StandardInterval[]; categories: CategoryConfig[]; sla: SLAPolicyConfig; arch: 'pooled' | 'siloed'; hc: number; gross: number; roster: string; status: string }> = [
+    { label: 'pooled spike 4/20 SLA 85/3h', intervals: mkIv76([['General', (hh) => (hh === 8 ? 20 : 4)]]), categories: c1, sla: mkSla76(85, 3), arch: 'pooled', hc: 6, gross: 7, roster: '0:3 150:1 210:1 240:1', status: 'adopted_partial' },
+    { label: 'siloed A spike 3/14 + B peak 2/7 SLA 95/4h', intervals: mkIv76([['A', (hh) => (hh === 8 ? 14 : 3)], ['B', (hh) => (hh >= 12 && hh < 16 ? 7 : 2)]]), categories: c2, sla: mkSla76(95, 4), arch: 'siloed', hc: 9, gross: 10, roster: 'A=0:1 60:1 240:2 | B=0:1 120:1 240:3', status: 'adopted' },
+  ];
+  for (const fx of fixtures76) {
+    const run = { intervals: fx.intervals, openingWIP: [] as any[], categories: fx.categories, calendar: cal76, labor: labor76, sla: fx.sla, seed: 42, userMaxHC: 60, replications: 6, queueArchitecture: fx.arch };
+    const t0 = Date.now();
+    const r: any = searchOptimalHC(run);
+    const ms = Date.now() - t0;
+    const pc = r.polishConfirmation;
+    console.log(`  (D76 fixture ${fx.label}: HC ${r.recommendedHC}/${r.staffing?.grossHCTotal}; ${r.rosterPolish?.status}; ${rs76(r.shiftPlacement?.winningDistribution)}; confirmation ${JSON.stringify(pc)}; ${ms}ms)`);
+    assert(r.recommendedHC === fx.hc && r.staffing?.grossHCTotal === fx.gross, `D76.4a ${fx.label}: recommended / gross headcount identical to the pre-change build (${fx.hc} / ${fx.gross})`, `${r.recommendedHC}/${r.staffing?.grossHCTotal}`);
+    assert(rs76(r.shiftPlacement?.winningDistribution) === fx.roster && r.rosterPolish?.status === fx.status, `D76.4b ${fx.label}: adopted roster and polish status identical to the pre-change build (a polish that passes confirmation is still adopted)`, `${rs76(r.shiftPlacement?.winningDistribution)} ${r.rosterPolish?.status}`);
+    assert(!!pc && pc.baselinePasses === true && pc.adoptedPasses === true, `D76.4c ${fx.label}: polishConfirmation reports baseline and adopted pass`, JSON.stringify(pc));
+    assert(!!pc && pc.evaluations === 2, `D76.4d ${fx.label}: exactly 2 extra full-R evaluations (baseline + the one primary-passing vector kept; each vector once, none for primary failures)`, JSON.stringify(pc));
+    const sets = h.generatePrecomputedReplications({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: cal76, sla: fx.sla, baseSeed: 42, replications: 6 });
+    const ind: any = evaluateCandidateStatistical({
+      operationalHC: r.recommendedHC, intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: cal76, labor: labor76, sla: fx.sla,
+      baseSeed: 42, replications: 6, queueArchitecture: fx.arch, precomputedCaseSets: sets, shiftDistribution: r.shiftPlacement?.winningDistribution, dispatchFairness: undefined,
+    });
+    assert(JSON.stringify(r.primaryStatistical) === JSON.stringify(ind.primaryStats), `D76.5 ${fx.label}: displayed statistics are the PRIMARY-set evaluation of the adopted roster (no confirmation leak)`, `reported mean=${r.primaryStatistical?.achievedPctMean} independent=${ind.primaryStats?.achievedPctMean}`);
+    const rA: any = await searchOptimalHCAsync(run);
+    assert(JSON.stringify(rA.polishConfirmation) === JSON.stringify(pc) && JSON.stringify(rA.rosterPolish) === JSON.stringify(r.rosterPolish) && rs76(rA.shiftPlacement?.winningDistribution) === rs76(r.shiftPlacement?.winningDistribution) && rA.recommendedHC === r.recommendedHC, `D76.6 ${fx.label}: sync === async (polishConfirmation, rosterPolish, roster, HC)`, `async=${JSON.stringify(rA.polishConfirmation)}`);
+    const r2: any = searchOptimalHC(run);
+    assert(JSON.stringify(r2.polishConfirmation) === JSON.stringify(pc) && JSON.stringify(r2.rosterPolish) === JSON.stringify(r.rosterPolish) && rs76(r2.shiftPlacement?.winningDistribution) === rs76(r.shiftPlacement?.winningDistribution), `D76.7 ${fx.label}: same seed twice identical`, '');
+  }
+  // Placement OFF: no confirmation, no field.
+  {
+    const fx = fixtures76[0];
+    const off: any = searchOptimalHC({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: cal76, labor: { ...labor76, shiftPlacementEnabled: false }, sla: fx.sla, seed: 42, userMaxHC: 60, replications: 6, queueArchitecture: fx.arch });
+    assert(off.polishConfirmation === undefined, 'D76.8 placement OFF: polishConfirmation undefined', '');
+  }
+}
+
 console.log('\n==================================================');
-console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
+console.log(` RESULTS:${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');
 
 if (failedTests > 0) process.exitCode = 1;

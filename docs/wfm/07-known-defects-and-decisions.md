@@ -999,6 +999,11 @@ The per-N decision was `uniformPasses OR coverageRepairPasses OR placementPasses
 **Why the confirmation block:** without it the support-sample 27 was accepted at ~0.1 point of margin and held on only 7 of 21 fresh seeds.
 **Open (backlog):** roster-polish and thin-category hairline margins (PRD L24 / L25, P1-7 / P1-8); one late share for all siloed queues (L26). Tests: D72, D73.
 
+### P1-7 / L24 - Roster polish was gated only on the case sets the search had already used *(fixed 2026-10-11, PRD 1.23.0)*
+The polish (Stage 3b, fixed headcount) adopted a re-spread roster once the CI gate passed on the primary arrival sets, so the adopted roster could be a hairline pass that did not hold on fresh arrivals (planner file, coverage OFF, 48 with polish: 3 of 6 fresh seeds). An absolute second gate was rejected in review: the unpolished roster has normally never been checked on fresh days either, so it would discard every polish whenever the headcount itself is marginal.
+**After (relative rule):** the unpolished roster is evaluated once on the confirmation block (baseline); a polish step that passes the primary gate is evaluated there too and counts only if not worse than the baseline (baseline passes -> must pass; baseline fails -> overall SLA CI lower bound >= baseline, no baseline-passing category fails, no baseline-satisfied cap broken). Pooled: chosen k re-checked, else largest evaluated passing k that satisfies the rule, else 0. Siloed: per-queue confirmation verdicts AND-merged with the primary ones. Shared helpers `polishNotWorseOnConfirmation`, `mergePolishConfirmation`, `pooledPolishFallbackOrder`; results kept in their own map, displayed statistics stay on the primary sets; optional result field `polishConfirmation`. Headcount never changes.
+**Open:** P1-7-a - when the baseline itself fails on fresh days the headcount is marginal (same family as P1-8); not shown in the UI. Tests: D76.
+
 ---
 
 ## C. Retracted after measurement

@@ -1542,6 +1542,77 @@ export function toRosterParallelEval(r: {
   return { passes: r.passesAllConstraints, passesOrgGates: r.passesOrgGates, categoryPasses: r.categoryPasses, reasons: r.failingReasons, slaPct: r.primaryStats.achievedPctMedian };
 }
 
+/** The slice of an evaluateCandidateStatistical(Async) result the polish confirmation rule reads. */
+export interface PolishConfirmEval {
+  passesOrgGates: boolean;
+  categoryPasses: Record<string, boolean>;
+  failingReasons: string[];
+  primaryStats: { ci95Low: number };
+}
+
+const POLISH_CAP_PREFIXES = ['BO ASA', 'Occupancy', 'Coverage:'];
+
+/**
+ * P1-7 / L24 relative confirmation rule, org-wide part. `baseline` = the UNPOLISHED roster and `cand` = a polish
+ * candidate, both on the confirmation block. Baseline passes the org gates -> the candidate must too; baseline
+ * fails -> the candidate's overall SLA CI lower bound must be >= the baseline's (1e-9) and a cap (BO ASA,
+ * occupancy, coverage) the baseline satisfies must stay satisfied.
+ */
+export function polishOrgNotWorse(baseline: PolishConfirmEval, cand: PolishConfirmEval): boolean {
+  if (baseline.passesOrgGates) return cand.passesOrgGates;
+  if (cand.primaryStats.ci95Low < baseline.primaryStats.ci95Low - 1e-9) return false;
+  for (const p of POLISH_CAP_PREFIXES) {
+    const baseFails = baseline.failingReasons.some((r) => r.startsWith(p));
+    const candFails = cand.failingReasons.some((r) => r.startsWith(p));
+    if (!baseFails && candFails) return false;
+  }
+  return true;
+}
+
+/** A category that passes for the baseline must not fail for the candidate. */
+export function polishCategoryNotWorse(baseline: PolishConfirmEval, cand: PolishConfirmEval, key: string): boolean {
+  return !(baseline.categoryPasses[key] === true && cand.categoryPasses[key] === false);
+}
+
+/** Full rule (pooled and combined-vector use): org-wide part AND every category. */
+export function polishNotWorseOnConfirmation(baseline: PolishConfirmEval, cand: PolishConfirmEval): boolean {
+  if (!polishOrgNotWorse(baseline, cand)) return false;
+  return Object.keys(cand.categoryPasses).every((k) => polishCategoryNotWorse(baseline, cand, k));
+}
+
+/**
+ * Siloed: AND-merge the confirmation verdicts into the primary per-queue evaluation so a confirmation failure is
+ * charged to the right queue (or to the org gates). Only meaningful when the primary evaluation already passes
+ * the org gates (the caller evaluates the confirmation block only then).
+ */
+export function mergePolishConfirmation(primary: RosterParallelEval, baseline: PolishConfirmEval, cand: PolishConfirmEval): RosterParallelEval {
+  const orgOk = polishOrgNotWorse(baseline, cand);
+  const categoryPasses: Record<string, boolean> = {};
+  for (const k of Object.keys(primary.categoryPasses)) categoryPasses[k] = primary.categoryPasses[k] && polishCategoryNotWorse(baseline, cand, k);
+  const passesOrgGates = primary.passesOrgGates && orgOk;
+  const passes = passesOrgGates && Object.values(categoryPasses).every(Boolean) && primary.passes;
+  const reasons = !orgOk && primary.passesOrgGates ? [...primary.reasons, 'Confirmation block: polish worse than the unpolished roster on fresh days'] : primary.reasons;
+  return { ...primary, passes, passesOrgGates, categoryPasses, reasons };
+}
+
+/** Every org gate and every category passes (the unmodified gate's verdict, read from the slice). */
+export function polishConfirmPasses(e: PolishConfirmEval): boolean {
+  return e.passesOrgGates && Object.values(e.categoryPasses).every(Boolean);
+}
+
+/** The optional `polishConfirmation` result field; `adopted` = the confirmation evaluation of the roster kept (undefined = none adopted -> the baseline). */
+export function summarizePolishConfirmation(baseline: PolishConfirmEval | undefined, adopted: PolishConfirmEval | undefined, evaluations: number): { baselinePasses: boolean; adoptedPasses: boolean; evaluations: number } | undefined {
+  if (!baseline) return undefined;
+  return { baselinePasses: polishConfirmPasses(baseline), adoptedPasses: polishConfirmPasses(adopted ?? baseline), evaluations };
+}
+
+/** Pooled: evaluated k values the primary gate passed, largest first, starting with the search's chosen k (k > 0 only). */
+export function pooledPolishFallbackOrder(search: { bestK: number; evals: Map<number, RosterStepEval> }): number[] {
+  const ks: number[] = [];
+  for (const [k, ev] of search.evals) if (k > 0 && k <= search.bestK && ev.passes) ks.push(k);
+  return ks.sort((a, b) => b - a);
+}
+
 /** Plan for the polish step: whether it applies, and whether the target roster covers better (else no DES run is needed). */
 export type RosterPolishPlan =
   | { applicable: false; reason: string; current?: CoverageProfile }
@@ -3086,6 +3157,7 @@ export function searchOptimalHC(params: {
   // Stage 3b — roster polish at the FIXED recommendedHC (placement ON only). Pure parts live in
   // planRosterPolish / finalizeRosterPolish, shared with the async twin; only the evaluator differs.
   let rosterPolish: RosterPolishResult | undefined;
+  let polishConfirmation: { baselinePasses: boolean; adoptedPasses: boolean; evaluations: number } | undefined;
   if (labor.shiftPlacementEnabled && recommendedHC !== null && !isInfeasible && representativeCases && primaryPassedResult) {
     const plan = planRosterPolish({
       n: recommendedHC, cases: representativeCases, calendar, labor, sla, queueArchitecture,
@@ -3094,18 +3166,38 @@ export function searchOptimalHC(params: {
     let search: ReturnType<ReturnType<typeof createRosterKSearch>['result']> | undefined;
     let parallelSearch: RosterParallelResult | undefined;
     const candidateEvals = new Map<string, ReturnType<typeof evaluateCandidateStatistical>>();
+    const confirmEvals = new Map<string, ReturnType<typeof evaluateCandidateStatistical>>();
+    let confirmBaseline: ReturnType<typeof evaluateCandidateStatistical> | undefined;
     if (plan.applicable && plan.improves) {
       const evalRoster = (roster: ShiftDistributionByCategory | undefined) => evaluateCandidateStatistical({
         operationalHC: recommendedHC, intervals, openingWIP, categories, calendar, labor, sla,
         baseSeed: seed, replications: R, queueArchitecture, precomputedCaseSets,
         shiftDistribution: roster, dispatchFairness,
       });
+      // P1-7: confirmation block evaluations (own map, never mixed into candidateEvals); baseline = the unpolished roster, evaluated lazily at the first primary pass.
+      const confirmCtx = resolveRescueEvaluation('confirm', { sla, categories, replications: R, baseSeed: seed, precomputedCaseSets, confirmation: rescueConfirmation });
+      const confirmEval = (roster: ShiftDistributionByCategory | undefined) => evaluateCandidateStatistical({ operationalHC: recommendedHC, intervals, openingWIP, calendar, labor, queueArchitecture, shiftDistribution: roster, dispatchFairness, ...confirmCtx });
+      const confirmRoster = (key: string, roster: ShiftDistributionByCategory | undefined) => {
+        let e = confirmEvals.get(key);
+        if (!e) {
+          e = confirmEval(roster);
+          confirmEvals.set(key, e);
+        }
+        return e;
+      };
+      const ensureBaseline = () => (confirmBaseline ??= confirmEval(winningDistributionByN.get(recommendedHC)));
       if (plan.perKey) {
         const ps = createParallelRosterKSearch(plan.perKey.totals);
         for (let v = ps.next(); v !== null; v = ps.next()) {
-          const r = evalRoster(plan.perKey.rosterAtVector(v));
+          const roster = plan.perKey.rosterAtVector(v);
+          const r = evalRoster(roster);
           candidateEvals.set(rosterVectorKey(plan.perKey.totals, v), r);
-          ps.record(v, toRosterParallelEval(r));
+          let ev = toRosterParallelEval(r);
+          if (r.passesOrgGates && Object.values(r.categoryPasses).some(Boolean)) {
+            const base = ensureBaseline();
+            ev = mergePolishConfirmation(ev, base, confirmRoster(rosterVectorKey(plan.perKey.totals, v), roster));
+          }
+          ps.record(v, ev);
         }
         parallelSearch = ps.result();
       } else {
@@ -3116,9 +3208,17 @@ export function searchOptimalHC(params: {
           ks.record(k, { passes: r.passesAllConstraints, reasons: r.failingReasons, slaPct: r.primaryStats.achievedPctMedian });
         }
         search = ks.result();
+        if (search.bestK > 0) {
+          let chosenK = 0;
+          for (const k of pooledPolishFallbackOrder(search)) {
+            if (polishNotWorseOnConfirmation(ensureBaseline(), confirmRoster(String(k), plan.rosterAt(k)))) { chosenK = k; break; }
+          }
+          search = { ...search, bestK: chosenK };
+        }
       }
     }
     const fin = finalizeRosterPolish({ plan, search, parallelSearch, currentSlaPct: primaryPassedResult.primaryStats.achievedPctMedian });
+    polishConfirmation = summarizePolishConfirmation(confirmBaseline, adoptedPolishEvaluation({ plan, fin, search, parallelSearch, candidateEvals: confirmEvals }), confirmEvals.size + (confirmBaseline ? 1 : 0));
     rosterPolish = fin.rosterPolish;
     if (fin.adoptedDistribution) winningDistributionByN.set(recommendedHC, fin.adoptedDistribution);
     // F3 (HC-15): after adoption every statistic reported for N describes the ADOPTED roster (rosterPolish.currentSlaPct above stays the pre-polish median).
@@ -3317,6 +3417,7 @@ export function searchOptimalHC(params: {
         }
       : undefined,
     ...(rosterPolish ? { rosterPolish } : {}),
+    ...(polishConfirmation ? { polishConfirmation } : {}),
   };
 }
 
@@ -3899,6 +4000,7 @@ export async function searchOptimalHCAsync(params: {
 
   // Stage 3b — roster polish at the FIXED recommendedHC (see searchOptimalHC's identical block).
   let rosterPolish: RosterPolishResult | undefined;
+  let polishConfirmation: { baselinePasses: boolean; adoptedPasses: boolean; evaluations: number } | undefined;
   if (labor.shiftPlacementEnabled && recommendedHC !== null && !isInfeasible && representativeCases && primaryPassedResult) {
     if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
     const plan = planRosterPolish({
@@ -3908,6 +4010,8 @@ export async function searchOptimalHCAsync(params: {
     let search: ReturnType<ReturnType<typeof createRosterKSearch>['result']> | undefined;
     let parallelSearch: RosterParallelResult | undefined;
     const candidateEvals = new Map<string, ReturnType<typeof evaluateCandidateStatistical>>();
+    const confirmEvals = new Map<string, ReturnType<typeof evaluateCandidateStatistical>>();
+    let confirmBaseline: ReturnType<typeof evaluateCandidateStatistical> | undefined;
     if (plan.applicable && plan.improves) {
       const evalRoster = async (roster: ShiftDistributionByCategory | undefined, movesNow: number) => {
         if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
@@ -3927,12 +4031,48 @@ export async function searchOptimalHCAsync(params: {
           shouldCancel, shiftDistribution: roster, dispatchFairness,
         });
       };
+      // P1-7: confirmation block evaluations (own map, never mixed into candidateEvals); same rule as the sync twin, evaluator awaited, cancel honoured between runs.
+      const confirmCtx = resolveRescueEvaluation('confirm', { sla, categories, replications: R, baseSeed: seed, precomputedCaseSets, confirmation: rescueConfirmation });
+      const confirmEval = async (roster: ShiftDistributionByCategory | undefined, movesNow: number) => {
+        if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
+        onProgress?.({
+          status: 'verifying_boundary',
+          phase: 'Phase 3: Roster Coverage Polish',
+          currentN: recommendedHC,
+          nMin: nMinAnalytical,
+          maxN: searchCap,
+          percent: 93,
+          evaluatedHistory: buildHistorySnapshot(),
+          currentMessage: `Confirming the polished roster on fresh days at N = ${recommendedHC} (${movesNow} of ${plan.totalMoves} moves)...`,
+        });
+        return evaluateCandidateStatisticalAsync({
+          operationalHC: recommendedHC, intervals, openingWIP, categories: confirmCtx.categories, calendar, labor, sla: confirmCtx.sla,
+          baseSeed: confirmCtx.baseSeed, replications: confirmCtx.replications, queueArchitecture, precomputedCaseSets: confirmCtx.precomputedCaseSets,
+          shouldCancel, shiftDistribution: roster, dispatchFairness,
+        });
+      };
+      const confirmRoster = async (key: string, roster: ShiftDistributionByCategory | undefined, movesNow: number) => {
+        let e = confirmEvals.get(key);
+        if (!e) {
+          e = await confirmEval(roster, movesNow);
+          confirmEvals.set(key, e);
+        }
+        return e;
+      };
+      const ensureBaseline = async () => (confirmBaseline ??= await confirmEval(winningDistributionByN.get(recommendedHC), 0));
       if (plan.perKey) {
         const ps = createParallelRosterKSearch(plan.perKey.totals);
         for (let v = ps.next(); v !== null; v = ps.next()) {
-          const r = await evalRoster(plan.perKey.rosterAtVector(v), Object.values(v).reduce((a, b) => a + b, 0));
+          const movesNow = Object.values(v).reduce((a, b) => a + b, 0);
+          const roster = plan.perKey.rosterAtVector(v);
+          const r = await evalRoster(roster, movesNow);
           candidateEvals.set(rosterVectorKey(plan.perKey.totals, v), r);
-          ps.record(v, toRosterParallelEval(r));
+          let ev = toRosterParallelEval(r);
+          if (r.passesOrgGates && Object.values(r.categoryPasses).some(Boolean)) {
+            const base = await ensureBaseline();
+            ev = mergePolishConfirmation(ev, base, await confirmRoster(rosterVectorKey(plan.perKey.totals, v), roster, movesNow));
+          }
+          ps.record(v, ev);
         }
         parallelSearch = ps.result();
       } else {
@@ -3943,9 +4083,17 @@ export async function searchOptimalHCAsync(params: {
           ks.record(k, { passes: r.passesAllConstraints, reasons: r.failingReasons, slaPct: r.primaryStats.achievedPctMedian });
         }
         search = ks.result();
+        if (search.bestK > 0) {
+          let chosenK = 0;
+          for (const k of pooledPolishFallbackOrder(search)) {
+            if (polishNotWorseOnConfirmation(await ensureBaseline(), await confirmRoster(String(k), plan.rosterAt(k), k))) { chosenK = k; break; }
+          }
+          search = { ...search, bestK: chosenK };
+        }
       }
     }
     const fin = finalizeRosterPolish({ plan, search, parallelSearch, currentSlaPct: primaryPassedResult.primaryStats.achievedPctMedian });
+    polishConfirmation = summarizePolishConfirmation(confirmBaseline, adoptedPolishEvaluation({ plan, fin, search, parallelSearch, candidateEvals: confirmEvals }), confirmEvals.size + (confirmBaseline ? 1 : 0));
     rosterPolish = fin.rosterPolish;
     if (fin.adoptedDistribution) winningDistributionByN.set(recommendedHC, fin.adoptedDistribution);
     // F3 (HC-15): after adoption every statistic reported for N describes the ADOPTED roster (rosterPolish.currentSlaPct above stays the pre-polish median).
@@ -4175,6 +4323,7 @@ export async function searchOptimalHCAsync(params: {
         }
       : undefined,
     ...(rosterPolish ? { rosterPolish } : {}),
+    ...(polishConfirmation ? { polishConfirmation } : {}),
   };
 }
 
