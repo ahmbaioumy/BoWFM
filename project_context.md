@@ -1165,6 +1165,8 @@ server-side AI capability contradicting the offline contract.
 Full register with IDs in `docs/wfm/07-known-defects-and-decisions.md`; prioritised as forward
 requirements in `PRD.md` §11. Summary:
 
+**Audit open findings (2026-10-11).** `PRD.md` §10 (L28–L32) and §11 (P1-9 to P1-13, P2-11 to P2-14) now carry the audit's still-open findings; not repeated here.
+
 **Utilisation % hidden (PRD 1.22.1, 2026-10-09; PRD L27 / P2-10).** `SHOW_UTILISATION = false` in
 `src/utils/agent-analytics.ts` hides it from `AgentAnalyticsPanel.tsx` (column, chart series, mode note,
 definitions, help line) and from the text builders `buildAgentInsights`, `buildAgentAnalyticsNotes`,

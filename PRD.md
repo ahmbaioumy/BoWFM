@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft — as-built specification |
-| **Version** | 1.23.0 |
+| **Version** | 1.23.1 |
 | **Date** | 2026-10-11 |
 | **Owner** | _(unassigned)_ |
 | **Product** | Backoffice WFM Sizing Engine |
@@ -1171,7 +1171,7 @@ capacity planner needs. See §7.3.
 
 ## 7. Design decisions and rationale
 
-Ten decisions that look like candidates for simplification and are not. Each has been
+Eleven decisions that look like candidates for simplification and are not. Each has been
 validated; changing any of them requires deliberate review.
 
 ### 7.1 Discrete-event simulation, not Erlang-C
@@ -1277,6 +1277,17 @@ method, which is house-monotone by construction.
 > where adding an agent *removed* one from a category — including a silo dropping from 1 agent
 > to **0**, leaving work with nobody to do it. The divisor method produces **zero**.
 
+### 7.11 Min-coverage presence is the agent's own shift window
+Frozen 2026-09-29 (`des-engine.ts` `countAgentsOnShiftNow`; suite D46). An agent counts as present
+for the minimum-coverage rule iff `dayOpen + startOffset <= t < dayOpen + startOffset +
+dailyProductiveHours*60`. Counting "productive budget remaining" as presence is wrong: adherence
+loss shortens the budget, so every shift would "end" early by `(1 - adherence) x shiftLength`
+minutes, coverage repair would always fail, and real-file recommendations inflated 30–40%.
+Adherence stays a reduction of daily productive time, not a gap at shift start or end. Since
+2026-10-08 dispatch obeys the same window on every non-24×7 run, with or without a start
+distribution (`fixedShifts` on the result; suite D71); 24×7 runs without a distribution keep
+agents on around the clock.
+
 ---
 
 ## 8. Non-functional requirements
@@ -1300,7 +1311,7 @@ comment. Nothing else.
 | ID | Requirement |
 |---|---|
 | **NFR-2.1** | Runtime dependencies limited to React, React-DOM and the icon library. No new runtime dependency may be added without explicit approval. |
-| **NFR-2.2** | Build tooling is devDependency-only and must never reach the artifact. |
+| **NFR-2.2** | Build tooling must be devDependency-only and must never reach the artifact. As built, `vite`, `@vitejs/plugin-react` and `@tailwindcss/vite` are still listed under `dependencies` (§11 P2-14); they do not reach the artifact. |
 
 ### 8.3 Deliverable
 
@@ -1427,6 +1438,11 @@ Behaviours a user must understand to interpret results correctly.
 | **L25** | **The per-category gate on low-volume categories can be hairline with the coverage floor ON** (1.22.0, unchanged by this release). Support sample, coverage ON, headcount 27: the unchanged gate (including each category's own target) passes on only 7 of 20 fresh seeds. A category with few cases per replication has a wide confidence interval, so its verdict flips with the arrival seed. | The recommendation is reproducible for a given seed and settings, but one agent more or fewer is within the noise of a low-volume category. Backlog: §11 P1-8. |
 | **L26** | **The ladder applies one late share to every queue in a siloed run** (1.22.0). Each category gets the same share (25, 30, ... %) of its own seats starting late; a category with too few seats for a late starter stays at opening. A better split between queues (for example more late starters in the queue with the evening work) is not tried. | A siloed run can miss a rescue that a per-queue split would find and then keeps the higher headcount it had before 1.22.0; it can never accept a roster that fails the gate. |
 | **L27** | **Utilisation % is hidden in Agent Analytics and its export** (1.22.1, 2026-10-09). `SHOW_UTILISATION = false` in `src/utils/agent-analytics.ts` hides the column, chart series, mode note, definitions, insight wording and the export column and note row; the calculation is kept. | On fixed-shift runs it equalled occupancy, so nothing is lost. A 24x7 run without a shift-start distribution (L20/L21) is the one case where utilisation read lower than occupancy; that difference is no longer shown anywhere. Set the constant to `true` and rebuild to restore. |
+| **L28** | **24×7 with minimum coverage ON can return "search infeasible"** (audit F1 + G8, HC-14; open, §11 P1-9). A single shift cannot cover 24 hours, so no headcount passes the coverage rule, most visibly with a sub-day SLA (default 6 h). | Affects 24×7 sites. Turning minimum coverage OFF gives an answer (flat demand tested only; peaky overnight demand not tested). |
+| **L29** | **Agent Analytics with a category filter on a shared pool shows partial occupancy / available figures** (UI-2; §11 P2-11). Busy time is filtered, idle time is not. The screen explains this. | Display only; headcount unaffected. Read per-category figures from siloed runs. |
+| **L30** | **The per-category ASA target in Settings is not used by the sizing** (H4, UI-40; §11 P1-10). The engine reads only the global BO ASA target (`sla.boAsaTarget`); `cat.boAsaTarget` is stored and copied by "Apply Template to All" but never read. | A per-category value has no effect; set the global target. Headcount unaffected. |
+| **L31** | **Some input and navigation guards are missing** (H10, H8, F5; §11 P1-11, P1-12; IS3-a, §11 P2-12). Settings import does not validate the file shape; no error boundary; no leave-page warning; the Sensitivity matrix is lost on leaving the tab; the Calendar tab does not block impossible calendars; balanced mid-cell quotes in a CSV can merge two cells. | Lost work or a late error message, not a changed headcount. Export config JSON before leaving; keep calendar and CSV input clean. |
+| **L32** | **Exports made from outdated results carry no "outdated" note** (SR-a; §11 P2-13). | Display only. Re-run before exporting. |
 
 ---
 
@@ -1565,6 +1581,18 @@ gate on 7 of 20 fresh seeds). Options: a minimum case count below which the cate
 not gated, or a wider R for such categories. Either changes recommendations and needs approval.
 *Rationale: the headline number should not depend on the arrival seed for the sake of one thin queue.*
 
+*Decision recorded 2026-10-11: flag such categories in Results first (display only); stricter fresh-days check after measurement.*
+
+**P1-9 — 24×7 operation with minimum coverage ON can report "infeasible" (F1 + G8, HC-14).** Owner design decision pending. A single shift cannot cover 24 hours, so the search can find no passing headcount (§10 L28). Any fix reverses the documented surplus-at-offset-0 behaviour (D33) for 24×7 and must be regression-checked on non-24×7 runs. Can change the headcount for 24×7 sites.
+
+**P1-10 — Per-category ASA / target control in Settings does not drive the sizing (H4, UI-40).** Either remove the per-category inputs and correct the help text (recommended: no engine risk), or make the engine honour them (engine change; needs approval). Today the planner believes a target is enforced when it is not (§10 L30). Headcount unaffected today.
+
+**P1-11 — Settings import validation and lost-work guards (H10, F5).** Import accepts a file without checking its shape (only `sla` is sanitised); there is no error boundary, no leave-page warning, and the Sensitivity matrix is lost when leaving the tab (§10 L31). Lost work, not headcount.
+
+**P1-12 — Calendar tab input guards (H8, UI-45, UI-46).** The tab does not block all weekdays unticked or close ≤ open, and shows no productive-hours-versus-window check; the error appears later on the Run screen (§10 L31). Input only; no headcount effect.
+
+**P1-13 — Edge cases awaiting owner decisions.** F4: tolerance on the single Gross HC `round` and the `N_min` floor (confirm half-up tie rule). F6: gates and CI maths on unrounded values (can move a recommendation by 1 at an exact edge). F7: keep the `N_min` floor or carry the unfloored value into the gross-up (L14). G9: drain window measured in business days versus not-yet-due cases excluded from failures (post-horizon holidays can change HC). G10: when opening backlog counts as "parked". Each can change a recommended headcount by about 1 at an edge.
+
 ### P2 — Polish and technical debt
 
 **P2-1 — Resolve 671 lines of dead code.** `DataTable.tsx` (308 lines: sorting, page-size
@@ -1606,6 +1634,14 @@ hidden behind `SHOW_UTILISATION` (1.22.1, L27) because it equals occupancy on fi
 give it a distinct meaning (for example against a denominator that differs from occupancy's) or delete
 the retained code (`utilisationPct`, `utilCv`, `utilJain`, `utilisationReadsLowByDesign`, the gated
 panel and export branches, and the tests that cover them).
+
+**P2-11 — Agent Analytics category filter on a shared pool shows partial figures (UI-2).** With a category filter on pooled agents, busy time is filtered but idle time is not, so the occupancy and available figures of the filtered view are not that category's true figures (§10 L29). Fix: filter idle time by the same rule, or show the unfiltered figures only. Display only; no effect on headcount.
+
+**P2-12 — Balanced quotes inside a CSV cell can merge two cells (IS3-a).** A cell with a balanced mid-cell quote pair is not split where the file intends (§10 L31). Rare input case. Fix: follow the standard CSV quoting rule or raise a data-quality error.
+
+**P2-13 — Mark exports made from outdated results (SR-a).** When inputs change after a run, the screen shows an outdated banner but CSV/JSON exports carry no note (§10 L32). Display only.
+
+**P2-14 — Move build tooling out of `dependencies` (G13).** `vite`, `@vitejs/plugin-react` and `@tailwindcss/vite` are listed under `dependencies` in `package.json`, contrary to the project rule and NFR-2.2. Internal only: they do not reach the artifact. Needs owner approval and a check that `npm run build:standalone` still passes.
 
 ### Modelling fidelity gaps
 
