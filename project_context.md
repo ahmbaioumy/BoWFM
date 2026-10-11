@@ -136,11 +136,11 @@ npm install --no-save @esbuild/win32-arm64      # substitute your platform
 Check what you have with `ls node_modules/@esbuild/` against
 `node -p "process.platform + ' ' + process.arch"`.
 
-### 3.2 There is no git repository
+### 3.2 The folder is a git repository — local commits only
 
-`git rev-parse` fails — there is no `.git` anywhere. **There is no undo, no diff, and no
-history.** Read files before overwriting them, keep changes surgical, and strongly consider
-`git init` before any substantial work.
+The folder has a `.git` with full history (`main` plus one branch per fix). Commit locally
+before and after each change; **do not push unless the owner asks** — local `main` is ahead
+of `origin/main` by owner decision.
 
 ### 3.3 Plain `node file.ts` will not run these sources
 
@@ -583,7 +583,7 @@ normal rounding (`round`) — see §6.7 for the rationale behind this split.
 
 ## 6. Frozen decisions
 
-Ten decisions that look wrong and are right. **If you are about to change one of these, read
+Eleven decisions that look wrong and are right. **If you are about to change one of these, read
 its entry first.**
 
 ### 6.1 DES, not Erlang-C
@@ -594,7 +594,7 @@ days. Applying Erlang-C here oversizes badly. There is deliberately no Erlang fo
 codebase.
 
 ### 6.2 Earliest-Deadline-First dispatch
-`des-engine.ts` `CaseMinHeap.compare`.
+`des-engine.ts` `pickNextCase` / `compareByUrgency` (`CaseMinHeap.compare` only orders the heap; see §11).
 *Looks like:* an over-complicated queue sort that could be FIFO.
 *Actually:* EDF is optimal for maximising on-time completions under deadline scheduling. Cases
 are ordered by *Latest Safe Start*, derived by walking **backwards through the business
@@ -942,7 +942,7 @@ npm run test:sizing   # sizing-chain suite only (faster)
 | `scripts/verify-fixes.mts` | 174 | Legacy regression — CSV/date parsing, calendar arithmetic, CRN consistency, occupancy semantics, artifact integrity, analytical infeasibility diagnosis, 24x7 midnight budget accounting. **Treat as append-only.** |
 | `scripts/verify-sizing-fixes.mts` | 1,063 | Sizing chain — `D1` working-day counting, `D3` apportionment monotonicity, `D7` staffing-chain integrity, `D9` offline enforcement, `D20`-`D26` deadline-coverage shift placement (Stage 3a: valid-slap enumeration, no-regression, greedy monotonicity/optimality, I1/I2 invariants under staggering, seed determinism, positive control, I4 occupancy-ceiling regression guard), `D27` day-open telemetry off-by-one, `D28` fast-path/full-path attainment agreement, `D29` I5 per-agent stagger-offset compliance (check #8), `D30`/`D31` shift-end enforcement + in-flight case handover, `D32`/`D33` minimum-coverage floor + flag-independent redistribution repair, `D34` N_sla walk-down safety-net fix, `D35` adherence/capacity conflation closed-form pin, `D36` 24×7 coverage-gate regression fix, `D37` real 24×7 multi-start (staggering, shift-end, coverage repair), `D38` "exact minimum" wording pin (source-text based — the message is unreachable dead code), `D39` empirical monotonicity sweep for the uniform-only predicate (N=1..25, no violation found), `D40` extra-OFF coverage-ratio fix (ratio table sweep + integer-exactness cases — see §6.4a), `D41` non-blocking DQ warnings for zero off-days / override-vs-horizon scale / calendar-open days with no uploaded rows, `D47` Workload Floor toggle, `D48` clock-start derivation, `D49` pinned HC of `test_files/AJM_Only.csv`, `D50`/`D51`/`D52` roster polish at fixed HC (pooled / siloed guard / per-queue search), `D53` Results use run-time settings, `D54` number fields keep what is typed, `D55`-`D61` (G12) tests that protect the frozen sizing decisions: dispatch order + priority tie-break + parked-first, business-calendar `latestSafeStart`, CI gates (primary / per-category / occupancy / ASA use the bound, not the mean), CRN, unfinished-in-denominator, Gross HC + harmonic shrinkage, volume rounding — each shown red under its own mutation (see §11); `D71` (P2-9, 2026-10-08) fixed shifts on every non-24x7 run: a run with no distribution equals an explicit single cohort at offset 0, nobody works past their own shift end (adherence does not shorten it), 24x7-without-distribution / equal-length-day / explicit-distribution controls unchanged, determinism, monotone pass/fail sweep, CI-gate rejection, `fixedShifts` flag; `D72` (P1-6: the rescue ladder - generator unit checks, pre-screen inputs and stage rules, the acceptance state machine, the confirmation block, measured rescues, never-a-false-accept, never-worse sweep, Shift Placement OFF digest controls, determinism, sync = async, monotone pass/fail); `D73` (P1-6: the roster-polish paths adopted pooled / adopted siloed / kept_current_failed_gate N >= 8 / siloed adopted_partial per queue, each on a fixture found at run time by a deterministic ordered scan - a scan that finds nothing fails). 45 pins in D50 / D51 / D52 / D65 re-pinned 2026-10-08 with dated notes (see §5 Stage 3a) |
 | `scripts/audit-compare.mts` (`npm run test:audit`, opt-in, ~30 min) | 24 cells | All four `test_files/` samples × 6 settings, diffed against `docs/audit/sample-hc-after-2026-09-30.jsonl`; exits 1 on any difference. Known difference (2026-10-08, 1.21.0, P2-9): since 1.21.0 the baseline `docs/audit/sample-hc-after-2026-09-30.jsonl` differs in the 4 infeasible Wall Clock + Arrival (WA) cells, `slaPct` only (AJM_Only 46 -> 32.6, AJM_Simu 45.4 -> 30.2, EGS_Only - With Reduction 45.3 -> 29.9, EGS_Only 45.4 -> 29.8), because the failing uniform audit run now has a shift end. The baseline has not been regenerated pending owner approval, so `npm run test:audit` exits 1 on those 4 cells; no recommended headcount differs. Re-run 2026-10-08 after 1.22.0 (P1-6, rescue ladder): the same 4 WA cells differ by the same `slaPct` values and nothing else; all 4 Shift-Placement-ON (PON) cells are identical to the baseline (AJM_Only 16 kept_current_failed_gate, AJM_Simu 123 / EGS_Only - With Reduction 80 / EGS_Only 100 adopted_partial, same SLA and tail), i.e. the ladder moved no audit cell (20/24 identical, exit 1 from the 4 WA cells only; about 1 h with 6 parallel jobs). |
-| `scripts/verify-agent-analytics.mts` | 92 | `EX` export timestamps == on-screen formatter (fixed UTC+4 TZ, midnight-crossing, real engine rows, static no-`toISOString` guard); `AA` agent analytics (reconciles to `completedCases`/`totalHandlingMinutes`/`agentFairness`, date/category/agent filters, determinism, late cohorts, scheduled-minute pins, run facts `staggered`/`drainDates`/`pooledCategoryFilter`, the three-section export and the Notes wording AA.40-AA.45, a 24x7 no-distribution fixture for the "around the clock" case AA.46-AA.46e); `AW` work share (split case 0.75/0.25, totals == finished, slice-date attribution, avg handle) + single-agent-cover insight fixtures |
+| `scripts/verify-agent-analytics.mts` | 97 | `EX` export timestamps == on-screen formatter (fixed UTC+4 TZ, midnight-crossing, real engine rows, static no-`toISOString` guard); `AA` agent analytics (reconciles to `completedCases`/`totalHandlingMinutes`/`agentFairness`, date/category/agent filters, determinism, late cohorts, scheduled-minute pins, run facts `staggered`/`drainDates`/`pooledCategoryFilter`, the three-section export and the Notes wording AA.40-AA.45, a 24x7 no-distribution fixture for the "around the clock" case AA.46-AA.46e); `AW` work share (split case 0.75/0.25, totals == finished, slice-date attribution, avg handle) + single-agent-cover insight fixtures |
 | `scripts/verify-trusted-source.mts` (`npm run test:trusted-source`) | 164 | Hand-derived ground truth in `trusted-source-validation.json` (see §9.2); **part of `npm test` since 2026-10-06**. Authored under `Asia/Dubai`; a different host timezone only prints a warning and the run continues (all 164 verified under UTC, America/New_York, Asia/Tokyo, Pacific/Auckland, Europe/London) |
 | `scripts/check-artifact-freshness.mts` | gate | Fails if `BoWFM.html` is missing or older than `src/` / build inputs (`npm run check:artifact`) |
 
@@ -1226,7 +1226,7 @@ older utilisation checks pass `true` explicitly; AA.47e pins the restored export
 | Wrong workload / FTE / Gross HC | `hc-search.ts` `calculateStaffingRequirement` |
 | Wrong occupancy | `des-engine.ts` occupancy block — **read §6.3 first** |
 | Wrong SLA attainment | `des-engine.ts` metrics compilation + `calendar.ts` deadline math |
-| Cases handled in the wrong order | `des-engine.ts` `CaseMinHeap.compare` |
+| Cases handled in the wrong order | `des-engine.ts` `pickNextCase` / `compareByUrgency` |
 | Wrong number of working days | `calendar.ts` `getCalendarWorkingDaysInHorizon` (half-open) |
 | Deadline lands at an impossible time | `calendar.ts` `addWorkingTime` / `subtractWorkingTime` |
 | Siloed agents distributed oddly | `des-engine.ts` `allocateAgentsToCategories` — §6.10 |

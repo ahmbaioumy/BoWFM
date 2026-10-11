@@ -62,7 +62,7 @@ shrinkage gross-up, harmonic blend, sum, then a single `round`).
 1. **DES, not Erlang-C.** Deferred backoffice work is deadline-based with legitimate
    multi-day queueing; Erlang-C models real-time queueing with abandonment. No Erlang
    formula exists in this codebase and that is intentional.
-2. **Earliest-Deadline-First dispatch** (`CaseMinHeap.compare`, `des-engine.ts`), ordered by
+2. **Earliest-Deadline-First dispatch** (`pickNextCase` / `compareByUrgency`, `des-engine.ts`), ordered by
    `latestSafeStart` walked *backwards* through the business calendar, not wall-clock
    subtraction.
 3. **Occupancy is demand ÷ planned-capacity, not realised utilisation.** Denominator is the
@@ -122,8 +122,8 @@ shrinkage gross-up, harmonic blend, sum, then a single `round`).
   duplication itself (D11) — is still open. Don't add a third copy, and don't fix a bug
   in one without the other; the correct resolution is one shared implementation the
   async variant wraps with
-  progress callbacks. Same hazard between `CaseMinHeap.compare` (real dispatch) and
-  `pickNextCase`/`compareByUrgency` (test harnesses only).
+  progress callbacks. Same hazard between `pickNextCase`/`compareByUrgency` (real dispatch) and
+  `CaseMinHeap.compare` (heap push/pop order only — it does not decide which case is served).
 - **All time math goes through `calendar.ts`.** Never hand-roll `Date` arithmetic in engine
   code — use `addWorkingTime`, `subtractWorkingTime`, `workingDuration`, `isWorking`,
   `nextOpen`, `getCalendarWorkingDaysInHorizon` (note: half-open `[start, end)` — an
