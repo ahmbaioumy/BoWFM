@@ -1063,3 +1063,6 @@ questions. Establish which question is being asked before calling one wrong.
 
 ### 2026-10-11 — UI-9 / UI-10: Results screen display truth (PRD 1.22.2)
 Search-history Primary SLA colour now follows the engine gate (`primaryCiLow >= effectivePrimaryTarget`, fallback median >= policy target); `infeasibleAdjacentWarning` is rendered as an amber note under the headline SLA card and below-target representative figures are amber when it is set. Display only; recommended/gross HC unchanged. Suite D74.
+
+### 2026-10-11 — H5 / H11: idle-agent label and low-replication note (PRD 1.22.3)
+Idle siloed agents now show the engine-assigned category (agentFairness) or "No cases handled" instead of an `index % categories` guess; the Run screen shows an amber note when replications < 30 (not a gate). Display only; recommended/gross HC unchanged. Suite D75.

@@ -6750,6 +6750,25 @@ console.log('\n--- Suite D73: P1-6 replacement fixtures for the roster-polish pa
   assert(rf74.includes('infeasibleAdjacentWarning') && rf74.includes('historyPrimaryPasses'), 'D74.6 ResultsFlow renders infeasibleAdjacentWarning and uses historyPrimaryPasses', '');
 }
 
+// ─── SUITE D75: idle-agent category label + low-replication note (H5 / H11, display only) ───
+{
+  console.log('\n=== SUITE D75: no guessed category for idle agents; replication note ===');
+  const { idleAgentCategoryLabel: lbl, replicationsNote: note } = await import('../src/utils/results-display');
+  assert(note(1) === 'No confidence check: with one replication the result is a single run.', 'D75.1 1 replication -> single-run note', '');
+  assert(note(2) !== null && note(2)!.startsWith('Fewer than 30 replications'), 'D75.2 2 replications -> weak-CI note', '');
+  assert(note(29) === note(2) && note(29) !== null, 'D75.3 29 replications -> weak-CI note', '');
+  assert(note(30) === null, 'D75.4 30 replications -> no note', '');
+  assert(note(100) === null, 'D75.5 100 replications -> no note', '');
+  assert(lbl('Billing') === 'Billing', 'D75.6 real engine assignment is returned when present', '');
+  assert(lbl(null) === 'No cases handled' && lbl(undefined) === 'No cases handled' && lbl('') === 'No cases handled', 'D75.7 neutral label when assignment absent', '');
+  const fixture75 = ['A', 'B', 'C'];
+  assert(!fixture75.includes(lbl(null)) && lbl(null) !== fixture75[4 % fixture75.length], 'D75.8 absent assignment never equals the old modulo guess for agent index 4', '');
+  const rf75 = readFileSync(join(resolve(import.meta.dirname, '..'), 'src', 'components', 'ResultsFlow.tsx'), 'utf-8');
+  assert(!rf75.includes('% categories.length') && rf75.includes('idleAgentCategoryLabel'), 'D75.9 ResultsFlow no longer labels agents by modulo guess', '');
+  const runf75 = readFileSync(join(resolve(import.meta.dirname, '..'), 'src', 'components', 'RunFlow.tsx'), 'utf-8');
+  assert(runf75.includes('replicationsNote('), 'D75.10 RunFlow shows the replication note', '');
+}
+
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');
