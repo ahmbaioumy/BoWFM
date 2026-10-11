@@ -6773,8 +6773,9 @@ console.log('\n--- Suite D73: P1-6 replacement fixtures for the roster-polish pa
 {
   console.log('\n=== SUITE D76: polish confirmation (relative rule on the confirmation block) ===');
   const h = hcNs as any;
-  const mkEv = (o: { orgOk?: boolean; cats?: Record<string, boolean>; lo?: number; reasons?: string[] }): any => ({
+  const mkEv = (o: { orgOk?: boolean; cats?: Record<string, boolean>; lo?: number; reasons?: string[]; occ?: boolean; asa?: boolean; cov?: boolean }): any => ({
     passesOrgGates: o.orgOk ?? true, categoryPasses: o.cats ?? { A: true }, failingReasons: o.reasons ?? [], primaryStats: { ci95Low: o.lo ?? 90 },
+    ...(o.occ === undefined ? {} : { passesOccupancyCap: o.occ }), ...(o.asa === undefined ? {} : { passesBoAsaCap: o.asa }), ...(o.cov === undefined ? {} : { passesCoverage: o.cov }),
   });
   const rule = h.polishNotWorseOnConfirmation as (b: any, c: any) => boolean;
   assert(typeof rule === 'function' && typeof h.mergePolishConfirmation === 'function' && typeof h.pooledPolishFallbackOrder === 'function', 'D76.0 polish confirmation API exported', '');
@@ -6788,7 +6789,7 @@ console.log('\n--- Suite D73: P1-6 replacement fixtures for the roster-polish pa
   assert(rule(badBase, mkEv({ orgOk: false, lo: 79, cats: { A: true, B: false } })) === false, 'D76.1f baseline fails + candidate lower bound worse -> rejected', '');
   assert(rule(badBase, mkEv({ orgOk: false, lo: 85, cats: { A: false, B: false } })) === false, 'D76.1g baseline fails + a category that passed for the baseline fails for the candidate -> rejected', '');
   assert(rule(badBase, mkEv({ orgOk: false, lo: 85, cats: { A: true, B: true } })) === true, 'D76.1h baseline fails + a failing category improves -> adopted', '');
-  assert(rule(badBase, mkEv({ orgOk: false, lo: 85, cats: { A: true, B: false }, reasons: ['Occupancy 90% CI [1%, 2%] upper bound > cap 80%'] })) === false, 'D76.1i a cap the baseline satisfied (occupancy) becomes violated -> rejected', '');
+  assert(rule(badBase, mkEv({ orgOk: false, lo: 85, cats: { A: true, B: false }, occ: false })) === false, 'D76.1i (P1-7-c: explicit flag, not message text) a cap the baseline satisfied (occupancy) becomes violated -> rejected', '');
   assert(rule(mkEv({ orgOk: false, lo: 80, reasons: ['BO ASA 90% CI x'] }), mkEv({ orgOk: false, lo: 81, reasons: ['BO ASA 90% CI x'] })) === true, 'D76.1j a cap violated by both stays neutral -> adopted on lower bound', '');
   // Siloed merge: two queues, only B fails confirmation -> only B is charged.
   const prim: any = { passes: true, passesOrgGates: true, categoryPasses: { A: true, B: true }, reasons: [], slaPct: 95 };
@@ -6872,6 +6873,46 @@ console.log('\n--- Suite D73: P1-6 replacement fixtures for the roster-polish pa
     const off: any = searchOptimalHC({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: cal76, labor: { ...labor76, shiftPlacementEnabled: false }, sla: fx.sla, seed: 42, userMaxHC: 60, replications: 6, queueArchitecture: fx.arch });
     assert(off.polishConfirmation === undefined, 'D76.8 placement OFF: polishConfirmation undefined', '');
   }
+}
+
+// ─── SUITE D77: P1-7-c polish cap check uses explicit booleans, not failingReasons text ───
+{
+  console.log('\n=== SUITE D77: polish cap flags (passesBoAsaCap / passesOccupancyCap / passesCoverage) ===');
+  const h = hcNs as any;
+  const mk = (o: { lo?: number; occ?: boolean; asa?: boolean; cov?: boolean; reasons?: string[] }): any => ({
+    passesOrgGates: false, categoryPasses: { A: true }, failingReasons: o.reasons ?? [], primaryStats: { ci95Low: o.lo ?? 80 },
+    ...(o.occ === undefined ? {} : { passesOccupancyCap: o.occ }), ...(o.asa === undefined ? {} : { passesBoAsaCap: o.asa }), ...(o.cov === undefined ? {} : { passesCoverage: o.cov }),
+  });
+  const rule = h.polishNotWorseOnConfirmation as (b: any, c: any) => boolean;
+  const base = mk({ occ: true, asa: true, cov: true });
+  assert(rule(base, mk({ lo: 85, occ: false, asa: true, cov: true })) === false, 'D77.1a baseline satisfies caps, candidate better SLA but occupancy cap false -> rejected', '');
+  assert(rule(base, mk({ lo: 85, occ: true, asa: false, cov: true })) === false, 'D77.1b same for BO ASA cap -> rejected', '');
+  assert(rule(base, mk({ lo: 85, occ: true, asa: true, cov: false })) === false, 'D77.1c same for coverage -> rejected', '');
+  assert(rule(base, mk({ lo: 85, occ: true, asa: true, cov: true })) === true, 'D77.1d candidate keeps all caps -> adopted', '');
+  assert(rule(mk({ occ: false, asa: true, cov: true }), mk({ lo: 85, occ: false, asa: true, cov: true })) === true, 'D77.1e cap broken by both stays neutral -> adopted', '');
+  assert(rule(base, mk({ lo: 85, reasons: ['Occupancy 90% CI x'] })) === true, 'D77.1f candidate with undefined flags is not treated as breaking a cap (message text is ignored)', '');
+  assert(rule(mk({}), mk({ lo: 85, occ: false })) === false, 'D77.1g baseline flag undefined (treated as satisfied) + candidate explicit false -> rejected', '');
+  // Real evaluation: flags carried and consistent with failingReasons.
+  const cats: CategoryConfig[] = [{ id: 'c1', name: 'General', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 }];
+  const ivs: StandardInterval[] = [];
+  for (let day = 0; day < 5; day++) for (let hr = 9; hr < 17; hr++) for (let m = 0; m < 60; m += 30) ivs.push({ intervalIndex: ivs.length, start: new Date(2026, 2, 2 + day, hr, m), end: new Date(2026, 2, 2 + day, hr, m + 30), volume: 12, category: 'General' });
+  const sla: SLAPolicyConfig = {
+    primaryPct: 80, primaryWindow: 4, primaryUnit: 'hours', boAsaEnabled: true, boAsaTarget: 1, boAsaUnit: 'minutes',
+    asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'next_open',
+    occupancyCapEnabled: true, occupancyCapPct: 30, confidenceLevelPct: 90, minCoverageEnabled: true, minAgentsPerInterval: 8,
+  };
+  let consistent = true; let sawOccFalse = false; let sawOccTrue = false; let sawAsaFalse = false; let present = true;
+  for (const n of [2, 6, 12, 25, 60]) {
+    const r: any = evaluateCandidateStatistical({ operationalHC: n, intervals: ivs, openingWIP: [], categories: cats, calendar: { ...BIZ_CAL }, labor: { ...LABOR }, sla, baseSeed: 42, replications: 4 });
+    const fr: string[] = r.failingReasons;
+    if (typeof r.passesBoAsaCap !== 'boolean' || typeof r.passesOccupancyCap !== 'boolean' || typeof r.passesCoverage !== 'boolean') present = false;
+    if (r.passesBoAsaCap !== !fr.some((x) => x.startsWith('BO ASA')) || r.passesOccupancyCap !== !fr.some((x) => x.startsWith('Occupancy')) || r.passesCoverage !== !fr.some((x) => x.startsWith('Coverage:'))) consistent = false;
+    if (r.passesOccupancyCap === false) sawOccFalse = true; else sawOccTrue = true;
+    if (r.passesBoAsaCap === false) sawAsaFalse = true;
+  }
+  assert(present, 'D77.2a real evaluation results carry the three boolean cap flags', '');
+  assert(consistent, 'D77.2b flags agree with failingReasons on every swept N', '');
+  assert(sawOccFalse && sawOccTrue && sawAsaFalse, 'D77.2c setup: the sweep exercises failing and passing occupancy cap and a failing BO ASA cap (coverage never fails with a uniform roster; its flag is checked for consistency only)', `occF=${sawOccFalse} occT=${sawOccTrue} asaF=${sawAsaFalse}`);
 }
 
 console.log('\n==================================================');

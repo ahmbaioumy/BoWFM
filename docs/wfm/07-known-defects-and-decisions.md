@@ -1071,3 +1071,6 @@ Search-history Primary SLA colour now follows the engine gate (`primaryCiLow >= 
 
 ### 2026-10-11 — H5 / H11: idle-agent label and low-replication note (PRD 1.22.3)
 Idle siloed agents now show the engine-assigned category (agentFairness) or "No cases handled" instead of an `index % categories` guess; the Run screen shows an amber note when replications < 30 (not a gate). Display only; recommended/gross HC unchanged. Suite D75.
+
+### 2026-10-11 — P1-7-c: polish cap check no longer reads message text
+`polishOrgNotWorse` matched `failingReasons` prefixes ('BO ASA', 'Occupancy', 'Coverage:') to decide whether a polish candidate kept the caps the baseline satisfied; rewording a message would have failed open. `evaluateCandidateStatistical(Async)` now returns `passesBoAsaCap` / `passesOccupancyCap` / `passesCoverage`, set from the same conditions that push the messages, and the rule reads those (explicit `false` on the candidate = cap broken). Internals only; recommended/gross HC unchanged. Suite D77.

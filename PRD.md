@@ -1343,7 +1343,7 @@ comment. Nothing else.
 
 ## 9. Validation and quality
 
-### 9.1 Automated test suites — 1,546 checks (174 + 1,111 + 97 + 164 trusted-source)
+### 9.1 Automated test suites — 1,556 checks (174 + 1,121 + 97 + 164 trusted-source)
 
 | Suite | Tests | Covers |
 |---|---|---|

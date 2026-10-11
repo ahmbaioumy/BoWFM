@@ -75,7 +75,7 @@ npm run dev               # dev server on :3000
 | Command | What it does |
 |---|---|
 | `npm run dev` | Vite dev server with HMR |
-| `npm test` | Four suites (1,546 checks: 174 + 1,111 + 97 + 164 trusted-source) + artifact freshness |
+| `npm test` | Four suites (1,556 checks: 174 + 1,121 + 97 + 164 trusted-source) + artifact freshness |
 | `npm run lint` | `tsc --noEmit` typecheck |
 | `npm run build:standalone` | Produces `BoWFM.html` — **the actual deliverable** |
 | `npm run check:artifact` | Fails if `BoWFM.html` is missing or older than `src/` / build inputs |
@@ -940,7 +940,7 @@ Keep full precision through the chain. Compare floats with a tolerance, never `=
 ### 9.1 Four suites plus the freshness gate, all must be green
 
 ```bash
-npm test              # four suites — 1,546 checks (174 + 1,111 + 97 + 164) + artifact freshness
+npm test              # four suites — 1,556 checks (174 + 1,121 + 97 + 164) + artifact freshness
 npm run test:sizing   # sizing-chain suite only (faster)
 ```
 

@@ -1548,9 +1548,15 @@ export interface PolishConfirmEval {
   categoryPasses: Record<string, boolean>;
   failingReasons: string[];
   primaryStats: { ci95Low: number };
+  passesBoAsaCap?: boolean;
+  passesOccupancyCap?: boolean;
+  passesCoverage?: boolean;
 }
 
-const POLISH_CAP_PREFIXES = ['BO ASA', 'Occupancy', 'Coverage:'];
+/** Cap flags the polish rule reads. A cap counts as broken for a candidate only when explicitly `false`
+ *  (undefined = older fixture shape = not broken); for the baseline, anything but explicit `false` counts as satisfied
+ *  too, so an unknown cap can never reject a candidate. */
+const POLISH_CAP_FLAGS = ['passesBoAsaCap', 'passesOccupancyCap', 'passesCoverage'] as const;
 
 /**
  * P1-7 / L24 relative confirmation rule, org-wide part. `baseline` = the UNPOLISHED roster and `cand` = a polish
@@ -1561,10 +1567,8 @@ const POLISH_CAP_PREFIXES = ['BO ASA', 'Occupancy', 'Coverage:'];
 export function polishOrgNotWorse(baseline: PolishConfirmEval, cand: PolishConfirmEval): boolean {
   if (baseline.passesOrgGates) return cand.passesOrgGates;
   if (cand.primaryStats.ci95Low < baseline.primaryStats.ci95Low - 1e-9) return false;
-  for (const p of POLISH_CAP_PREFIXES) {
-    const baseFails = baseline.failingReasons.some((r) => r.startsWith(p));
-    const candFails = cand.failingReasons.some((r) => r.startsWith(p));
-    if (!baseFails && candFails) return false;
+  for (const f of POLISH_CAP_FLAGS) {
+    if (baseline[f] !== false && cand[f] === false) return false;
   }
   return true;
 }
@@ -2387,7 +2391,8 @@ export function computeStatisticalEvaluation(
   if (!passesCategorySLA) {
     failingReasons.push(...categoryFailureMessages);
   }
-  if (sla.boAsaEnabled && !passesBOASA) {
+  const boAsaCapBroken = sla.boAsaEnabled && !passesBOASA;
+  if (boAsaCapBroken) {
     failingReasons.push(
       `BO ASA ${ciLevel}% CI [${asaCi95Low}m, ${asaCi95High}m] upper bound > target ${sla.boAsaTarget}${sla.boAsaUnit} (${targetAsaMinutes}m) (Mean: ${Math.round(asaMean * 10) / 10}m)`
     );
@@ -2431,6 +2436,9 @@ export function computeStatisticalEvaluation(
     representativeRepIndex: bestRepIdx,
     passesPrimaryCI,
     passesCoverage,
+    // Explicit cap signals for the polish confirmation rule (P1-7-c); same conditions as the failingReasons pushes.
+    passesBoAsaCap: !boAsaCapBroken,
+    passesOccupancyCap,
     passesCategorySLA,
     categoryPasses,
     passesOrgGates: passesPrimaryCI && passesBOASA && passesOccupancyCap && passesCoverage,
