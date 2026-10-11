@@ -1060,3 +1060,6 @@ questions. Establish which question is being asked before calling one wrong.
   that is the cause.
 - **Node 24** strips TypeScript types natively, but the sources use extensionless relative
   imports and unmarked type imports, so plain `node file.ts` will not run them. Use `tsx`.
+
+### 2026-10-11 — UI-9 / UI-10: Results screen display truth (PRD 1.22.2)
+Search-history Primary SLA colour now follows the engine gate (`primaryCiLow >= effectivePrimaryTarget`, fallback median >= policy target); `infeasibleAdjacentWarning` is rendered as an amber note under the headline SLA card and below-target representative figures are amber when it is set. Display only; recommended/gross HC unchanged. Suite D74.
