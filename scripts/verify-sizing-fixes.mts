@@ -6875,7 +6875,7 @@ console.log('\n--- Suite D73: P1-6 replacement fixtures for the roster-polish pa
 }
 
 console.log('\n==================================================');
-console.log(` RESULTS:${passedTests} PASSED, ${failedTests} FAILED`);
+console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');
 
 if (failedTests > 0) process.exitCode = 1;
