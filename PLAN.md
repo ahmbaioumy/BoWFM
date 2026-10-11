@@ -1645,3 +1645,16 @@ categories is hairline at today's coverage-ON support result. Logged for the bac
   miss a rescue, never accept a failing roster.
 - "No roster passes at 46 on the planner's own config" is evidence from search (grid, local
   search, polish), not a proof.
+
+---
+
+# 2026-10-11 — owner: "plan for them and implement, no limit, until the weekly limit is finished" (meter 95%)
+
+Order chosen (about 5 points left before the reset on 12 Oct):
+1. **Now, in parallel (read-only):** investigator frames the owner decision for thin SLA margins (P1-7 / L24, P1-8 / L25) and the late-start rescue gap (L26): what happens today, measured size, 2–3 options each with headcount impact. Engine change itself is Tier 3 and is built after the decision.
+2. **Now (build, Tier 1, display only, no headcount change):** H5 + H11.
+   - H5: `ResultsFlow.tsx:~355` labels an agent who handled no cases with a GUESSED category (`categories[i % categories.length].name`). Fix: use the category the engine actually assigned to that agent when the run output carries it (siloed runs); otherwise show a neutral label ("No cases handled" / "Shared pool"), never a guess. Same value in the on-screen table and any export built from it.
+   - H11: `RunFlow.tsx` gives no warning for a low replication count. Add a plain warning under the replications field: 1 replication → "No confidence check: with one replication the result is a single run."; 2–29 → "Fewer than 30 replications: the confidence check is weak; results may change from run to run. 30 or more is recommended." No gate, run still allowed, default unchanged.
+   - Tests: pure helpers with checks in a new suite (next free number after D74); browser check by tester. Scope: `src/components/ResultsFlow.tsx`, `src/components/RunFlow.tsx`, one small helper under `src/utils/` (may extend `results-display.ts`), test file (append), `PRD.md`, `project_context.md`, `docs/wfm/07`, rebuilt `BoWFM.html`.
+   - Acceptance: an agent with zero cases never shows a category it was not assigned; warning texts appear at 1 and at 10 replications and disappear at 30; samples 31/40, 27/34, 31/39; zero console errors; `npm test` green; `check:artifact` passes.
+3. **After the reset, in this order:** thin SLA margins (decision framed in step 1) → 24x7 minimum coverage (F1 + G8, owner design decision) → H4 → H10 / H8 → G7 numbers (the other session chose "explain, do not change" — confirm with owner before touching) → F4–F7, G9, G10 → J2, rest of J4, G13, F9, minor backlog, never-audited areas.
