@@ -1093,3 +1093,19 @@ Auditor: pass. Only the 45 approved assertions changed; D73 covers all four poli
 - Step 3 (H3: UI-9, UI-10) on `fix/h3-results-truth`: search-history Primary SLA cell coloured by the confidence lower bound against the engine floor (`historyPrimaryPasses`, `src/utils/results-display.ts`) with a "CI low" line; the engine note `infeasibleAdjacentWarning` is shown under the headline SLA card ("Why this card is below target: …") and the card / category figure turn amber instead of red in that case. Suite D74 (6 checks). `npm test` 1,504 green (174 + 1,069 + 97 + 164). PRD v1.22.2.
 - Tester: PASS, no blocker or major. Samples 31/40, 27/34, 31/39 unchanged, zero console errors. Every history row of the three samples: colour agrees with the primary gate (green beside "Fail" only where another gate failed, e.g. a category at 79.5%). Helper cases correct incl. equality and fallback. Mutation (median always) → D74.1, D74.2, D74.4 fail. Scope: 7 allowed files, no engine file.
 - Open minors: H3-a the below-target note was not reproduced in the browser (no sample triggers it); its text and amber styling are checked by code-text test only. H3-b history layout with the extra line checked through the page structure, not by eye. H3-c amber is keyed on the presence of the warning only. Auditor and challenger not run (budget).
+
+---
+
+# H5 + H11 display fixes — verification, 2026-10-11
+
+- Build on `fix/h5-h11-display`: idle agent in a separated-queue run shows the engine-assigned category (`des.agentFairness.perAgent[].category`) or "No cases handled"; replication note on the Run screen at 1 and at 2–29. Suite D75 (10 checks). `npm test` 1,514 green (174 + 1,079 + 97 + 164). PRD v1.22.3.
+- Tester: PASS. Samples 31/40, 27/34, 31/39; zero console errors; notes appear at 10 and 1, gone at 30; run at 10 completes; helper cases correct; mutation → D75.1–3 fail; scope 8 allowed files, no engine file.
+- Open minors: H5-a idle-agent label not seen on screen (no idle agent produced in the browser); logic covered by helper checks only. Auditor and challenger not run (Tier 1, budget).
+
+# Decision framing — thin SLA margins (investigator, read-only, 2026-10-11)
+
+- Correction: the record says 7 of 20 fresh seeds PASS at N=27 on the support sample (13 fail), not 7 fail. L24 sample recorded inconsistently (3 of 6 in PRD, 3 of 20 in project_context).
+- P1-7 / L24: polish evaluates every step on the SAME case sets the search used (`hc-search.ts:3090-3130` sync, `:3908-3939` async); the confirmation block (`createConfirmationBlock` `:740`, built `:2828` / `:3535`, used by `createRescueSearch` `:914`) is never passed to it. Headcount unaffected (polish runs at fixed N).
+- P1-8 / L25: per-category gate uses the same CI rule on few cases → verdict flips with the seed; headcount can be 1 low or 1 high by chance.
+- L26: rescue ladder gives every queue the same late share; can only make headcount too HIGH; no measurement recorded.
+- OWNER DECISIONS 2026-10-11: P1-7 → **confirm each polish step** on the confirmation block. P1-8 → owner asked for the best option → supervisor recommendation adopted: **flag thin categories in Results now (display only); stricter fresh-days check later after measurement**. L26 → leave as is until measured.
