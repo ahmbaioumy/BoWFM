@@ -1699,3 +1699,22 @@ Owner decision 2026-10-11: confirm EACH polish step. No usage cap ("until the li
 | 7 | Mutation proof | Remove the confirmation condition in a scratch copy → new tests fail |
 | 8 | Docs and artifact | PRD / project_context / docs 07; `npm run check:artifact` passes |
 | 9 | Scope respected | Only scope-lock files changed |
+
+## P1-7 — challenger verdict: FAIL (accepted). Revised rules below override the plan above.
+
+**Accepted findings:** (1) the unpolished roster has normally NEVER been checked on the confirmation block (polish is gated on the primary result only, `hc-search.ts:~3089`; the ladder runs only when the primary gate fails), so an absolute rule would reject every polish when the headcount itself is marginal and throw away the coverage gain for nothing; (2) the confirmation block is built unconditionally (`~2828`, `~3535`) — no "block missing" branch is needed unless the builder finds a real path; (3) a second noisy gate breaks the binary search monotonicity assumption more often; (4) siloed path needs per-queue confirmation verdicts or one failure collapses every queue to no polish; (5) cost and async cancel were unspecified; (6) confirmation results must never leak into the displayed statistics.
+
+**Rule, final (RELATIVE):**
+- Once per search, when the polish is about to run, the UNPOLISHED roster (k = 0 / all zeros) is evaluated on the confirmation block (full R, unmodified gate). Call it the baseline.
+- A polish candidate that passes the primary gate is then evaluated on the confirmation block and counts as passing only if it is NOT WORSE than the baseline there: (a) if the baseline passes the confirmation gate, the candidate must pass it too; (b) if the baseline fails it, the candidate must have an overall SLA confidence lower bound >= the baseline one (tolerance 1e-9) and no category that passes for the baseline may fail for the candidate. Occupancy / ASA caps: a cap the baseline satisfies must stay satisfied.
+- Siloed runs: the confirmation evaluation returns per-queue verdicts; they are AND-merged with the primary per-queue verdicts so a failure is charged to the right queue. The combined final vector must satisfy the same relative rule; the existing fallback (best fully passing evaluated vector, worst case no polish) is unchanged.
+- Pooled runs: after the binary search, the chosen k must satisfy the rule; if not, fall back to the largest already-evaluated k that does, else k = 0. State what the existing code does when monotonicity breaks and keep that behaviour otherwise.
+- Confirmation results live in their OWN map keyed by roster vector (never in `candidateEvals` / `evalCache`); statistics, history row and headline figures keep coming from the primary sets (F3). A test pins this.
+- Cost: confirmation evaluations only for candidates that pass primary, cached per vector, plus one baseline; the builder reports the count and time on a Shift Placement run. Async: yields and honours cancel between confirmation evaluations exactly as between primary ones.
+- Out of scope, recorded as open item P1-7-a: when the baseline itself fails the confirmation gate the recommended HEADCOUNT is marginal on fresh days (same family as P1-8); this change does not alter the headcount. The builder exposes one optional result field (e.g. `polishConfirmation: { baselinePasses, adoptedPasses }`) so a later change can show it; no UI in this build.
+
+**Tests, revised:** injected-evaluator unit tests for each branch: baseline passes + candidate fails → rejected; baseline passes + candidate passes → adopted; baseline fails + candidate better or equal → adopted; baseline fails + candidate worse → rejected; two queues where only one fails confirmation → only that queue loses its polish; pooled non-monotone case → falls back to the largest k satisfying the rule; confirmation called only after a primary pass and once per vector; displayed statistics equal the primary-set evaluation of the adopted roster; sync = async; same seed twice identical; recommended headcount identical before / after. Existing D50 / D65 / D72 expectations: run before and after, list every difference with its reason.
+
+**Acceptance 1, revised:** the adopted roster is never worse than the unpolished roster on fresh days: tester measures both on 10 fresh seeds (pass count and SLA lower bound) — adopted >= unpolished; and on the old build shows a case where the adopted roster was worse.
+
+**Scope lock addition:** `src/types/wfm.ts` (one optional result field).
