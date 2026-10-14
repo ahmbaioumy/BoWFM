@@ -1210,3 +1210,10 @@ Moved cases re-pinned with supervisor approval (the headcount moves, so they are
   - [minor] Coverage-OFF note repeats itself; Sensitivity roster mixing not recorded in PRD.
 - Confirmed fine: displayed roster = the roster the recommended HC passed with (sync/async); infeasible hides block; clock conversion incl. wrap; single open time per calendar.
 - User-side claim "user-entered Shift Placement roster" — Shift Placement start times are engine-chosen (analytic placement), not typed; the substance (reason line not established for every path) holds via polish.
+
+# Item 1 review round 3 (2026-10-14) — re-check of A13 (commit b8b63ee)
+
+- User-side PASS; challenger PASS. Tests 1,646 green (174 + 1,211 + 97 + 164), check:artifact fresh, no HC/roster change.
+- Builder deviation accepted: D65/D72 digest helpers skip the display-only `winningLayout` key (old digests still pass → nothing else moved).
+- Backlog (minor): split Coverage-OFF parenthetical into its own sentence; polish adoption always gets neutral wording (conservative); reason line says "targets" where coverage is the failing one; add a real siloed end-to-end check that listed seats sum to HC; seat counts depend on non-null agent categories (no path found today); Sensitivity grid layout labels (L34); runtime 1.4-1.9x on large files (owner); spread with coverage OFF (owner follow-up).
+- Supervisor verdict: ready for owner approval.
