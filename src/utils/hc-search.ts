@@ -3394,7 +3394,7 @@ export function searchOptimalHC(params: {
       } else {
         // Search exhausted up to searchCap without finding a passing candidate
         isInfeasible = true;
-        const failReasons = primaryFailedResult?.failingReasons?.join('; ') || 'SLA constraints not satisfied';
+        const failReasons = (primaryFailedResult?.failingReasons?.join('; ') || 'SLA constraints not satisfied').replace(/\.$/, ''); // a confirmation-failure sentence ends with '.'; every other reason does not
         infeasibleReason = `Headcount search exhausted all candidate headcounts up to the user max ceiling of ${searchCap} agents without finding a passing configuration. At N=${searchCap}: ${failReasons}. Increase userMaxHC or review SLA/labor parameters.`;
         primaryDrivenHC = searchCap;
         recommendedHC = null;
@@ -4304,7 +4304,7 @@ export async function searchOptimalHCAsync(params: {
       } else {
         // Search exhausted up to searchCap without finding a passing candidate
         isInfeasible = true;
-        const failReasons = primaryFailedResult?.failingReasons?.join('; ') || 'SLA constraints not satisfied';
+        const failReasons = (primaryFailedResult?.failingReasons?.join('; ') || 'SLA constraints not satisfied').replace(/\.$/, ''); // a confirmation-failure sentence ends with '.'; every other reason does not
         infeasibleReason = `Headcount search exhausted all candidate headcounts up to the user max ceiling of ${searchCap} agents without finding a passing configuration. At N=${searchCap}: ${failReasons}. Increase userMaxHC or review SLA/labor parameters.`;
         primaryDrivenHC = searchCap;
         recommendedHC = null;

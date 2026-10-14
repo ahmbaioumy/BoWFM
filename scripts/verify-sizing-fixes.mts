@@ -7160,7 +7160,7 @@ console.log('\n--- Suite D78: spread layout when the coverage-repair roster fail
   }
 
   // ---- D78.e three built-in samples at defaults are unchanged ----
-  for (const [type, hc, gross] of [['claims', 31, 40], ['support', 27, 34], ['healthcare', 31, 39]] as Array<['claims' | 'support' | 'healthcare', number, number]>) {
+  for (const [type, hc, gross] of [['claims', 31, 40], ['support', 28, 35], ['healthcare', 31, 39]] as Array<['claims' | 'support' | 'healthcare', number, number]>) {
     const { rows } = buildSampleDataset(type, new Date(2026, 9, 5, 8, 0, 0, 0));
     const ivs = mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
     const cats = discoverAndSyncCategories(ivs, DEFAULT_CATEGORIES, DEFAULT_SLA);
@@ -7479,6 +7479,218 @@ console.log('\n--- Suite D80: no wall-clock horizon (S1) and heap order = dispat
     }
     console.log(`  (D80 S2: ${pairs} pairs compared, ${bad.length} disagree${bad.length ? ': ' + bad.slice(0, 5).join('; ') : ''})`);
     assert(pairs > 1000 && bad.length === 0, 'D80.5 CaseMinHeap.compare and pickNextCase/compareByUrgency give the same winner on every pair (parked, ties, equal deadlines, overdue, categories)', bad.slice(0, 3).join('; '));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Suite D81 - Item 2 (L25 / P1-8, closes P1-7-a): a passing headcount must also pass on the confirmation block (owner decision 2026-10-11)
+// A candidate N counts as passing only if the layout that passed ALSO passes the unchanged gate on the confirmation block (fresh,
+// independent random days). One pure state machine (createPassConfirmation) is driven by both searches for the uniform, repair and
+// placement layouts (the spread layout and the rescue ladder already confirm and are not confirmed twice). A primary pass that fails
+// confirmation is a NON-passing result with the reason "N=<n> passed on the main simulated days but not on a second, independent set
+// (<gate line>)."; the N-1 boundary evidence says the same. Cap reached only by confirmation = infeasible (B1). Runs with R <= 5 confirm
+// every evaluation (B7); 5-replication leap probes of a larger R stay primary-only.
+// Fail-first (pre-change, 11 failures): D81.0 (machine absent), D81.a1 (27, not 28), D81.a3/a4/a5 (no confirmation reason or evidence),
+// D81.d10 (no confirmation progress), D81.cap1 / D81.cap3 (cap 27 / 28), D81.g1 / D81.h1 (27 / 26 returned), D81.r1 (R=3 not confirmed);
+// the controls hold (sync === async, claims, healthcare, AJM_Only, the 10-fresh-seed proof, monotonicity 28..31, determinism).
+// Mutation proof (hc-search.ts, scratch copy): dropping confirmation for uniform / repair / placement, in sync or in async, fails D81.
+// ---------------------------------------------------------------------------
+console.log('\n--- Suite D81: reliable minimum - a passing headcount also passes on the confirmation block (L25 / P1-8) ---');
+{
+  type PM = { next: () => any; record: (e: any) => void; result: () => any };
+  const passMachine = (hcNs as any).createPassConfirmation as ((p: { n: number; confirmEnabled: boolean }) => PM) | undefined;
+  const fmtConf = (hcNs as any).formatConfirmationFailure as ((n: number, g: string[]) => string) | undefined;
+  assert(typeof passMachine === 'function' && typeof fmtConf === 'function', 'D81.0 createPassConfirmation and formatConfirmationFailure are exported', `machine=${typeof passMachine} fmt=${typeof fmtConf}`);
+  const CONF_RE = /^N=(\d+) passed on the main simulated days but not on a second, independent set \((.+)\)\.$/;
+  const BOUND_RE = /^N=(\d+) passed on the main simulated days but failed on a second, independent set \((.+)\)\. Stepping up to N=(\d+) achieved /;
+  const rowOf = (r: any, n: number): any => (r.searchHistory as any[]).find((h) => h.hc === n);
+  const sigOf = (r: any): string => `${r.recommendedHC}|${r.staffing?.grossHCTotal}|${r.isInfeasible}|${r.infeasibleReason}|${r.bindingConstraintType}|${r.bindingConstraintDescription}|${r.boundaryEvidence?.differenceSummary}|${JSON.stringify(r.finalDESResult?.shiftDistributionUsed)}|${JSON.stringify(r.boundaryEvidence?.failedResult?.shiftDistributionUsed)}|${JSON.stringify(r.searchHistory)}`;
+
+  // ---- D81.d the pure machine (primary -> confirm), no evaluation inside ----
+  if (typeof passMachine === 'function') {
+    const ev = (pass: boolean, reasons: string[], tag: string): any => ({ passesAllConstraints: pass, failingReasons: reasons, tag, primaryStats: { achievedPctMedian: 81.5 } });
+    {
+      const m = passMachine({ n: 27, confirmEnabled: true });
+      assert(m.next() === 'primary', 'D81.d1 first step is the primary evaluation', String(m.next()));
+      m.record(ev(true, [], 'p'));
+      assert(m.next() === 'confirm', 'D81.d2 a primary pass is NOT adopted yet: the confirmation block runs next', String(m.next()));
+      m.record(ev(true, [], 'c'));
+      const r = m.result();
+      assert(m.next() === null && r.adopted && r.adopted.tag === 'p' && r.failed === null && r.confirmationGate === null, 'D81.d3 confirmed pass -> adopted, carrying the PRIMARY evaluation (figures comparable with every other N)', JSON.stringify(r));
+    }
+    {
+      const m = passMachine({ n: 27, confirmEnabled: true }); m.next(); m.record(ev(true, [], 'p')); m.next();
+      m.record(ev(false, ["Category 'X' Primary SLA 95% CI [70.0%, 90.0%] lower bound < target 80%"], 'c'));
+      const r = m.result();
+      const want = `N=27 passed on the main simulated days but not on a second, independent set (Category 'X' Primary SLA 95% CI [70.0%, 90.0%] lower bound < target 80%).`;
+      assert(m.next() === null && r.adopted === null && r.failed.passesAllConstraints === false && r.failed.tag === 'p' && r.failed.primaryStats.achievedPctMedian === 81.5, 'D81.d4 confirmation failure -> NOT adopted; the failing result keeps the primary figures but is non-passing', JSON.stringify(r));
+      assert(r.failed.failingReasons.length === 1 && r.failed.failingReasons[0] === want && r.confirmationGate === "Category 'X' Primary SLA 95% CI [70.0%, 90.0%] lower bound < target 80%", 'D81.d5 the only reason is the confirmation sentence; confirmationGate = the failing gate line', JSON.stringify([r.failed.failingReasons, r.confirmationGate]));
+      assert(typeof fmtConf === 'function' && fmtConf(27, ['a', 'b']) === 'N=27 passed on the main simulated days but not on a second, independent set (a; b).', 'D81.d6 several failing gate lines are joined with "; "', typeof fmtConf === 'function' ? fmtConf(27, ['a', 'b']) : 'absent');
+    }
+    {
+      const m = passMachine({ n: 27, confirmEnabled: true }); m.next(); m.record(ev(false, ['Primary SLA: 70% < 80%'], 'p'));
+      const r = m.result();
+      assert(m.next() === null && r.adopted === null && r.failed.tag === 'p' && r.failed.failingReasons[0] === 'Primary SLA: 70% < 80%' && r.confirmationGate === null, 'D81.d7 primary failure -> not adopted, no confirmation run, reasons unchanged', JSON.stringify(r));
+    }
+    {
+      const m = passMachine({ n: 27, confirmEnabled: false }); m.next(); m.record(ev(true, [], 'probe'));
+      const r = m.result();
+      assert(m.next() === null && r.adopted && r.adopted.tag === 'probe' && r.confirmationGate === null, 'D81.d8 leap probe (fewer replications than R: confirmEnabled=false) is NOT confirmed - a probe pass is always followed by a full-R evaluation, which is', JSON.stringify(r));
+      m.record(ev(false, ['late record'], 'late'));
+      assert(m.result().adopted.tag === 'probe', 'D81.d9 records after the machine finished are ignored', JSON.stringify(m.result()));
+    }
+  }
+
+  // ---- fixtures ----
+  const { rows: supRows } = buildSampleDataset('support', new Date(2026, 9, 5, 8, 0, 0, 0));
+  const ivSup = mapRawRecordsToIntervals(supRows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+  const catSup = discoverAndSyncCategories(ivSup, DEFAULT_CATEGORIES, DEFAULT_SLA);
+  const pSup = (extra: any = {}) => ({ intervals: ivSup, openingWIP: [] as OpeningWIPCase[], categories: catSup, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, seed: DEFAULT_SIM_PARAMS.seed, userMaxHC: DEFAULT_SIM_PARAMS.maxHCSearch, replications: DEFAULT_SIM_PARAMS.replications, queueArchitecture: 'pooled' as const, dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness, ...extra });
+
+  // ---- D81.a support sample: 28 (was 27), sync === async, N=27 row and N-1 evidence (B4) ----
+  const events: Array<{ n: number | undefined; msg: string }> = [];
+  const sup: any = searchOptimalHC(pSup());
+  const supA: any = await searchOptimalHCAsync(pSup({ onProgress: (p: any) => events.push({ n: p.currentN, msg: String(p.currentMessage ?? '') }) }));
+  assert(sup.recommendedHC === 28 && sup.staffing?.grossHCTotal === 35 && !sup.isInfeasible, 'D81.a1 support sample (defaults, coverage ON): recommended 28 / gross 35 (was 27 / 34: 27 cleared the main days but not a second independent set)', `got ${sup.recommendedHC}/${sup.staffing?.grossHCTotal}`);
+  assert(sigOf(sup) === sigOf(supA), 'D81.a2 support: sync === async (HC, gross, label, evidence, roster, full search history)', `sync=${sup.recommendedHC} async=${supA.recommendedHC}`);
+  const row27 = rowOf(sup, 27);
+  const m27 = row27 && row27.failingReasons.length === 1 ? CONF_RE.exec(row27.failingReasons[0]) : null;
+  assert(!!row27 && row27.passed === false && !!m27 && m27[1] === '27' && /Category/.test(m27[2]), 'D81.a3 support N=27 history row: Fail, with the "passed on the main simulated days but not on a second, independent set (<category gate>)" reason', JSON.stringify(row27?.failingReasons));
+  assert(!!row27 && row27.primaryPct >= 80, 'D81.a3b the N=27 row still shows its main-days figure (>= the 80% target) - which is why the reason text is needed', `primaryPct=${row27?.primaryPct}`);
+  {
+    const ev = sup.boundaryEvidence;
+    const mb = ev ? BOUND_RE.exec(ev.differenceSummary) : null;
+    const dist = ev?.failedResult?.shiftDistributionUsed as ShiftDistributionByCategory | undefined;
+    const starts = dist ? Object.values(dist).reduce((a, d) => Math.max(a, d.slaps.length), 0) : 0;
+    assert(!!ev && ev.failedN === 27 && !!mb && mb[1] === '27' && mb[3] === '28', 'D81.a4 N-1 evidence (27) says it passed on the main days but failed on a second, independent set', ev?.differenceSummary);
+    assert(!!mb && !!m27 && mb[2] === m27[2], 'D81.a5 the evidence text and the history row quote the SAME failing gate line', `${mb?.[2]} | ${m27?.[2]}`);
+    assert(starts >= 2, 'D81.a6 the N-1 evidence run uses the layout that passed the main days (a multi-start coverage roster), not the uniform one', `starts=${starts}`);
+  }
+  // progress + leap probes
+  {
+    const conf = events.filter((e) => e.msg.includes('Confirming on a second set of simulated days'));
+    const probes = events.filter((e) => /^Leap test N=/.test(e.msg));
+    const perN = new Map<number, number>();
+    for (const e of conf) if (e.n !== undefined) perN.set(e.n, (perN.get(e.n) ?? 0) + 1);
+    const R81 = DEFAULT_SIM_PARAMS.replications;
+    const perRun = R81 - 1; // evaluateCandidateStatisticalAsync reports after every replication except the last
+    assert(conf.length > 0 && conf.length % perRun === 0, 'D81.d10 async progress shows "Confirming on a second set of simulated days" (whole confirmation runs)', `events=${conf.length} (per run ${perRun})`);
+    assert(probes.length > 0 && probes.every((e) => !e.msg.includes('Confirming')), 'D81.d11 the 5-replication leap probes (R=30) are primary-only: no "Confirming" progress inside a "Leap test" step', `probes=${probes.length}`);
+    assert(Array.from(perN.values()).every((c) => c <= perRun), 'D81.d12 no double confirmation: at most ONE confirmation run per headcount for support (repair layout only; the spread layout confirms itself)', JSON.stringify(Array.from(perN.entries())));
+  }
+
+  // ---- D81.cap support: the old answer as a cap. Cap 27 was already infeasible before this change (the 5-replication leap probe at the cap
+  //      fails on its own sets, so the full-R run never happens) and stays so; cap 28 recommends 28. The confirmation-text case is D81.g3 (fixture A). ----
+  {
+    const c27: any = searchOptimalHC(pSup({ userMaxHC: 27 }));
+    const c27a: any = await searchOptimalHCAsync(pSup({ userMaxHC: 27 }));
+    const c28: any = searchOptimalHC(pSup({ userMaxHC: 28 }));
+    const c28a: any = await searchOptimalHCAsync(pSup({ userMaxHC: 28 }));
+    assert(c27.isInfeasible && c27a.isInfeasible && c27.recommendedHC === null && c27.infeasibleReason === c27a.infeasibleReason && /Headcount search exhausted all candidate headcounts up to the user max ceiling of 27 agents/.test(c27.infeasibleReason ?? ''), 'D81.cap1 support with userMaxHC = 27 (the old answer): infeasible, sync === async, message wording unchanged', c27.infeasibleReason);
+    assert(c28.recommendedHC === 28 && c28a.recommendedHC === 28 && !c28.isInfeasible && !c28a.isInfeasible, 'D81.cap3 support with userMaxHC = 28: recommends 28 (sync and async)', `sync=${c28.recommendedHC} async=${c28a.recommendedHC}`);
+  }
+
+  // ---- D81.b unchanged answers ----
+  for (const [type, hc, gross] of [['claims', 31, 40], ['healthcare', 31, 39]] as Array<['claims' | 'healthcare', number, number]>) {
+    const { rows } = buildSampleDataset(type, new Date(2026, 9, 5, 8, 0, 0, 0));
+    const ivs = mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+    const cats = discoverAndSyncCategories(ivs, DEFAULT_CATEGORIES, DEFAULT_SLA);
+    const r = searchOptimalHC({ intervals: ivs, openingWIP: [], categories: cats, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, seed: DEFAULT_SIM_PARAMS.seed, userMaxHC: DEFAULT_SIM_PARAMS.maxHCSearch, replications: DEFAULT_SIM_PARAMS.replications, queueArchitecture: 'pooled', dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness });
+    assert(r.recommendedHC === hc && r.staffing.grossHCTotal === gross, `D81.b ${type} sample (defaults): HC ${hc} / gross ${gross} unchanged by the confirmation rule`, `got ${r.recommendedHC}/${r.staffing.grossHCTotal}`);
+  }
+  {
+    const { intervals: ivAjm, categories: catAjm } = loadSampleFile('AJM_Only.csv');
+    const r = searchOptimalHC({ intervals: ivAjm, openingWIP: [], categories: catAjm, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, seed: DEFAULT_SIM_PARAMS.seed, userMaxHC: DEFAULT_SIM_PARAMS.maxHCSearch, replications: DEFAULT_SIM_PARAMS.replications, queueArchitecture: 'pooled', dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness });
+    assert(r.recommendedHC === 16 && r.staffing.grossHCTotal === 20, 'D81.b AJM_Only.csv (defaults): HC 16 / gross 20 unchanged by the confirmation rule', `got ${r.recommendedHC}/${r.staffing.grossHCTotal}`);
+  }
+
+  // ---- D81.c owner proof target: at the new N, fresh seeds (independent of the primary AND confirmation blocks) pass >= 9 of 10 ----
+  {
+    const freshPass = (n: number, roster: ShiftDistributionByCategory | undefined, nSeeds: number): number => {
+      let pass = 0;
+      for (let k = 0; k < nSeeds; k++) {
+        const bs = (1000000007 + k * 1000003) % 2147483647;
+        const sets = hcNs.generatePrecomputedReplications({ intervals: ivSup, openingWIP: [], categories: catSup, calendar: DEFAULT_CALENDAR, sla: DEFAULT_SLA, baseSeed: bs, replications: 30 });
+        const e = evaluateCandidateStatistical({ operationalHC: n, intervals: ivSup, openingWIP: [], categories: catSup, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, baseSeed: bs, replications: 30, queueArchitecture: 'pooled', precomputedCaseSets: sets, shiftDistribution: roster, dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness });
+        if (e.passesAllConstraints) pass++;
+      }
+      return pass;
+    };
+    const rosterNew = sup.finalDESResult?.shiftDistributionUsed as ShiftDistributionByCategory | undefined;
+    const rosterOld = sup.boundaryEvidence?.failedResult?.shiftDistributionUsed as ShiftDistributionByCategory | undefined;
+    const pNew = rosterNew ? freshPass(28, rosterNew, 10) : -1;
+    const pOld = rosterOld ? freshPass(27, rosterOld, 10) : -1;
+    console.log(`  (D81.c fresh seeds: N=28 passes ${pNew}/10, old answer N=27 passes ${pOld}/10)`);
+    assert(pNew >= 9, 'D81.c1 support at the recommended 28: >= 9 of 10 fresh seeds pass the unchanged gate (owner proof target; N=27 passed 8 of 20)', `pass=${pNew}/10`);
+    assert(pOld >= 0 && pOld < 9, 'D81.c2 control: the old answer N=27 does NOT reach the same bar on the same 10 fresh seeds (the proof can fail)', `pass=${pOld}/10`);
+  }
+
+  // ---- D81.e monotonicity: the search's own verdict (primary AND confirmation, repair or spread layout) at 28..31 ----
+  {
+    const planOf81 = (hcNs as any).planCoverageRepair as (p: any) => any;
+    const R = DEFAULT_SIM_PARAMS.replications; const seed = DEFAULT_SIM_PARAMS.seed;
+    const pre = hcNs.generatePrecomputedReplications({ intervals: ivSup, openingWIP: [], categories: catSup, calendar: DEFAULT_CALENDAR, sla: DEFAULT_SLA, baseSeed: seed, replications: R });
+    const cb = hcNs.createConfirmationBlock({ intervals: ivSup, openingWIP: [], categories: catSup, calendar: DEFAULT_CALENDAR, sla: DEFAULT_SLA, seed, replications: R });
+    const run = (n: number, roster: any, sets: any, bs: number) => evaluateCandidateStatistical({ operationalHC: n, intervals: ivSup, openingWIP: [], categories: catSup, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, baseSeed: bs, replications: R, queueArchitecture: 'pooled', precomputedCaseSets: sets, shiftDistribution: roster, dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness }).passesAllConstraints;
+    const verdicts: string[] = []; let all = true;
+    for (let n = 27; n <= 31; n++) {
+      const plan = planOf81({ n, sla: DEFAULT_SLA, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, queueArchitecture: 'pooled', representativeCases: pre[0].cases });
+      const ok = [plan.dist, plan.spread].some((roster: any) => !!roster && run(n, roster, pre, seed) && run(n, roster, cb.sets(), cb.baseSeed));
+      verdicts.push(`${n}${ok ? 'P' : 'F'}`);
+      if (n >= 28 && !ok) all = false;
+      if (n === 27 && ok) all = false;
+    }
+    assert(all, 'D81.e monotonicity: support passes primary AND confirmation at 28, 29, 30 and 31 (27 does not)', verdicts.join(' '));
+  }
+
+  // ---- D81.f determinism ----
+  {
+    const sup2: any = searchOptimalHC(pSup());
+    assert(sigOf(sup2) === sigOf(sup), 'D81.f two sync runs of the support sample are identical (HC, evidence, roster, full history)', `${sup2.recommendedHC} vs ${sup.recommendedHC}`);
+  }
+
+  // ---- D81.g/h/i layout fixtures (flat 5-day, 14 h/day window, 9 h shift, AHT 20, R=5, seed 1): uniform / placement ----
+  const flat81 = (vol: number, win: number, pct: number, extraLabor: any = {}, cov = false) => {
+    const ivs: StandardInterval[] = [];
+    for (let day = 0; day < 5; day++) for (let h = 8; h < 22; h++) for (let m = 0; m < 60; m += 30) ivs.push({ intervalIndex: ivs.length, start: new Date(2026, 2, 2 + day, h, m), end: new Date(2026, 2, 2 + day, h, m + 30), volume: vol, category: 'General' });
+    return {
+      intervals: ivs, openingWIP: [] as OpeningWIPCase[], categories: [{ id: 'c1', name: 'General', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 }] as CategoryConfig[],
+      calendar: { workingDays: [1, 2, 3, 4, 5], dailyOpenHour: 8, dailyOpenMinute: 0, dailyCloseHour: 22, dailyCloseMinute: 0, holidays: [] } as CalendarConfig,
+      labor: { ...DEFAULT_LABOR, dailyProductiveHours: 9, ...extraLabor } as LaborConfig,
+      sla: { primaryPct: pct, primaryWindow: win, primaryUnit: 'hours', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes', asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'next_open', occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 90, minCoverageEnabled: cov } as SLAPolicyConfig,
+      seed: 1, userMaxHC: 60, replications: 5, queueArchitecture: 'pooled' as const,
+    };
+  };
+  {
+    // uniform layout (coverage OFF, no placement): 27 clears the main days (CI low 80.0) but not the second set (79.8) -> 28
+    const fxU = flat81(20, 4, 80);
+    const u: any = searchOptimalHC(fxU); const uA: any = await searchOptimalHCAsync(fxU);
+    const rU = rowOf(u, 27);
+    assert(u.recommendedHC === 28 && !!rU && rU.passed === false && rU.failingReasons.length === 1 && !!CONF_RE.exec(rU.failingReasons[0]), 'D81.g1 uniform layout (coverage OFF): recommended 28; the N=27 row is the confirmation failure (27 cleared the main days only)', `rec=${u.recommendedHC} row27=${JSON.stringify(rU?.failingReasons)}`);
+    assert(sigOf(u) === sigOf(uA), 'D81.g2 uniform layout: sync === async (full history, evidence, roster)', `sync=${u.recommendedHC} async=${uA.recommendedHC}`);
+    // B1: the cap is reached ONLY by a confirmation failure (27 is evaluated at full R, clears the main days, fails the second set) -> infeasible, with the sentence
+    const u27: any = searchOptimalHC({ ...fxU, userMaxHC: 27 }); const u27a: any = await searchOptimalHCAsync({ ...fxU, userMaxHC: 27 });
+    const wantTail = /Headcount search exhausted all candidate headcounts up to the user max ceiling of 27 agents without finding a passing configuration\. At N=27: N=27 passed on the main simulated days but not on a second, independent set \(.+\)\. Increase userMaxHC or review SLA\/labor parameters\.$/;
+    assert(u27.isInfeasible && u27.recommendedHC === null && wantTail.test(u27.infeasibleReason ?? ''), 'D81.g3 uniform layout with userMaxHC = 27 (the old answer): INFEASIBLE - a number that is not reliably met is not given; the message keeps its wording and names the confirmation failure (one full stop)', u27.infeasibleReason);
+    assert(u27a.isInfeasible && u27a.infeasibleReason === u27.infeasibleReason, 'D81.g4 cap 27: sync === async message', `${u27.infeasibleReason} | ${u27a.infeasibleReason}`);
+  }
+  {
+    // placement layout (coverage OFF, Shift Placement ON): 26 clears the main days with the analytic placement roster (CI low 76.7 vs target 76.5) but not the second set (76.0) -> 27
+    const fxP = flat81(20, 1, 76.5, { shiftPlacementEnabled: true });
+    const p: any = searchOptimalHC(fxP); const pA: any = await searchOptimalHCAsync(fxP);
+    const rP = rowOf(p, 26);
+    assert(p.recommendedHC === 27 && !!rP && rP.passed === false && rP.failingReasons.length === 1 && !!CONF_RE.exec(rP.failingReasons[0]), 'D81.h1 placement layout (Shift Placement ON, coverage OFF): recommended 27; the N=26 row is the confirmation failure of the placement roster', `rec=${p.recommendedHC} row26=${JSON.stringify(rP?.failingReasons)}`);
+    assert(sigOf(p) === sigOf(pA), 'D81.h2 placement layout: sync === async (full history, evidence, roster)', `sync=${p.recommendedHC} async=${pA.recommendedHC}`);
+  }
+
+  // ---- D81.r B7: R <= 5 - the leap probes are full evaluations and are confirmed ----
+  {
+    const ev3: Array<{ msg: string }> = [];
+    const s3: any = searchOptimalHC(pSup({ replications: 3 }));
+    const s3a: any = await searchOptimalHCAsync(pSup({ replications: 3, onProgress: (p: any) => ev3.push({ msg: String(p.currentMessage ?? '') }) }));
+    const leapConf = ev3.filter((e) => /^Leap test N=/.test(e.msg) && e.msg.includes('Confirming on a second set of simulated days') && /\/3 replications\)$/.test(e.msg));
+    assert(leapConf.length > 0, 'D81.r1 R=3: a leap step is a full evaluation and shows the confirmation run (3 replications)', `leap-confirm events=${leapConf.length}`);
+    assert(sigOf(s3) === sigOf(s3a) && s3.recommendedHC !== null, 'D81.r2 R=3: sync === async', `sync=${s3.recommendedHC} async=${s3a.recommendedHC}`);
   }
 }
 

@@ -85,7 +85,8 @@ shrinkage gross-up, harmonic blend, sum, then a single `round`).
    wording was stale, not the behavior. See `trusted-source-validation.json`'s
    `GROSS-HC-ROUND-VS-CEIL` entry.)
 8. **CI-gated acceptance, not single-run** — 95% CI bound must clear the target (lower bound
-   for SLA attainment, upper bound for occupancy/ASA caps).
+   for SLA attainment, upper bound for occupancy/ASA caps). A passing candidate must also
+   pass the same gate on the independent confirmation block (item 2, owner decision 2026-10-11).
 9. **Common Random Numbers** — `precomputedCaseSets` deliberately reuses identical arrival
    realisations across candidate N values. Variance reduction, not redundancy.
 10. **House-monotone agent apportionment** (`allocateAgentsToCategories`, divisor/
