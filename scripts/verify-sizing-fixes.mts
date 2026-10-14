@@ -38,7 +38,9 @@ import {
 } from '../src/utils/hc-search';
 import {
   allocateAgentsToCategories,
+  CaseMinHeap,
   generateCaseEntities,
+  pickNextCase,
   resolveEffectiveAdherence,
   resolveMinAgentsPerInterval,
   resolveOccupancyCapPct,
@@ -47,6 +49,7 @@ import {
   verifyAgentTimelineInvariants,
 } from '../src/utils/des-engine';
 import * as hcNs from '../src/utils/hc-search';
+import * as calNs from '../src/utils/calendar';
 import * as desNs from '../src/utils/des-engine';
 import { discoverAndSyncCategories, mapRawRecordsToIntervals, missingRequiredMappings, validateDataQuality } from '../src/utils/csv-parser';
 import { buildSampleDataset } from '../src/utils/sample-data';
@@ -7400,6 +7403,82 @@ console.log('\n--- Suite D79: start-time block and roster-source end-to-end (A12
       assert(fx.want.includes(lay(rs)) && same(rs, ra), `D79.n6 ${fx.name}: winningLayout ${fx.want.join('/')} and sync == async`, `sync=${lay(rs)} async=${lay(ra)}`);
       if (fx.want[0] === 'polish') assert(['adopted', 'adopted_partial'].includes((rs as any).rosterPolish?.status), `D79.n7 ${fx.name}: polish adopted -> layout polish`, `status=${(rs as any).rosterPolish?.status}`);
     }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Suite D80 - small fixes S1 + S2 (2026-10-14)
+// S1: computeIntervalHorizon never reads the wall clock. No valid demand interval AND no valid backlog arrival -> it throws a
+//     clear message (it used to return new Date(), so a result could change with the day it was run).
+// S2: the heap order (CaseMinHeap.compare) and the real dispatch order (pickNextCase / compareByUrgency) agree on every pair.
+// Fail-first: before the change D80.1 / D80.2 / D80.2c / D80.3b / D80.4 fail (a date is returned instead of an error).
+// ---------------------------------------------------------------------------
+console.log('\n--- Suite D80: no wall-clock horizon (S1) and heap order = dispatch order (S2) ---');
+{
+  const badIv: StandardInterval = { intervalIndex: 0, start: new Date(NaN), end: new Date(NaN), category: 'General', volume: 5 };
+  const MSG = 'No valid demand interval or backlog arrival date: the planning horizon cannot be set. Check the date columns of the uploaded file.';
+  const thrown = (f: () => unknown): string | null => { try { f(); return null; } catch (e) { return (e as Error).message; } };
+  const badWip = { id: 'W', category: 'General', priority: 1, arrival: new Date(NaN), clockStart: new Date(NaN), remainingWorkMinutes: 10 } as OpeningWIPCase;
+  const goodWip = { ...badWip, id: 'B', arrival: new Date(2026, 9, 5, 10, 0), clockStart: new Date(2026, 9, 5, 10, 0) } as OpeningWIPCase;
+  assert(thrown(() => computeIntervalHorizon([], [])) === MSG, 'D80.1 no demand interval and no backlog: throws the clear message (no wall-clock date)', `msg=${thrown(() => computeIntervalHorizon([], []))}`);
+  assert(thrown(() => computeIntervalHorizon([badIv], [badWip])) === MSG, 'D80.2 only invalid dates: throws the same message', '');
+  const bo = computeIntervalHorizon([badIv], [goodWip]);
+  assert(bo.horizonStart.getTime() === new Date(2026, 9, 5, 10, 0).getTime() && bo.horizonEnd.getTime() - bo.horizonStart.getTime() === 7 * 86400000, 'D80.2b backlog-only still gives arrival and arrival + 7 days', '');
+  const hasFn = (calNs as any).hasValidHorizonInput as ((i: any[], w: any[]) => boolean) | undefined;
+  assert(typeof hasFn === 'function' && hasFn([badIv], []) === false && hasFn([], [badWip]) === false && hasFn([{ start: new Date(2026, 9, 5, 9), end: new Date(2026, 9, 5, 10) }], []) === true && hasFn([], [goodWip]) === true, 'D80.2c hasValidHorizonInput: false for all-invalid, true for a valid interval or a valid backlog arrival', `typeof=${typeof hasFn}`);
+  // Valid data: unchanged.
+  const okIv: StandardInterval = { intervalIndex: 0, start: new Date(2026, 9, 5, 9, 0), end: new Date(2026, 9, 5, 9, 30), category: 'General', volume: 20 };
+  const okHz = computeIntervalHorizon([okIv, badIv], []);
+  assert(okHz.horizonStart.getTime() === okIv.start.getTime() && okHz.horizonEnd.getTime() === okIv.end.getTime(), 'D80.2d valid data: horizon = span of the valid intervals', '');
+  // Data quality: all-invalid dates never throw, still block the run, and skip the horizon warnings.
+  {
+    let dq: any = null; let err: string | null = null;
+    try {
+      dq = validateDataQuality({ intervals: [badIv, { ...badIv, intervalIndex: 1 }], mapping: { intervalStartCol: 'Date', volumeCol: 'Volume' } as any, categories: DEFAULT_CATEGORIES, calendar: DEFAULT_CALENDAR, labor: { ...DEFAULT_LABOR, contractualHoursSource: 'override', contractualProductiveHoursOverride: 500 } as any, sla: DEFAULT_SLA, openingWIP: [] });
+    } catch (e) { err = (e as Error).message; }
+    assert(err === null && !!dq && dq.passed === false && dq.issues.some((i: any) => i.severity === 'error'), 'D80.3 validateDataQuality with all-invalid dates: does not throw and still returns a blocking issue', `err=${err}`);
+    assert(!!dq && dq.horizonStart === null && dq.horizonEnd === null && !dq.issues.some((i: any) => i.field === 'Manual Agent Hours Override' || i.field === 'Calendar/Data Coverage Gap'), 'D80.3b horizon-dependent warnings (override scale, empty open days) are skipped; horizon reported as null', `hs=${dq?.horizonStart}`);
+  }
+  // Engine: a direct call with no valid data throws the clear message, not an obscure later error.
+  {
+    const m = thrown(() => generateCaseEntities({ intervals: [badIv], openingWIP: [], categories: DEFAULT_CATEGORIES, calendar: DEFAULT_CALENDAR, sla: DEFAULT_SLA, seed: 1 }));
+    assert(m === MSG, 'D80.4 generateCaseEntities with no valid data throws the clear horizon message', `msg=${m}`);
+  }
+  // S2: heap order vs dispatch order on a deterministic set of pairs (local seeded Mulberry32; createPrng is not exported).
+  {
+    let s80 = 80;
+    const prng = (): number => { let t = (s80 += 0x6d2b79f5); t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+    const base = new Date(2026, 9, 5, 8, 0).getTime();
+    let sid = 0;
+    const mk = (over: Partial<CaseEntity> = {}): CaseEntity => {
+      sid += 1;
+      const aht = 10 + Math.floor(prng() * 3) * 10;
+      const arr = new Date(base + Math.floor(prng() * 4) * 3600000);
+      const lss = new Date(base + Math.floor(prng() * 5) * 3600000 - 2 * 3600000); // few distinct values -> many equal deadlines; some before base (overdue)
+      return { id: `C${sid}`, syntheticId: sid, category: prng() < 0.5 ? 'A' : 'B', priority: 1 + Math.floor(prng() * 2), arrival: arr, clockStart: arr, totalAhtMinutes: aht, remainingWorkMinutes: prng() < 0.3 ? aht - 5 : aht, primaryDeadline: new Date(lss.getTime() + 1800000), latestSafeStart: lss, firstStartTime: null, completeTime: null, parkCount: prng() < 0.2 ? 1 : 0, isOpeningWip: prng() < 0.2, ...over } as CaseEntity;
+    };
+    const pool: CaseEntity[] = [];
+    for (let i = 0; i < 60; i++) pool.push(mk());
+    // Forced shapes: identical keys except syntheticId; parked with a later deadline vs fresh and earlier; overdue.
+    pool.push(mk({ latestSafeStart: new Date(base), priority: 1, arrival: new Date(base), parkCount: 0, remainingWorkMinutes: 10, totalAhtMinutes: 10 }));
+    pool.push(mk({ latestSafeStart: new Date(base), priority: 1, arrival: new Date(base), parkCount: 0, remainingWorkMinutes: 10, totalAhtMinutes: 10 }));
+    pool.push(mk({ latestSafeStart: new Date(base + 9 * 3600000), parkCount: 2, remainingWorkMinutes: 5, totalAhtMinutes: 30 }));
+    pool.push(mk({ latestSafeStart: new Date(base - 9 * 3600000), parkCount: 0, remainingWorkMinutes: 30, totalAhtMinutes: 30 }));
+    const heapCmp = (a: CaseEntity, b: CaseEntity): number => (new CaseMinHeap() as any).compare(a, b);
+    // Dispatch winner of a pair: put both in a queue and ask pickNextCase (the real dispatch).
+    const dispatchSign = (a: CaseEntity, b: CaseEntity): number => {
+      const q = new CaseMinHeap(); q.push(a); q.push(b);
+      return pickNextCase(q, new Date(base)) === a ? -1 : 1;
+    };
+    let pairs = 0; const bad: string[] = [];
+    for (let i = 0; i < pool.length; i++) for (let j = i + 1; j < pool.length; j++) {
+      pairs++;
+      const h = Math.sign(heapCmp(pool[i], pool[j])); const d = dispatchSign(pool[i], pool[j]);
+      if (h !== d) bad.push(`${pool[i].id} vs ${pool[j].id}: heap=${h} dispatch=${d}`);
+      if (Math.sign(heapCmp(pool[j], pool[i])) !== -h) bad.push(`${pool[i].id} vs ${pool[j].id}: heap not antisymmetric`);
+    }
+    console.log(`  (D80 S2: ${pairs} pairs compared, ${bad.length} disagree${bad.length ? ': ' + bad.slice(0, 5).join('; ') : ''})`);
+    assert(pairs > 1000 && bad.length === 0, 'D80.5 CaseMinHeap.compare and pickNextCase/compareByUrgency give the same winner on every pair (parked, ties, equal deadlines, overdue, categories)', bad.slice(0, 3).join('; '));
   }
 }
 

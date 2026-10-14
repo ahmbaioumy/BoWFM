@@ -492,7 +492,8 @@ export function getValidSlapStarts(
  * max(arrival, horizonStart) (des-engine.ts).
  *
  * Fallback when there is no valid demand interval at all (backlog-only data): start = earliest valid backlog
- * arrival, end = start + 7 days. With neither, the start is the wall clock (callers guard that case).
+ * arrival, end = start + 7 days. With neither it THROWS (S1, 2026-10-14): the horizon used to fall back to the wall
+ * clock there, which made a result depend on the day it was run. Callers guard with hasValidHorizonInput.
  */
 export function computeIntervalHorizon(
   intervals: Array<{ start: Date; end: Date }>,
@@ -511,13 +512,30 @@ export function computeIntervalHorizon(
     return { horizonStart: new Date(minStartMs), horizonEnd: new Date(maxEndMs) };
   }
 
-  // No valid demand interval: fall back to the opening backlog, else the wall clock.
+  // No valid demand interval: fall back to the opening backlog; with no valid backlog arrival either, fail loudly.
   let minArrivalMs = Infinity;
   for (const w of openingWIP ?? []) {
     if (w.arrival && !isNaN(w.arrival.getTime()) && w.arrival.getTime() < minArrivalMs) minArrivalMs = w.arrival.getTime();
   }
-  const horizonStart = isFinite(minArrivalMs) ? new Date(minArrivalMs) : new Date();
+  if (!isFinite(minArrivalMs)) {
+    throw new Error('No valid demand interval or backlog arrival date: the planning horizon cannot be set. Check the date columns of the uploaded file.');
+  }
+  const horizonStart = new Date(minArrivalMs);
   return { horizonStart, horizonEnd: new Date(horizonStart.getTime() + 7 * 86400000) };
+}
+
+/** True when computeIntervalHorizon can set a horizon: one valid demand interval or one valid backlog arrival. */
+export function hasValidHorizonInput(
+  intervals: Array<{ start: Date; end: Date }>,
+  openingWIP: Array<{ arrival?: Date }> = []
+): boolean {
+  for (const it of intervals) {
+    if (it.start && !isNaN(it.start.getTime()) && it.end && !isNaN(it.end.getTime())) return true;
+  }
+  for (const w of openingWIP ?? []) {
+    if (w.arrival && !isNaN(w.arrival.getTime())) return true;
+  }
+  return false;
 }
 
 /**
