@@ -1901,3 +1901,59 @@ Re-check of A12: user-side FAIL, challenger FAIL (FINDINGS "Item 1 review round 
 | 4 | Heap = dispatch order | D80 S2 pairs |
 | 5 | Mutation | restore the `new Date()` fallback → D80 fails |
 | 6 | Docs + artifact | check:artifact passes |
+
+---
+
+# BUILD PLAN — Item 2: reliable minimum — a passing headcount must also pass on the confirmation block (L25 / P1-8, closes P1-7-a), 2026-10-14
+
+**Task:** a candidate N counts as passing only if the layout that passed also passes the unchanged gate on the existing confirmation block (fresh, independent random days) — sync and async through one shared step.
+**End user:** WFM planner. **Tier 3** (headcount numbers). Reviewers: `tester` + `auditor` + `user-side` + final `challenger`.
+**Skills:** `wfm-sizing-simulation`, `wfm-engine-testing` (fail-first, monotonicity, CRN), `browser-automation`.
+**Owner decision (2026-10-11):** "Reliable minimum" — a headcount counts only if it also passes on fresh random draws.
+
+## Facts (investigator 2026-10-14, probes scratch `i2/`)
+- Fresh-seed pass rate today (20 independent 30-replication gates, recommended roster): claims 31 → 20/20; **support 27 → 8/20** (all failures = category SLA, `Technical_Escalations`, true mean ≈ 80.00 % vs 80 % target; N=28 → 20/20); healthcare 31, AJM_Only 16, EGS_Only 100 → 20/20.
+- Confirmation block: `deriveConfirmationBaseSeed` `hc-search.ts:828` (offset `:826`), `createConfirmationBlock` `:837`, built in every search (`:3029` sync, `:3816` async), lazy case sets, R replications. Used today only by the spread layout (`:3070`, `:3884`) and the rescue ladder (`:3158-3173`, async `:4035`). Not used by the main walk: leap-up check `:3257`, leap probes `:3277` (R ≤ 5), full-R leap check `:3285`, walk-down `:3303`, final re-read `:3316`.
+- Prototype (sync only): confirm at full R for the repair and the uniform evaluations; failing confirmation = not passing (repair then falls through to spread, which is already confirmed). Results: claims 31, **support 28**, healthcare 31, AJM_Only 16, EGS_Only 100; all 20/20 fresh. Cost: one extra full-R evaluation per passing candidate at full R; healthcare CPU ≈ +40 %; support faster (walk ends higher). EGS runtime not measured cleanly.
+- Every fresh failure observed was the per-category SLA gate; variants (SLA 90, occupancy cap 85, ASA 60, siloed, SLA sweep 81–92, occupancy caps 60–70) found the same category-only failures. Cost of all-gates vs category-only is identical.
+- Caveat: one confirmation draw halves, not removes, the chance of adopting a coin-flip N (≈50 % → ≈25 %). A stricter margin rule changes gate semantics — not in this build; offered to owner.
+
+## Design
+1. **All gates** confirmed (same `passesAllConstraints` verdict on the confirmation block), matching spread and ladder.
+2. One shared helper (e.g. `confirmPassingCandidate(res, dist, rescueCtx)` using `resolveRescueEvaluation('confirm', …)`) applied inside the shared evaluation path for EVERY full-R evaluation that would pass at N: uniform, repair, placement (analytic placement roster), and any other full-R pass path not already confirmed (spread and ladder already are — no double confirmation). Leap probes (R ≤ 5) stay primary-only; a probe pass is always followed by a full-R evaluation, which is confirmed.
+3. A candidate that passes primary but fails confirmation is recorded as failing with a clear reason: "Passed on the main simulated days but not on a second, independent set (<the failing gate line>)." It then falls through to the next layout exactly like a primary failure (repair → spread → placement → ladder).
+4. Results / cache: `evalCache` and `winningDistributionByN` store only confirmed passes; the reported failing result for a confirmation failure is the confirmation evaluation's reasons (A4 rule from item 1 still holds).
+5. Binding label: if the recommended N is set because N−1 failed only on confirmation, the label shows the gate that failed (e.g. category SLA), unchanged label rules otherwise.
+6. Polish (Stage 3b) unchanged: it already has its own `polishConfirmation`.
+7. Sensitivity grid and every other caller get the rule automatically (same search).
+8. History table: a row that passed primary but failed confirmation shows Fail with the note above (display text only through the existing reason field).
+
+## Steps (sonnet-executor, fail-first)
+1. Checkpoint. Suite **D81** before the RESULTS block of `scripts/verify-sizing-fixes.mts`:
+   a. support sample: recommended 28 (was 27), sync == async; N=27 history row fails with the confirmation reason.
+   b. claims 31 / healthcare 31 unchanged (HC and gross); AJM_Only 16 unchanged.
+   c. at the recommended N, 10 fresh seeds (independent of primary and confirmation) pass the gate ≥ 8/10 for support (owner proof target).
+   d. helper unit: confirmation failure → not passing; leap probe (R ≤ 5) not confirmed; no double confirmation for spread / ladder (count evaluations).
+   e. monotonicity: support passes at 28..31.
+   f. determinism: two runs identical.
+2. Implement design 1–8 in `hc-search.ts`; sync and async through the shared helper.
+3. `npm run lint`, `npm test`. Any existing pin that moves: allowed only if HC rises by the confirmation rule; report each old → new with the fixture's confirmation result. Any HC DROP = blocker (stop and report).
+4. Measure before/after idle, one job at a time: three samples, support + answer-time 60, AJM_Only, AJM_Only + 60, EGS_Only, AJM_Simu, HC-14 24x7, D33 — HC, gross, runtime. Table in FINDINGS.md.
+5. Mutation: drop confirmation in async only → D81.a fails; drop it for uniform only → D81.a fails.
+6. Build, docs: PRD (L25 / P1-8 resolved, P1-7-a closed, new limitation "one confirmation set lowers but does not remove the chance of a lucky pass", version bump), project_context §5 / §11 / counts, docs/wfm/07 entry. `npm test` incl. check:artifact.
+
+## Scope lock
+`src/utils/hc-search.ts`, `src/types/wfm.ts` (optional field only if unavoidable), `scripts/verify-sizing-fixes.mts` (D81; re-pins only per step 3), `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`, `FINDINGS.md`, `BoWFM.html`.
+
+## Acceptance
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | Support answer is reliable | D81.c ≥ 8/10 fresh seeds at the new N (was 8/20 at 27) |
+| 2 | Other samples unchanged | D81.b; FINDINGS table |
+| 3 | Sync = async | D81.a |
+| 4 | No answer drops | step 3 rule; FINDINGS table |
+| 5 | Clear failure reason | browser: support sample history row 27 shows Fail with the "second, independent set" text |
+| 6 | Runtime | idle before/after per case; flag > 1.5x |
+| 7 | No regression | lint; npm test green |
+| 8 | Mutation | step 5 |
+| 9 | Docs + artifact | check:artifact passes |
