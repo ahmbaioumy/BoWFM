@@ -1957,3 +1957,17 @@ Re-check of A12: user-side FAIL, challenger FAIL (FINDINGS "Item 1 review round 
 | 7 | No regression | lint; npm test green |
 | 8 | Mutation | step 5 |
 | 9 | Docs + artifact | check:artifact passes |
+
+## Item 2 — amendments after the plan challenge (2026-10-14). These OVERRIDE the item 2 text above.
+
+Challenger: fail (5 majors, 5 minors) — accepted as follows.
+B1. **Cap reached by confirmation only → infeasible (owner principle: a number that is not reliably met is not given).** The exhausted-search message keeps its wording (item 1 A3) but the inserted reason for a confirmation failure reads: "N=<n> passed on the main simulated days but not on a second, independent set (<gate line>)." Test: a fixture with `userMaxHC` = the old answer (support, cap 27) → infeasible with that text; cap 28 → 28. Sensitivity cells at the cap behave the same (documented).
+B2. **Restructure the layout chain:** in both searches, a uniform / repair / placement result that passes primary but fails confirmation is converted into a NON-passing `finalRes` BEFORE the repair / spread / placement / ladder gates (`hc-search.ts:3111, 3114, 3123, 3157`; async `3952, 3955, 3967, 4013`), so the chain continues exactly as for a primary failure; `reportedRes` still returns a coverage-satisfying roster (item 1 A4).
+B3. **Pure state machine**, driven by both loops, like `createCoverageSpreadSearch` (`:756-798`) / `createRescueSearch` (`:1011`): no evaluation call inside the shared code; async passes `shouldCancel` / `onRepProgress`; async progress shows "Confirming on a second set of simulated days". Mutation proof per layout: drop confirmation for uniform, for repair, for placement — each in sync and in async — D81 must fail each time.
+B4. **Boundary evidence (N−1)**: when N−1 failed only on confirmation, store the layout that passed primary in `reportedDistributionByN`, and the evidence summary states "N−1 passed on the main simulated days but failed on a second, independent set (<gate line>)". Test that the history row and the evidence text agree.
+B5. **Runtime with a hard limit:** measure idle, one job at a time, before/after: three samples, support + 60, AJM_Only, EGS_Only, AJM_Simu, and the Sensitivity grid on the support sample (25 cells). If any case is > 2.0x slower, or EGS_Only runs out of memory, STOP and report before merge.
+B6. Design 5 (label naming the confirmation gate) DROPPED; label rules unchanged.
+B7. Confirmation applies to every evaluation where `rToUse === R`, including runs with R ≤ 5 (then leap probes are full evaluations and are confirmed). Test with R=3. Limitation documented: with R=1 the gate is a single draw, so confirmation is a second coin flip and can raise HC.
+B8. D81.c threshold: ≥ 9/10 fresh seeds at the new N; D81.e asserts the search's own verdict (primary + confirmation) at 28..31 after measuring them.
+B9. Docs also: project_context §6 records the acceptance rule; CLAUDE.md frozen decision 8 gains one clause: "a passing candidate must also pass the same gate on the independent confirmation block (item 2, owner decision 2026-10-11)". Scope adds `CLAUDE.md` (that clause only).
+B10. Browser check: the Fail history row for N=27 on support shows the confirmation text, so a ≥ target figure is not misread.
