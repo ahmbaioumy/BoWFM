@@ -1200,3 +1200,13 @@ Moved cases re-pinned with supervisor approval (the headcount moves, so they are
   - R1 [major] The answer depends on a staggered start-time roster that Results never shows when Shift Placement is OFF (only source `ResultsFlow.tsx:994` reads `searchOutput.shiftPlacement`, built only with placement ON, `hc-search.ts:3558-3563` / `4516-4520`); the single-shift note (`ResultsFlow.tsx:231`) disappears, so nothing is shown. Planner rostering all at opening would fail SLA.
   - R2 [major] Coverage OFF can be higher than ON (d51a 13 vs 19, D33 21 vs 28, support+60 43 vs 46); on-screen note `ConfigFlow.tsx ~1099` says OFF "does not lower headcount... can go up" without the reason; only PRD L33 explains.
 - Minor (backlog): Sensitivity grid cells may assume different rosters without a label (`SensitivityFlow.tsx:87-107`); no monotonicity break found in D33 volume sweep 10-24 x 3 seeds. Runtime 1.4-1.9x on large files with no HC change (support+60 1.93x, AJM_Simu 1.44x, EGS_Only 1.39x) — to owner. No direct end-to-end test for A4 (audit/N-1 roster) — add in rework. Spread helper ignores zero-count starts (harmless). Coverage-failure reason has no remedy text.
+
+# Item 1 review round 2 (2026-10-14) — re-check of A12 display rework (commit 3f3619c)
+
+- User-side FAIL, challenger FAIL. Accepted majors -> rework round 2 (final):
+  - [major] "Rostering everyone at opening would not meet the targets" can be false: roster polish (Stage 3b) can replace a passing all-at-opening roster with a staggered one (`hc-search.ts:3307-3311, 3369, 3384-3397`; async `4206, 4296, 4328-4339`).
+  - [major] Siloed: categories missing from the roster (repair omits them, `hc-search.ts:687-694`; engine puts them at offset 0, `des-engine.ts:1018`) are not listed; lines sum to less than HC.
+  - [major/minor] Spread note guessed from even counts (`results-display.ts:107-117`) — can state a false cause.
+  - [minor] Coverage-OFF note repeats itself; Sensitivity roster mixing not recorded in PRD.
+- Confirmed fine: displayed roster = the roster the recommended HC passed with (sync/async); infeasible hides block; clock conversion incl. wrap; single open time per calendar.
+- User-side claim "user-entered Shift Placement roster" — Shift Placement start times are engine-chosen (analytic placement), not typed; the substance (reason line not established for every path) holds via polish.

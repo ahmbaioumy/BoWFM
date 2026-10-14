@@ -1846,3 +1846,14 @@ A11. **Re-pins approved by the supervisor (2026-10-14), after the build found 17
 - A12.2 Coverage OFF note (`ConfigFlow.tsx ~1099`) adds: "With the floor ON the search also tries spreading start times evenly, so turning it OFF can give a higher headcount." Results shows a one-line note when the recommended roster is a spread one.
 - A12.3 Add one end-to-end test that fails if the final audit / N-1 runs ignore `reportedDistributionByN`, and tests for A12.1 text helper (pure function in a utils file, e.g. `results-display.ts`).
 - Scope add: `src/components/ResultsFlow.tsx`, `src/components/ConfigFlow.tsx`, `src/utils/results-display.ts`, `src/utils/hc-search.ts` (pass-through field only), `src/types/wfm.ts` (optional field only).
+
+## Item 1 — A13 rework round 2 (FINAL allowed round, 2026-10-14)
+
+Re-check of A12: user-side FAIL, challenger FAIL (FINDINGS "Item 1 review round 2").
+- A13.1 The search output records which layout the recommended roster came from: `winningLayout: 'uniform' | 'repair' | 'spread' | 'placement' | 'ladder' | 'polish'` (optional field), set in BOTH searches through shared code at the points where `winningDistributionByN.set(recommendedHC, …)` happens (incl. polish adoption, `hc-search.ts:~3369` / async `~4296`). No sizing change.
+- A13.2 Reason line "Rostering everyone at opening would not meet the targets with this headcount." only when winningLayout is repair, spread, placement or ladder (each is reached only after the all-at-opening roster failed or cannot meet coverage). For polish (or unknown): "These are the start times this headcount was tested with." Heading for polish: "Start times used for this headcount:".
+- A13.3 Spread note only when winningLayout === 'spread' (drop the `isEvenSplit` guess).
+- A13.4 Siloed: a category with agents but no roster entry is listed as "<Category>: N agents at <open time>" so the lines sum to the recommended headcount (seat counts from the DES result / apportionment already on the result).
+- A13.5 Merge the two Coverage-OFF sentences in ConfigFlow into one.
+- A13.6 PRD §10 new limitation: Sensitivity cells each run a full search and may use different start-time layouts; the grid does not label them.
+- Tests: extend D79 (winningLayout per path incl. polish fixture from D76 if available; reason/heading per layout; spread note only for spread; siloed missing category listed and totals = HC).
