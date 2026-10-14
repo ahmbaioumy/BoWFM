@@ -442,6 +442,7 @@ business window exceeded the shift length under uniform-start.
   green, 190/190 total sizing suite. UI: a toggle in SLA Defaults and a results card in
   Results & Audit, both mirroring the occupancy-cap pattern, verified in a live dev-server
   pass with zero console errors.
+- **Amended 2026-10-14 (Item 1, PRD 1.24.0, owner decision 2026-10-11)**: the passing roster may now be the EVEN SPREAD of the same agents over the same cover starts, not only "minimum at the late starts, surplus at offset 0". `buildCoverageRepairDistribution` is unchanged; when its roster fails the gate at N, `buildCoverageSpreadDistribution` (minimum at every start, remaining seats to the fewest-seat start, ties earliest) is tried and adopted only if it also passes the confirmation block. A second layout tried, not the proven minimum over layouts. Effect: HC-14 24×7 ON infeasible -> 20; D33 fixture ON 22 -> 21 (D33.7 re-pinned; OFF stays 28, so OFF can now exceed ON - PRD L33). Failing N now report the coverage-satisfying roster. Suite D78.
 - **Not yet done**: joint (rather than per-category-independent) coverage optimization for
   siloed queue architecture; 24×7 coverage (moot until 24×7 multi-start itself exists).
 
@@ -1074,3 +1075,6 @@ Idle siloed agents now show the engine-assigned category (agentFairness) or "No 
 
 ### 2026-10-11 — P1-7-c: polish cap check no longer reads message text
 `polishOrgNotWorse` matched `failingReasons` prefixes ('BO ASA', 'Occupancy', 'Coverage:') to decide whether a polish candidate kept the caps the baseline satisfied; rewording a message would have failed open. `evaluateCandidateStatistical(Async)` now returns `passesBoAsaCap` / `passesOccupancyCap` / `passesCoverage`, set from the same conditions that push the messages, and the rule reads those (explicit `false` on the candidate = cap broken). Internals only; recommended/gross HC unchanged. Suite D77.
+
+### 2026-10-14 — Item 1: even-spread layout when the coverage-repair roster fails (PRD 1.24.0; closes L28 / P1-9, adds L33)
+Before: with Minimum Coverage ON one layout was tried (minimum at the late cover starts, surplus at opening); on a 24×7 calendar it could fail at every headcount (HC-14: infeasible at the cap of 80, coverage OFF 20) and the reported failure was the uniform layout with "as few as 0 agents". After: the same agents spread evenly over the same cover starts are tried before N is rejected (primary + confirmation block; shared by sync and async; coverage-satisfying roster reported when nothing passes). HC-14 ON 20; support + answer-time 60 46 -> 43; D33 fixture 22 -> 21; the three samples, AJM_Only, AJM_Simu, EGS_Only unchanged. Open: coverage OFF does not try the layout (L33). Tests: D78; re-pinned D33.7, D50.4b, D51.1d/e, D65.4-6, D72.6b / 8b / 8z / 10 / 12 (see FINDINGS.md "Item 1 build").

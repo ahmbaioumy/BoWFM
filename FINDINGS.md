@@ -1142,3 +1142,45 @@ Auditor: pass. Only the 45 approved assertions changed; D73 covers all four poli
 - Status at stop (weekly limit ~99%): investigation complete, no code changed. Resume after the reset with: quick test of an even split at N=20..24 (probe), re-measure G8 on the built-in support sample, then plan → challenger → build.
 
 - **Even split confirmed as the fix (probe `f1/d.mts`, 5 replications, seed 42), 2026-10-11:** the same 24x7 scenario with agents split evenly across the EXISTING four cover starts (0 / 450 / 900 / 990 min) passes the unmodified gate at N=20 (SLA 100%, minimum coverage 5) — equal to the coverage-OFF headcount; N=19 fails on the occupancy cap (101.1%), not coverage. A three-start split (0 / 450 / 900) never passes: 22:30–24:00 is uncovered. So the cover starts are fine; only the placement of the surplus must change. Not yet tested: whether one seed / 5 replications holds at 30; peaky overnight demand; the search actually reaching this layout.
+
+# Item 1 build — before/after measurements (2026-10-14)
+
+Before = checkpoint 7f18f7a (`src` copy). After = Item 1 build (spread layout tried when the coverage-repair roster fails; confirmed on the second replication block; reported failing roster = spread / repair, A4). Sync search, defaults (`DEFAULT_SLA`, `DEFAULT_LABOR`, `DEFAULT_CALENDAR`, seed and replications from `DEFAULT_SIM_PARAMS`, pooled) unless stated. Runtime = wall clock of one `searchOptimalHC` call, one job at a time, nothing else running; before and after run back to back (before first).
+
+| Case | Recommended HC | Gross HC | Roster (late-start offset : agents) | Binding label | Runtime s (ratio) |
+|---|---|---|---|---|---|
+| claims, coverage ON | 31 -> 31 | 40 -> 40 | 0:30 150:1 -> same | analytical_baseline -> same | 1.8 -> 1.4 (0.80x) |
+| support, coverage ON | 27 -> 27 | 34 -> 34 | 0:26 150:1 -> same | statistical_primary_sla -> same | 4.2 -> 5.1 (1.19x) |
+| healthcare, coverage ON | 31 -> 31 | 39 -> 39 | 0:30 150:1 -> same | statistical_primary_sla -> same | 8.2 -> 8.9 (1.09x) |
+| claims / support / healthcare, coverage OFF | 31 / 28 / 31 -> same | 40 / 35 / 39 -> same | uniform | unchanged | 1.5 -> 1.1, 3.4 -> 2.7, 7.8 -> 8.0 |
+| **support + answer-time 60 min, ON** | **46 -> 43** | **58 -> 54** | **0:45 150:1 -> 0:22 150:21** | statistical_primary_sla -> same | 8.7 -> 16.9 (**1.93x**) |
+| support + answer-time 60 min, OFF | 46 -> 46 | 58 -> 58 | uniform | unchanged | 9.1 -> 6.9 (0.76x) |
+| AJM_Only, ON | 16 -> 16 | 20 -> 20 | 0:15 150:1 -> same | statistical_primary_sla -> same | 8.1 -> 9.8 (1.21x) |
+| AJM_Only, OFF | 17 -> 17 | 21 -> 21 | uniform | unchanged | 6.1 -> 5.8 (0.94x) |
+| AJM_Only + answer-time 60, ON | 28 -> 28 | 35 -> 35 | 0:27 150:1 -> same | statistical_primary_sla -> same | 24.2 -> 26.5 (1.09x) |
+| AJM_Only + answer-time 60, OFF | 29 -> 29 | 36 -> 36 | uniform | unchanged | 22.2 -> 35.0 (1.57x, see note) |
+| AJM_Simu (test_files), ON | 123 -> 123 | 154 -> 154 | 0:122 150:1 -> same | statistical_primary_sla -> same | 149.4 -> 214.6 (**1.44x**) |
+| AJM_Simu, OFF | 123 -> 123 | 154 -> 154 | uniform | unchanged | 123.8 -> 137.3 (1.11x) |
+| EGS_Only, ON | 100 -> 100 | 125 -> 125 | 0:99 150:1 -> same | statistical_primary_sla -> same | 254.3 -> 352.8 (**1.39x**) |
+| EGS_Only, OFF | 100 -> 100 | 125 -> 125 | uniform | unchanged | 340.1 -> 266.5 (0.78x) |
+| **D33 fixture (14 h window, 9 h shift), ON** | **22 -> 21** | **24 -> 23** | **0:21 300:1 -> 0:11 300:10** | statistical_primary_sla -> analytical_baseline (Occupancy-Feasible Capacity Floor, N_occ = 21) | 1.2 -> 1.5 (1.24x) |
+| D33 fixture, OFF | 28 -> 28 | 31 -> 31 | uniform | unchanged | 1.7 -> 1.4 (0.86x) |
+| **HC-14 24x7 (7 days, 6 cases / 30 min, AHT 30, SLA 80 % / 6 h, R=5, max 80), ON** | **infeasible -> 20** | **140 (at the cap) -> 35** | **uniform -> 0:5 450:5 900:5 990:5** | analytical_baseline ("Infeasible at User Cap") -> analytical_baseline (Occupancy-Feasible Capacity Floor, N_occ = 20) | 2.0 -> 0.8 (0.37x) |
+| HC-14 24x7, OFF | 20 -> 20 | 35 -> 35 | uniform | unchanged | 0.2 -> 0.2 |
+
+Notes
+- Every answer is after <= before. Moved: support + answer-time 60 ON (46 -> 43), D33 ON (22 -> 21), HC-14 ON (no answer -> 20). The three built-in samples at defaults are unchanged (31 / 27 / 31, gross 40 / 34 / 39).
+- Coverage ON/OFF gap (A1): with Minimum Coverage OFF the search does not try the spread layout (spread needs a repair roster), so OFF can now exceed ON: support + answer-time 60 ON 43 vs OFF 46; D33 ON 21 vs OFF 28.
+- Run time. Coverage-OFF rows run identical code before and after, yet vary 0.76x to 1.57x (AJM_Only + 60 OFF 1.57x): run-to-run noise on this machine is about +/-40 %, so ratios inside that band mean little. Coverage-ON rows above 1.5x: support + answer-time 60 (1.93x, 8.7 s -> 16.9 s): every failing N now evaluates the spread roster and, if it clears the primary block, the confirmation block. AJM_Simu 1.44x and EGS_Only 1.39x are inside the noise band but above 1.3x. HC-14 is faster (0.37x): it now finds an answer at the first candidate instead of walking to the cap.
+
+## Group A re-pins (A11): fixtures whose headcount, gross HC and winning roster must NOT change
+
+Per-fixture diff, checkpoint vs new (sync): recommended HC, gross HC, winning roster, the N / passed flags of the search history, and which result fields differ. A4: the N-1 audit run and the failing N's history rows now describe the coverage-satisfying roster (spread, else repair) instead of the uniform one.
+
+| Fixture (test) | HC | Gross HC | Winning roster | History N / pass flags | Fields that differ |
+|---|---|---|---|---|---|
+| min, placement OFF, coverage ON (D72.10) | 9 -> 9 | 10 -> 10 | 0:8 240:1 -> same | 8F 9P -> same | boundaryEvidence, searchHistory (failing-N row) |
+| smp-support, placement OFF, coverage ON (D72.10) | 27 -> 27 | 34 -> 34 | 0:26 150:1 -> same | 21F 26F 27P 28P -> same | boundaryEvidence, searchHistory |
+| D52 siloed, placement ON (D65.4 `others` digest) | 18 -> 18 | 20 -> 20 | A=0:8 240:3, B=0:5 240:2 -> same | 15F 17F 18P 19P 20P 21P 22P -> same | boundaryEvidence, searchHistory |
+
+Reclassified (the headcount moves, so they are NOT group A): D72.10 d33 (22 -> 21, gross 24 -> 23, the same value as D33.7 / D72.6b; re-pinned with D72.11c, its async twin), D72.10 d50 (9 -> 7, gross 10 -> 8, 0:8 240:1 -> 0:4 240:3), D72.10 d51a (17 -> 13, gross 19 -> 14, A=0:8 240:1 B=0:7 240:1 -> A=0:4 240:3 B=0:3 240:3) and D65.6 (placement OFF, 9 -> 7, gross 10 -> 8). All decreases, by the same spread mechanism.
