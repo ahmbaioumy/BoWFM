@@ -18,6 +18,7 @@ import {
 } from '../types/wfm';
 import {
   computeIntervalHorizon,
+  hasValidHorizonInput,
   convertDurationToMinutes,
   getCalendarWorkingDaysInHorizon,
   getDailyWindowLengthHours,
@@ -69,7 +70,7 @@ export function ConfigFlow({
   const presentHoursPerDay = labor.dailyProductiveHours * adherence;
 
   let derivedAgentHoursHint: number | null = null;
-  if (intervals.length > 0) {
+  if (hasValidHorizonInput(intervals, openingWIP)) {
     // Same horizon the search uses: the demand span only (backlog never moves it).
     const { horizonStart, horizonEnd } = computeIntervalHorizon(intervals, openingWIP);
     const days = Math.max(1, getCalendarWorkingDaysInHorizon(horizonStart, horizonEnd, calendar));

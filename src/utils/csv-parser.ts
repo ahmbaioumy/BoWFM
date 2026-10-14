@@ -17,6 +17,7 @@ import {
 } from '../types/wfm';
 import {
   computeIntervalHorizon,
+  hasValidHorizonInput,
   convertDurationToMinutes,
   formatDate24,
   formatDateTime24,
@@ -1397,8 +1398,13 @@ export function validateDataQuality(params: {
     }
   }
 
-  const { horizonStart, horizonEnd } = computeIntervalHorizon(intervals, openingWIP);
-  const calendarWorkingDays = getCalendarWorkingDaysInHorizon(horizonStart, horizonEnd, calendar);
+  // No valid date anywhere (S1, 2026-10-14): there is no horizon. The invalid-timestamp error already blocks the run;
+  // the horizon-dependent warnings below (B, C, opening-WIP overdue) are skipped rather than guessing a date.
+  const hasHorizon = hasValidHorizonInput(intervals, openingWIP);
+  const horizon = hasHorizon ? computeIntervalHorizon(intervals, openingWIP) : null;
+  const horizonStart = horizon ? horizon.horizonStart : null;
+  const horizonEnd = horizon ? horizon.horizonEnd : null;
+  const calendarWorkingDays = horizonStart && horizonEnd ? getCalendarWorkingDaysInHorizon(horizonStart, horizonEnd, calendar) : 0;
 
   // Warning A: labor off days is 0 on a non-24/7 calendar. Real labor policy rarely has
   // zero weekly rest; this is also the residue left behind by un-ticking "24/7 Operations"
@@ -1417,7 +1423,7 @@ export function validateDataQuality(params: {
   // actually uses the override. Not imported from hc-search.ts to avoid a new cross-layer
   // dependency (csv-parser depends only on types + calendar today) — the gate is 3 lines.
   const override = labor.contractualProductiveHoursOverride;
-  if (labor.contractualHoursSource === 'override' && typeof override === 'number' && Number.isFinite(override) && override > 0) {
+  if (hasHorizon && labor.contractualHoursSource === 'override' && typeof override === 'number' && Number.isFinite(override) && override > 0) {
     const derivedAgentHours = labor.dailyProductiveHours * Math.max(1, calendarWorkingDays);
     const ratio = derivedAgentHours > 0 ? override / derivedAgentHours : Infinity;
     if (ratio > 3 || ratio < 1 / 3) {
@@ -1434,9 +1440,8 @@ export function validateDataQuality(params: {
   // count as fully-staffed working days downstream (getCalendarWorkingDaysInHorizon), so a
   // gap in the export — as opposed to genuine zero demand — understates the occupancy
   // denominator and can undersize the recommendation. Only meaningful once every timestamp
-  // parsed cleanly: computeIntervalHorizon falls back to `new Date()` when none did, which
-  // would make this non-deterministic (CLAUDE.md bans wall-clock-dependent results).
-  if (invalidTimestamps.length === 0) {
+  // parsed cleanly (a partly-invalid file is already blocked by the timestamp error).
+  if (horizonStart && horizonEnd && invalidTimestamps.length === 0) {
     const emptyOpenDays: string[] = [];
     const curr = new Date(horizonStart);
     curr.setHours(0, 0, 0, 0);
@@ -1526,7 +1531,7 @@ export function validateDataQuality(params: {
       });
     }
   }
-  if (openingWIP.length > 0) {
+  if (horizonStart && openingWIP.length > 0) {
     let overdueAtStart = 0;
     try {
       overdueAtStart = buildOpeningWipCases({ openingWIP, categoryMap, calendar, sla, horizonStart }).cases.filter((c) => c.overdueAtStart).length;
