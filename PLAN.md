@@ -1857,3 +1857,11 @@ Re-check of A12: user-side FAIL, challenger FAIL (FINDINGS "Item 1 review round 
 - A13.5 Merge the two Coverage-OFF sentences in ConfigFlow into one.
 - A13.6 PRD §10 new limitation: Sensitivity cells each run a full search and may use different start-time layouts; the grid does not label them.
 - Tests: extend D79 (winningLayout per path incl. polish fixture from D76 if available; reason/heading per layout; spread note only for spread; siloed missing category listed and totals = HC).
+
+## Queue addition 2026-10-14 (from the "Case assignment flow audit" session; owner approval reported by that session — confirm with owner before build)
+
+- **Small builds right after item 1 is merged and rebuilt (before item 2):**
+  - S1 `computeIntervalHorizon` (`calendar.ts`) falls back to `new Date()` with no valid intervals (non-deterministic) → fail-first test, then throw a clear error.
+  - S2 Test that `CaseMinHeap.compare` and `compareByUrgency` (`des-engine.ts`) rank cases identically. Test only, no dispatch change.
+- **Item 7 (after items 2–6): opt-in Poisson arrival counts.** SLA-config flag, default OFF (OFF = byte-identical results, regression test). ConfigFlow toggle next to Workload Floor. Per-interval count ~ Poisson(mean = interval volume) from a separate seeded stream (seed + interval index) so CRN holds across candidate N; normal approximation above ~30 expected. Opening WIP stays fixed. R unchanged (wider CI may raise HC — intended). Results badge + note "Volume variability on: not comparable with replay runs." Docs PRD / project_context, rebuild, check:artifact. Slotted last because it is opt-in (no default change) and should be measured against the default numbers after items 2–6; it overlaps ConfigFlow / wfm.ts / engine with item 1 and items 2–5.
+- FYI from that session: CLAUDE.md "never duplicate an algorithm" bullet corrected; D8 fixed, D11 still open.
