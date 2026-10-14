@@ -1754,3 +1754,69 @@ Owner principles (saved to memory): BoWFM is a SIZING tool, not a roster tool �
 
 ## No decision needed (build between the items above)
 - Settings-import validation, error boundary, leave-page warning, Sensitivity matrix kept (P1-11); calendar guards (P1-12); "outdated" note on exports (P2-13); rest of the stale-text sweep; minor backlog.
+
+
+---
+
+# BUILD PLAN — Item 1: spread layout when the coverage-repair roster fails (F1 + G8, HC-14, L28 / P1-9), 2026-10-14
+
+**Task:** when the Minimum-Coverage repair roster fails the gate at a candidate N, try the same N agents spread evenly over the same cover starts before rejecting N — every calendar, sync and async through one shared helper — and report the real blocking reason when nothing passes.
+**End user:** the WFM planner opening `BoWFM.html` from disk.
+**Tier 3** (headcount numbers). Reviewers: `tester` + `auditor` + `user-side` + final `challenger`.
+**Skills:** `wfm-sizing-simulation` (layout/gate reasoning), `wfm-engine-testing` (fail-first, monotonicity sweep), `browser-automation` (free gate, tester).
+**Owner decision (2026-10-11):** spread on EVERY calendar; Minimum Coverage stays ON by default; this reverses documented design D33 (surplus at offset 0) for the passing roster only.
+
+## Facts (investigator 2026-10-14, prototype in scratch `f1/proto`)
+
+- Built-in samples, defaults, coverage ON before → prototype after: claims 31 → 31; support 27 → 27; healthcare 31 → 31; support + answer-time 60 min **46 → 43** (roster `0:45 150:1` → `0:22 150:21`); AJM_Only 16 → 16; AJM_Only + answer-time 60 28 → 28; EGS_Only 100 → 100; 24x7 HC-14 **infeasible → 20** (roster `0:5 450:5 900:5 990:5`; coverage OFF is also 20). AJM_Simu 123 → not measured.
+- Audit's G8 figure (46 vs about 34) is NOT reproduced: support + 60 min is 46 with coverage ON and OFF alike; prototype gives 43.
+- D33 fixture (14 h window, 9 h shift): coverage ON 22 → **21** (roster `0:11 300:10`), label statistical_primary_sla → analytical_baseline; OFF stays 28. D36 / D37 unchanged.
+- HC-14 runtime 2.58 s → 1.41 s; business-hours runs that walk many failing N: expected 1.2–1.9x (measured under load; must be re-measured idle).
+- Layout order today (sync `evaluateN` `hc-search.ts:2909-3024`; async `evaluateAsync` `3664-3831`): `planCoverageRepair` → (repairFirst on non-24x7) repair, else uniform then repair → placement (Shift Placement ON) → rescue ladder (Shift Placement ON, none on 24x7). A failed repair never becomes the reported result on 24x7 (`2929-2932`, `2954`), so the uniform roster's "as few as 0 agents" line is reported (built at `2420-2422`).
+- Exhausted-search message `3156-3157` / async `4000-4001`; baseline-over-cap message `3063` / `3874`: both end "Increase userMaxHC or review SLA/labor parameters."
+- Tests touching the layout: D33.7 (`verify-sizing-fixes.mts:2078-2088`, pins ON = 22) breaks; D21.4 (`:1165`, at most 2 starts) may break; D72 `decide` mirror (`:6484-6500`) must gain the spread step; D73 / D76 rosters must be re-run. D33.1–D33.4, D52, D72.1, D72.5d call the repair builder directly — unchanged because the repair builder is unchanged.
+
+## Design
+
+1. **Shared helper** `buildCoverageSpreadDistribution(repairDist, …)` beside `buildCoverageRepairDistribution` (`hc-search.ts` ~650-701), pure and deterministic: same starts as the repair roster, same total N (pooled) or same per-category totals (siloed — applied per category). Each start first receives the repair roster's own seats for that late start (never fewer agents on shift in any interval than the minimum the repair roster guarantees); the remaining seats are dealt one at a time to the start with the fewest seats, ties to the earliest start (house-monotone: the N+1 roster equals the N roster plus one seat). Returns null when it equals the repair roster or when repair is null.
+2. **`planCoverageRepair`** (`976-999`) also returns `spread` so both searches get it from one place.
+3. **Both `evaluateN` and `evaluateAsync`:** immediately after the repair roster is evaluated and FAILS (both repair-first and uniform-then-repair branches), evaluate `spread` with the unchanged gate; adopt it only if it passes. Placement and rescue then run exactly as today if nothing has passed. One shared function for the "try repair, then spread" step, called by both; no third copy.
+4. **Reported reason:** when repair (and spread) were evaluated and all fail, the reported failing result is a coverage-satisfying roster (repair, else spread), not the uniform roster with zero coverage. The exhausted-search and over-cap messages drop "Increase userMaxHC"; new tail: "No staff layout tried met the targets up to N=<cap>. Review the SLA / answer-time targets, shift length or calendar." The "Infeasible at User Cap" label text stays (factual) followed by the real reasons.
+5. **Binding label:** unchanged rule (`resolveCoverageBinding`, `1022-1036`); verify it never says "Minimum Coverage Floor" when spread passed one agent lower.
+6. **Rescue ladder untouched** (no new rung); D72 `decide` mirror updated to the new order.
+7. Siloed runs: spread per category; a category whose repair roster has one start gets no spread.
+
+## Steps (builder `sonnet-executor`, fail-first)
+
+1. Checkpoint commit. Tests first — suite **D78** before the RESULTS block of `scripts/verify-sizing-fixes.mts`:
+   a. helper unit tests: totals preserved; each start at least its repair seats; house-monotone over N = repair min .. 200 (no start ever loses a seat when N grows); deterministic; null when repair null / single start; siloed per-category totals preserved.
+   b. HC-14 24x7 fixture (7 days, 6 cases / 30 min, AHT 30, SLA 80 % in 6 h, R = 5, max 80): coverage ON → a recommendation equal to the coverage-OFF value (20 in the prototype) with minimum coverage at least 1; sync and async give identical HC and roster.
+   c. Failure message on an impossible fixture never contains "as few as 0 agents" when a repair roster existed, and never contains "Increase userMaxHC".
+   d. Sync == async on the D33 fixture and on support + answer-time 60.
+   e. Three built-in samples at defaults unchanged (31 / 27 / 31 HC; gross 40 / 34 / 39).
+   f. Monotonicity sweep on the HC-14 fixture: recommended N and N+1..N+3 all pass.
+2. D33.7 changed by owner decision: new pin = the measured value (prototype 21) with a comment citing item 1; D21.4 and D73 / D76 re-run and any change reported to the supervisor, never silently re-pinned.
+3. Implement design 1–7 in `hc-search.ts`.
+4. `npm run lint`, `npm run build:standalone`, `npm test` once.
+5. Measure before/after (idle machine, one job at a time): three samples, support + answer-time 60, AJM_Only, AJM_Only + 60, EGS_Only, D33 fixture, HC-14 ON/OFF — recommended HC, gross HC, roster, runtime. Table into FINDINGS.md.
+6. Docs: `PRD.md` (L28 / P1-9 resolved, version bump, message wording), `project_context.md` (§5 layout order, §11), `docs/wfm/07` D33 entry amended (passing roster may be spread; repair builder unchanged).
+
+## Scope lock
+
+`src/utils/hc-search.ts`, `src/types/wfm.ts` (only if a result field is unavoidable), `scripts/verify-sizing-fixes.mts` (D78 append; D33.7 / D21.4 / D72 decide edits only as stated), `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`, `FINDINGS.md` (measurement table), rebuilt `BoWFM.html`. No `des-engine.ts`, no UI component, no `package.json`.
+
+## Acceptance criteria and proof
+
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | 24x7 HC-14 gets an answer | D78.b + browser: 24x7 scenario, coverage ON → recommendation shown, equal to coverage OFF |
+| 2 | No answer is ever worse | Every measured case after <= before; D78.e samples identical |
+| 3 | Sync = async | D78.b / D78.d |
+| 4 | Honest failure message | D78.c; browser on an impossible scenario shows SLA / answer-time reasons, no "Increase userMaxHC" |
+| 5 | Layout stable as N grows | D78.a house-monotone; D78.f sweep |
+| 6 | Changes listed | FINDINGS table: every case that moved, old → new, with roster |
+| 7 | Run time acceptable | Idle runtime per case before/after; flag any case > 1.5x |
+| 8 | No regression | lint clean; `npm test` green (1,556 + D78, re-pinned D33.7 explained) |
+| 9 | Mutation proof | Remove the spread call in async only → D78.b/d fail; ties to latest start → D78.a fails |
+| 10 | Docs + artifact | PRD / project_context / docs 07 updated; `npm run check:artifact` passes |
+| 11 | Scope | `git diff <checkpoint>..HEAD --stat` only scope files |
