@@ -797,6 +797,79 @@ export function createCoverageSpreadSearch<T extends { passesAllConstraints: boo
   };
 }
 
+export type PassConfirmStage = 'primary' | 'confirm';
+
+/**
+ * The confirmation sentence for a layout that cleared the main simulated days but not the second,
+ * independent set (item 2, L25 / P1-8). One wording, used by the history row, the infeasible message and the
+ * N-1 boundary evidence in both searches. `gateLines` are the failing-gate lines of the confirmation run.
+ */
+export function formatConfirmationFailure(n: number, gateLines: string[]): string {
+  return `N=${n} passed on the main simulated days but not on a second, independent set (${gateLines.join('; ')}).`;
+}
+
+/** Boundary-evidence wording when N-1 failed only on the confirmation block (item 2, B4). */
+export function formatBoundaryConfirmationFailure(failedN: number, gateLine: string): string {
+  return `N=${failedN} passed on the main simulated days but failed on a second, independent set (${gateLine}).`;
+}
+
+/**
+ * Reliable-minimum acceptance for ONE layout (uniform, repair or placement roster) at one candidate N, item 2.
+ * Pure state machine in the style of createCoverageSpreadSearch / createRescueSearch: no evaluation happens in
+ * here - the caller evaluates whatever next() asks for ('primary' = its own replication count, seed and sets;
+ * 'confirm' = resolveRescueEvaluation('confirm', ...), the unchanged gate on the independent confirmation
+ * block) and record()s it. sync and async drive the SAME machine, so they cannot drift (D11).
+ *   primary fails                       -> not adopted; failed = the primary evaluation.
+ *   primary passes, confirmEnabled=false -> adopted (leap probes with fewer replications than R stay primary-only).
+ *   primary passes, confirmEnabled       -> confirm; confirm passes -> adopted (the PRIMARY evaluation, so every figure
+ *                                           stays comparable with every other N).
+ *   confirm fails                       -> not adopted; failed = the primary evaluation flipped to non-passing with
+ *                                           the confirmation sentence as its only reason, confirmationGate = the
+ *                                           failing-gate lines of the confirmation run.
+ */
+export function createPassConfirmation<T extends { passesAllConstraints: boolean; failingReasons: string[] }>(params: {
+  n: number;
+  confirmEnabled: boolean;
+}) {
+  let stage: PassConfirmStage | 'done' = 'primary';
+  let primaryEv: T | null = null;
+  let adopted: T | null = null;
+  let failed: T | null = null;
+  let confirmationGate: string | null = null;
+  return {
+    /** The stage to evaluate next, or null when finished. */
+    next(): PassConfirmStage | null {
+      return stage === 'done' ? null : stage;
+    },
+    record(ev: T): void {
+      if (stage === 'done') return;
+      if (stage === 'primary') {
+        if (!ev.passesAllConstraints) {
+          failed = ev;
+          stage = 'done';
+        } else if (!params.confirmEnabled) {
+          adopted = ev;
+          stage = 'done';
+        } else {
+          primaryEv = ev;
+          stage = 'confirm';
+        }
+        return;
+      }
+      if (ev.passesAllConstraints) {
+        adopted = primaryEv;
+      } else {
+        confirmationGate = ev.failingReasons.join('; ');
+        failed = { ...(primaryEv as T), passesAllConstraints: false, failingReasons: [formatConfirmationFailure(params.n, ev.failingReasons)] };
+      }
+      stage = 'done';
+    },
+    result(): { adopted: T | null; failed: T | null; confirmationGate: string | null } {
+      return { adopted, failed, confirmationGate };
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------------------------
 // Rescue ladder (PRD P1-6 / L23) - only when labor.shiftPlacementEnabled. When a headcount N has
 // failed with everyone at opening, with the coverage-repair roster and with the analytic placement
@@ -3030,6 +3103,8 @@ export function searchOptimalHC(params: {
   const rescueCtx = { sla, categories, replications: R, baseSeed: seed, precomputedCaseSets, confirmation: rescueConfirmation };
   // Coverage-satisfying roster whose failure is reported at an N where nothing passed (repair / spread layout; A4). Not set for passing Ns.
   const reportedDistributionByN = new Map<number, ShiftDistributionByCategory>();
+  // Gate line of the confirmation run for every N whose best layout cleared the main days but failed the second set (item 2, B4).
+  const confirmationOnlyGateByN = new Map<number, string>();
 
   function evaluateN(n: number, overrideR?: number) {
     const rToUse = overrideR ?? R;
@@ -3050,13 +3125,28 @@ export function searchOptimalHC(params: {
     let reportedRes: ReturnType<typeof evaluateCandidateStatistical> | undefined;
     let reportedDist: ShiftDistributionByCategory | undefined;
     let reportedReasons: string[] | undefined;
+    // Reliable minimum (item 2): a layout that passes the primary block counts only if it also passes the unchanged gate on the
+    // confirmation block. createPassConfirmation is the shared state machine the async twin drives too; a primary pass that fails
+    // confirmation comes back as a NON-passing result, so the chain below continues exactly as for a primary failure.
+    // confirmationFailure remembers the first layout that cleared primary but not confirmation (N-1 evidence, reported roster).
+    let confirmationFailure: { res: ReturnType<typeof evaluateCandidateStatistical>; roster: ShiftDistributionByCategory | undefined; gate: string } | undefined;
+    const evaluateLayout = (roster: ShiftDistributionByCategory | undefined): ReturnType<typeof evaluateCandidateStatistical> => {
+      const gate = createPassConfirmation<ReturnType<typeof evaluateCandidateStatistical>>({ n, confirmEnabled: rToUse === R });
+      for (let stage = gate.next(); stage !== null; stage = gate.next()) {
+        gate.record(evaluateCandidateStatistical({
+          operationalHC: n, intervals, openingWIP, calendar, labor, queueArchitecture, shiftDistribution: roster, dispatchFairness,
+          ...(stage === 'confirm'
+            ? resolveRescueEvaluation('confirm', rescueCtx)
+            : { sla, categories, replications: rToUse, baseSeed: seed, precomputedCaseSets }),
+        }));
+      }
+      const out = gate.result();
+      if (out.confirmationGate !== null && !confirmationFailure) confirmationFailure = { res: out.failed!, roster, gate: out.confirmationGate };
+      return out.adopted ?? out.failed!;
+    };
     // "Repair, then spread (confirmed)" - ONE step; createCoverageSpreadSearch is the shared state machine the async twin drives too.
     const runRepair = () => {
-      coverageRes = evaluateCandidateStatistical({
-        operationalHC: n, intervals, openingWIP, categories, calendar, labor, sla,
-        baseSeed: seed, replications: rToUse, queueArchitecture, precomputedCaseSets,
-        shiftDistribution: covPlan.dist!, dispatchFairness,
-      });
+      coverageRes = evaluateLayout(covPlan.dist!);
       if (coverageRes.passesAllConstraints) {
         finalRes = coverageRes;
         winningDist = covPlan.dist!;
@@ -3093,20 +3183,7 @@ export function searchOptimalHC(params: {
       if (!finalRes) finalRes = reportedRes;
     }
     if (!finalRes) {
-      const uniformRes = evaluateCandidateStatistical({
-        operationalHC: n,
-        intervals,
-        openingWIP,
-        categories,
-        calendar,
-        labor,
-        sla,
-        baseSeed: seed,
-        replications: rToUse,
-        queueArchitecture,
-        precomputedCaseSets,
-        dispatchFairness,
-      });
+      const uniformRes = evaluateLayout(undefined);
       finalRes = uniformRes;
       if (!uniformRes.passesAllConstraints && covPlan.attempt && covPlan.dist && !coverageRes) {
         runRepair();
@@ -3114,7 +3191,7 @@ export function searchOptimalHC(params: {
         if (!finalRes.passesAllConstraints && reportedRes) finalRes = reportedRes;
       }
     }
-    const repairReasons = coverageRepairReasons(covPlan, finalRes, reportedReasons ? { passesAllConstraints: false, failingReasons: reportedReasons } : coverageRes);
+    let repairReasons = coverageRepairReasons(covPlan, finalRes, reportedReasons ? { passesAllConstraints: false, failingReasons: reportedReasons } : coverageRes);
 
     // Rosters already tried at this N, so the rescue ladder below never repeats one.
     const triedRosters: Array<ShiftDistributionByCategory | null | undefined> = [covPlan.dist, covPlan.spread];
@@ -3131,21 +3208,7 @@ export function searchOptimalHC(params: {
       triedRosters.push(placementDist);
       placementTried = placementDist;
       if (placementDist) {
-        const placedRes = evaluateCandidateStatistical({
-          operationalHC: n,
-          intervals,
-          openingWIP,
-          categories,
-          calendar,
-          labor,
-          sla,
-          baseSeed: seed,
-          replications: rToUse,
-          queueArchitecture,
-          precomputedCaseSets,
-          shiftDistribution: placementDist,
-          dispatchFairness,
-        });
+        const placedRes = evaluateLayout(placementDist);
         const picked = pickPlacementOrUniform(finalRes, placedRes, placementDist);
         finalRes = picked.result;
         if (picked.distributionUsed) winningDist = picked.distributionUsed;
@@ -3173,8 +3236,20 @@ export function searchOptimalHC(params: {
       }
     }
 
+    // Nothing passed both blocks, but some layout cleared the main days: report THAT layout (primary figures, the confirmation
+    // sentence as the reason) - not a hard primary failure of a later layout - so the row is never read as a plain miss (item 2, B4).
+    let confirmationOnlyGate: string | undefined;
+    if (!finalRes.passesAllConstraints && confirmationFailure) {
+      finalRes = confirmationFailure.res;
+      reportedDist = confirmationFailure.roster;
+      repairReasons = confirmationFailure.res.failingReasons;
+      confirmationOnlyGate = confirmationFailure.gate;
+    }
+
     if (rToUse === R) {
       evalCache.set(n, finalRes);
+      if (confirmationOnlyGate !== undefined) confirmationOnlyGateByN.set(n, confirmationOnlyGate);
+      else confirmationOnlyGateByN.delete(n);
       if (repairReasons === undefined) coverageRepairReasonsByN.delete(n);
       else coverageRepairReasonsByN.set(n, repairReasons);
       if (winningDist) {
@@ -3547,7 +3622,9 @@ export function searchOptimalHC(params: {
       failedResult: failedNResult,
       differenceSummary: isInfeasible
         ? `Evaluated at cap N=${evalN}: Primary SLA was ${finalDESResult.primaryAchievedPct}%. Targets could not be met within userMaxHC=${searchCap}.`
-        : `At N=${failedNResult.operationalHC}, Primary SLA was ${failedNResult.primaryAchievedPct}%, BO ASA was ${failedNResult.boAsaMeanMinutes}m. Stepping up to N=${evalN} achieved ${finalDESResult.primaryAchievedPct}% Primary SLA and ${finalDESResult.boAsaMeanMinutes}m BO ASA.`,
+        : confirmationOnlyGateByN.has(failedNResult.operationalHC)
+          ? `${formatBoundaryConfirmationFailure(failedNResult.operationalHC, confirmationOnlyGateByN.get(failedNResult.operationalHC)!)} Stepping up to N=${evalN} achieved ${finalDESResult.primaryAchievedPct}% Primary SLA and ${finalDESResult.boAsaMeanMinutes}m BO ASA.`
+          : `At N=${failedNResult.operationalHC}, Primary SLA was ${failedNResult.primaryAchievedPct}%, BO ASA was ${failedNResult.boAsaMeanMinutes}m. Stepping up to N=${evalN} achieved ${finalDESResult.primaryAchievedPct}% Primary SLA and ${finalDESResult.boAsaMeanMinutes}m BO ASA.`,
       breachSamplesAtNMinus1: breachSamples,
     };
   }
@@ -3817,6 +3894,8 @@ export async function searchOptimalHCAsync(params: {
   const rescueCtx = { sla, categories, replications: R, baseSeed: seed, precomputedCaseSets, confirmation: rescueConfirmation };
   // Coverage-satisfying roster whose failure is reported at an N where nothing passed (repair / spread layout; A4). Not set for passing Ns.
   const reportedDistributionByN = new Map<number, ShiftDistributionByCategory>();
+  // Gate line of the confirmation run for every N whose best layout cleared the main days but failed the second set (item 2, B4).
+  const confirmationOnlyGateByN = new Map<number, string>();
 
   function buildHistorySnapshot(): SearchProgressState['evaluatedHistory'] {
     const list: SearchProgressState['evaluatedHistory'] = [];
@@ -3863,14 +3942,43 @@ export async function searchOptimalHCAsync(params: {
     let reportedRes: Awaited<ReturnType<typeof evaluateCandidateStatisticalAsync>> | undefined;
     let reportedDist: ShiftDistributionByCategory | undefined;
     let reportedReasons: string[] | undefined;
+    // Reliable minimum (item 2) - the sync twin's evaluateLayout, driven through the same createPassConfirmation machine; the
+    // confirmation stage shows its own progress text, and a cancel is honoured before every evaluation.
+    let confirmationFailure: { res: Awaited<ReturnType<typeof evaluateCandidateStatisticalAsync>>; roster: ShiftDistributionByCategory | undefined; gate: string } | undefined;
+    const evaluateLayout = async (roster: ShiftDistributionByCategory | undefined, primaryLabel: string): Promise<Awaited<ReturnType<typeof evaluateCandidateStatisticalAsync>>> => {
+      const gate = createPassConfirmation<Awaited<ReturnType<typeof evaluateCandidateStatisticalAsync>>>({ n, confirmEnabled: rToUse === R });
+      for (let stage = gate.next(); stage !== null; stage = gate.next()) {
+        if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
+        gate.record(await evaluateCandidateStatisticalAsync({
+          operationalHC: n, intervals, openingWIP, calendar, labor, queueArchitecture, shiftDistribution: roster, dispatchFairness,
+          shouldCancel,
+          onRepProgress: (completedReps, totalReps) => {
+            onProgress?.({
+              status: 'searching',
+              phase: `Phase 2: Statistical Primary SLA Search (Testing N = ${n})`,
+              currentN: n,
+              nMin: nMinAnalytical,
+              maxN: searchCap,
+              percent: progressPct,
+              evaluatedHistory: buildHistorySnapshot(),
+              currentMessage: stage === 'confirm'
+                ? `${msg} (Confirming on a second set of simulated days, ${completedReps}/${totalReps} replications)`
+                : `${msg} (${primaryLabel}${completedReps}/${totalReps} replications)`,
+            });
+          },
+          ...(stage === 'confirm'
+            ? resolveRescueEvaluation('confirm', rescueCtx)
+            : { sla, categories, replications: rToUse, baseSeed: seed, precomputedCaseSets }),
+        }));
+      }
+      const out = gate.result();
+      if (out.confirmationGate !== null && !confirmationFailure) confirmationFailure = { res: out.failed!, roster, gate: out.confirmationGate };
+      return out.adopted ?? out.failed!;
+    };
     // "Repair, then spread (confirmed)": the sync twin's step, driven through the same createCoverageSpreadSearch machine.
     const runRepair = async () => {
       if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
-      coverageRes = await evaluateCandidateStatisticalAsync({
-        operationalHC: n, intervals, openingWIP, categories, calendar, labor, sla,
-        baseSeed: seed, replications: rToUse, queueArchitecture, precomputedCaseSets,
-        shouldCancel, shiftDistribution: covPlan.dist!, dispatchFairness,
-      });
+      coverageRes = await evaluateLayout(covPlan.dist!, 'trying a coverage-repair start-time layout, ');
       if (coverageRes.passesAllConstraints) {
         finalRes = coverageRes;
         winningDist = covPlan.dist!;
@@ -3921,33 +4029,7 @@ export async function searchOptimalHCAsync(params: {
       if (!finalRes) finalRes = reportedRes;
     }
     if (!finalRes) {
-      const uniformRes = await evaluateCandidateStatisticalAsync({
-        operationalHC: n,
-        intervals,
-        openingWIP,
-        categories,
-        calendar,
-        labor,
-        sla,
-        baseSeed: seed,
-        replications: rToUse,
-        queueArchitecture,
-        precomputedCaseSets,
-        dispatchFairness,
-        shouldCancel,
-        onRepProgress: (completedReps, totalReps) => {
-          onProgress?.({
-            status: 'searching',
-            phase: `Phase 2: Statistical Primary SLA Search (Testing N = ${n})`,
-            currentN: n,
-            nMin: nMinAnalytical,
-            maxN: searchCap,
-            percent: progressPct,
-            evaluatedHistory: buildHistorySnapshot(),
-            currentMessage: `${msg} (${completedReps}/${totalReps} replications)`,
-          });
-        },
-      });
+      const uniformRes = await evaluateLayout(undefined, '');
       finalRes = uniformRes;
       if (!uniformRes.passesAllConstraints && covPlan.attempt && covPlan.dist && !coverageRes) {
         await runRepair();
@@ -3955,7 +4037,7 @@ export async function searchOptimalHCAsync(params: {
         if (!finalRes.passesAllConstraints && reportedRes) finalRes = reportedRes;
       }
     }
-    const repairReasons = coverageRepairReasons(covPlan, finalRes, reportedReasons ? { passesAllConstraints: false, failingReasons: reportedReasons } : coverageRes);
+    let repairReasons = coverageRepairReasons(covPlan, finalRes, reportedReasons ? { passesAllConstraints: false, failingReasons: reportedReasons } : coverageRes);
 
     // Same shared computeCandidatePlacementDistribution / pickPlacementOrUniform as
     // searchOptimalHC's evaluateN — see that function's comment for the guarantees this
@@ -3986,22 +4068,7 @@ export async function searchOptimalHCAsync(params: {
           evaluatedHistory: buildHistorySnapshot(),
           currentMessage: `${msg} (verifying deadline-coverage shift placement)`,
         });
-        const placedRes = await evaluateCandidateStatisticalAsync({
-          operationalHC: n,
-          intervals,
-          openingWIP,
-          categories,
-          calendar,
-          labor,
-          sla,
-          baseSeed: seed,
-          replications: rToUse,
-          queueArchitecture,
-          precomputedCaseSets,
-          shouldCancel,
-          shiftDistribution: placementDist,
-          dispatchFairness,
-        });
+        const placedRes = await evaluateLayout(placementDist, 'verifying deadline-coverage shift placement, ');
         const picked = pickPlacementOrUniform(finalRes, placedRes, placementDist);
         finalRes = picked.result;
         if (picked.distributionUsed) winningDist = picked.distributionUsed;
@@ -4043,8 +4110,19 @@ export async function searchOptimalHCAsync(params: {
       }
     }
 
+    // Nothing passed both blocks, but some layout cleared the main days: report THAT layout (see searchOptimalHC's evaluateN).
+    let confirmationOnlyGate: string | undefined;
+    if (!finalRes.passesAllConstraints && confirmationFailure) {
+      finalRes = confirmationFailure.res;
+      reportedDist = confirmationFailure.roster;
+      repairReasons = confirmationFailure.res.failingReasons;
+      confirmationOnlyGate = confirmationFailure.gate;
+    }
+
     if (rToUse === R) {
       evalCache.set(n, finalRes);
+      if (confirmationOnlyGate !== undefined) confirmationOnlyGateByN.set(n, confirmationOnlyGate);
+      else confirmationOnlyGateByN.delete(n);
       if (repairReasons === undefined) coverageRepairReasonsByN.delete(n);
       else coverageRepairReasonsByN.set(n, repairReasons);
       if (winningDist) {
@@ -4501,7 +4579,9 @@ export async function searchOptimalHCAsync(params: {
       failedResult: failedNResult,
       differenceSummary: isInfeasible
         ? `Evaluated at cap N=${evalN}: Primary SLA was ${finalDESResult.primaryAchievedPct}%. Targets could not be met within userMaxHC=${searchCap}.`
-        : `At N=${failedNResult.operationalHC}, Primary SLA was ${failedNResult.primaryAchievedPct}%, BO ASA was ${failedNResult.boAsaMeanMinutes}m. Stepping up to N=${evalN} achieved ${finalDESResult.primaryAchievedPct}% Primary SLA and ${finalDESResult.boAsaMeanMinutes}m BO ASA.`,
+        : confirmationOnlyGateByN.has(failedNResult.operationalHC)
+          ? `${formatBoundaryConfirmationFailure(failedNResult.operationalHC, confirmationOnlyGateByN.get(failedNResult.operationalHC)!)} Stepping up to N=${evalN} achieved ${finalDESResult.primaryAchievedPct}% Primary SLA and ${finalDESResult.boAsaMeanMinutes}m BO ASA.`
+          : `At N=${failedNResult.operationalHC}, Primary SLA was ${failedNResult.primaryAchievedPct}%, BO ASA was ${failedNResult.boAsaMeanMinutes}m. Stepping up to N=${evalN} achieved ${finalDESResult.primaryAchievedPct}% Primary SLA and ${finalDESResult.boAsaMeanMinutes}m BO ASA.`,
       breachSamplesAtNMinus1: breachSamples,
     };
   }
