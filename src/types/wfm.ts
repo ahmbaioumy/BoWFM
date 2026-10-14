@@ -678,6 +678,12 @@ export interface HCSearchOutput {
     /** The distribution actually used for the returned recommendedHC, if placement won. */
     winningDistribution?: ShiftDistributionByCategory;
   };
+  /**
+   * Which start-time layout the recommended roster came from: 'uniform' = everyone at opening (no roster);
+   * 'repair' / 'spread' = coverage-floor layouts; 'placement' / 'ladder' = Shift Placement; 'polish' = adopted roster polish.
+   * Display only; absent when nothing was recommended.
+   */
+  winningLayout?: WinningLayout;
   /** Stage 3b roster polish. Present only when shift placement is ON and a HC was recommended. */
   rosterPolish?: RosterPolishResult;
   /**
@@ -688,6 +694,8 @@ export interface HCSearchOutput {
    */
   polishConfirmation?: { baselinePasses: boolean; adoptedPasses: boolean; evaluations: number };
 }
+
+export type WinningLayout = 'uniform' | 'repair' | 'spread' | 'placement' | 'ladder' | 'polish';
 
 export interface SensitivityScenario {
   volumeDeltaPct: number; // e.g. -20, -10, 0, 10, 20

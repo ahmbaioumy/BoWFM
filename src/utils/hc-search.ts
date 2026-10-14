@@ -23,7 +23,7 @@ import {
   StaffingRequirement,
   StandardInterval,
 } from '../types/wfm';
-import type { DispatchFairnessConfig } from '../types/wfm';
+import type { DispatchFairnessConfig, WinningLayout } from '../types/wfm';
 import {
   computeIntervalHorizon,
   convertSlaDurationToMinutes,
@@ -1961,6 +1961,27 @@ export function adoptedPolishEvaluation<T>(params: {
  *    house-monotone greedy), this can only patch over — never introduce — a monotonicity dip
  *    relative to uniform alone (decision-log D3's regression class).
  */
+/**
+ * A13.1: which layout the roster of an evaluated N came from. Shared by searchOptimalHC and searchOptimalHCAsync.
+ * Identity-based: the winning roster object is one of the rosters the search built. No roster = all agents at opening ('uniform').
+ */
+export function classifyWinningLayout(
+  winningDist: ShiftDistributionByCategory | undefined,
+  tried: {
+    repair?: ShiftDistributionByCategory | null;
+    spread?: ShiftDistributionByCategory | null;
+    placement?: ShiftDistributionByCategory | null;
+    ladderWon?: boolean;
+  },
+): WinningLayout {
+  if (!winningDist) return 'uniform';
+  if (tried.spread && winningDist === tried.spread) return 'spread';
+  if (tried.repair && winningDist === tried.repair) return 'repair';
+  if (tried.ladderWon) return 'ladder';
+  if (tried.placement && winningDist === tried.placement) return 'placement';
+  return 'ladder';
+}
+
 export function pickPlacementOrUniform<T extends { passesAllConstraints: boolean }>(
   uniformResult: T,
   placedResult: T | null,
@@ -3001,6 +3022,8 @@ export function searchOptimalHC(params: {
   // audit DES run and the N−1 boundary-evidence run so what is displayed matches what the CI
   // gate actually verified, and surfaced as HCSearchOutput.shiftPlacement.winningDistribution.
   const winningDistributionByN = new Map<number, ShiftDistributionByCategory>();
+  // Which layout produced that roster (A13.1); same shared classifier in the sync and async search.
+  const winningLayoutByN = new Map<number, WinningLayout>();
 
   // Rescue ladder confirmation block (PRD P1-6): built lazily, once per search, shared by every N and rung.
   const rescueConfirmation = createConfirmationBlock({ intervals, openingWIP, categories, calendar, sla, seed, replications: R });
@@ -3095,6 +3118,8 @@ export function searchOptimalHC(params: {
 
     // Rosters already tried at this N, so the rescue ladder below never repeats one.
     const triedRosters: Array<ShiftDistributionByCategory | null | undefined> = [covPlan.dist, covPlan.spread];
+    let placementTried: ShiftDistributionByCategory | null | undefined;
+    let ladderWon = false;
     if (labor.shiftPlacementEnabled && !finalRes.passesAllConstraints && representativeCases) {
       const placementDist = computeCandidatePlacementDistribution({
         n,
@@ -3104,6 +3129,7 @@ export function searchOptimalHC(params: {
         queueArchitecture,
       });
       triedRosters.push(placementDist);
+      placementTried = placementDist;
       if (placementDist) {
         const placedRes = evaluateCandidateStatistical({
           operationalHC: n,
@@ -3143,6 +3169,7 @@ export function searchOptimalHC(params: {
       if (rescued) {
         finalRes = rescued.ev;
         winningDist = rescued.roster;
+        ladderWon = true;
       }
     }
 
@@ -3155,6 +3182,7 @@ export function searchOptimalHC(params: {
       } else {
         winningDistributionByN.delete(n);
       }
+      winningLayoutByN.set(n, classifyWinningLayout(winningDist, { repair: covPlan.dist, spread: covPlan.spread, placement: placementTried, ladderWon }));
       if (!winningDist && reportedDist && !finalRes.passesAllConstraints) reportedDistributionByN.set(n, reportedDist);
       else reportedDistributionByN.delete(n);
     }
@@ -3366,7 +3394,10 @@ export function searchOptimalHC(params: {
     const fin = finalizeRosterPolish({ plan, search, parallelSearch, currentSlaPct: primaryPassedResult.primaryStats.achievedPctMedian });
     polishConfirmation = summarizePolishConfirmation(confirmBaseline, adoptedPolishEvaluation({ plan, fin, search, parallelSearch, candidateEvals: confirmEvals }), confirmEvals.size + (confirmBaseline ? 1 : 0));
     rosterPolish = fin.rosterPolish;
-    if (fin.adoptedDistribution) winningDistributionByN.set(recommendedHC, fin.adoptedDistribution);
+    if (fin.adoptedDistribution) {
+      winningDistributionByN.set(recommendedHC, fin.adoptedDistribution);
+      winningLayoutByN.set(recommendedHC, 'polish');
+    }
     // F3 (HC-15): after adoption every statistic reported for N describes the ADOPTED roster (rosterPolish.currentSlaPct above stays the pre-polish median).
     const adoptedEval = adoptedPolishEvaluation({ plan, fin, search, parallelSearch, candidateEvals });
     if (adoptedEval) {
@@ -3562,6 +3593,7 @@ export function searchOptimalHC(params: {
           winningDistribution: recommendedHC !== null ? winningDistributionByN.get(recommendedHC) : undefined,
         }
       : undefined,
+    ...(recommendedHC !== null && winningLayoutByN.has(recommendedHC) ? { winningLayout: winningLayoutByN.get(recommendedHC) } : {}),
     ...(rosterPolish ? { rosterPolish } : {}),
     ...(polishConfirmation ? { polishConfirmation } : {}),
   };
@@ -3777,6 +3809,8 @@ export async function searchOptimalHCAsync(params: {
   }
 
   const winningDistributionByN = new Map<number, ShiftDistributionByCategory>();
+  // Which layout produced that roster (A13.1); same shared classifier in the sync and async search.
+  const winningLayoutByN = new Map<number, WinningLayout>();
 
   // Rescue ladder confirmation block (PRD P1-6): built lazily, once per search, shared by every N and rung.
   const rescueConfirmation = createConfirmationBlock({ intervals, openingWIP, categories, calendar, sla, seed, replications: R });
@@ -3928,6 +3962,8 @@ export async function searchOptimalHCAsync(params: {
     // preserves (never-worse, monotone-safe gate).
     // Rosters already tried at this N, so the rescue ladder below never repeats one.
     const triedRosters: Array<ShiftDistributionByCategory | null | undefined> = [covPlan.dist, covPlan.spread];
+    let placementTried: ShiftDistributionByCategory | null | undefined;
+    let ladderWon = false;
     if (labor.shiftPlacementEnabled && !finalRes.passesAllConstraints && representativeCases) {
       if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
       const placementDist = computeCandidatePlacementDistribution({
@@ -3938,6 +3974,7 @@ export async function searchOptimalHCAsync(params: {
         queueArchitecture,
       });
       triedRosters.push(placementDist);
+      placementTried = placementDist;
       if (placementDist) {
         onProgress?.({
           status: 'searching',
@@ -4002,6 +4039,7 @@ export async function searchOptimalHCAsync(params: {
       if (rescued) {
         finalRes = rescued.ev;
         winningDist = rescued.roster;
+        ladderWon = true;
       }
     }
 
@@ -4014,6 +4052,7 @@ export async function searchOptimalHCAsync(params: {
       } else {
         winningDistributionByN.delete(n);
       }
+      winningLayoutByN.set(n, classifyWinningLayout(winningDist, { repair: covPlan.dist, spread: covPlan.spread, placement: placementTried, ladderWon }));
       if (!winningDist && reportedDist && !finalRes.passesAllConstraints) reportedDistributionByN.set(n, reportedDist);
       else reportedDistributionByN.delete(n);
     }
@@ -4293,7 +4332,10 @@ export async function searchOptimalHCAsync(params: {
     const fin = finalizeRosterPolish({ plan, search, parallelSearch, currentSlaPct: primaryPassedResult.primaryStats.achievedPctMedian });
     polishConfirmation = summarizePolishConfirmation(confirmBaseline, adoptedPolishEvaluation({ plan, fin, search, parallelSearch, candidateEvals: confirmEvals }), confirmEvals.size + (confirmBaseline ? 1 : 0));
     rosterPolish = fin.rosterPolish;
-    if (fin.adoptedDistribution) winningDistributionByN.set(recommendedHC, fin.adoptedDistribution);
+    if (fin.adoptedDistribution) {
+      winningDistributionByN.set(recommendedHC, fin.adoptedDistribution);
+      winningLayoutByN.set(recommendedHC, 'polish');
+    }
     // F3 (HC-15): after adoption every statistic reported for N describes the ADOPTED roster (rosterPolish.currentSlaPct above stays the pre-polish median).
     const adoptedEval = adoptedPolishEvaluation({ plan, fin, search, parallelSearch, candidateEvals });
     if (adoptedEval) {
@@ -4520,6 +4562,7 @@ export async function searchOptimalHCAsync(params: {
           winningDistribution: recommendedHC !== null ? winningDistributionByN.get(recommendedHC) : undefined,
         }
       : undefined,
+    ...(recommendedHC !== null && winningLayoutByN.has(recommendedHC) ? { winningLayout: winningLayoutByN.get(recommendedHC) } : {}),
     ...(rosterPolish ? { rosterPolish } : {}),
     ...(polishConfirmation ? { polishConfirmation } : {}),
   };
