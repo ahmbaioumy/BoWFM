@@ -2082,9 +2082,13 @@ console.log('\n--- Suite D33: Phase 3 — coverage repair (redistribution before
     // late cohort any more, so every agent works ONE 9h shift from 08:00 and the 17:00-22:00 evening is unstaffed: the
     // uniform-only answer rises 21 -> 28 and now EXCEEDS the coverage-ON answer (22, which keeps a late cohort that
     // serves the evening). Pinned explicitly: ON = 22, OFF = 28, OFF >= ON.
-    searchWithCoverage.recommendedHC === 22 && searchNoCoverage.recommendedHC === 28 &&
-      (searchNoCoverage.recommendedHC ?? -1) >= (searchWithCoverage.recommendedHC ?? Infinity),
-    'D33.7 coverage ON = 22, coverage OFF = 28 (OFF >= ON: one shift from open leaves the evening unstaffed, a late cohort serves it)',
+    // Re-pinned 2026-10-14 (Item 1, L28 / P1-9, owner decision 2026-10-11): ON was 22 (repair roster 0:21 300:1). When the repair roster fails the gate
+    // the same agents are now also tried spread evenly over the same starts and the even split (0:11 300:10) passes the gate and the confirmation block at
+    // 21. Coverage OFF is unchanged at 28 because the spread layout exists only with a repair roster (A1: OFF may now EXCEED ON, only when the ON answer
+    // uses the spread roster - D78.d2 / D78.j).
+    searchWithCoverage.recommendedHC === 21 && searchNoCoverage.recommendedHC === 28 &&
+      [...(searchWithCoverage.finalDESResult?.shiftDistributionUsed?.__POOLED__?.slaps ?? [])].sort((p, q) => p.startMinutesFromOpen - q.startMinutesFromOpen).map((x) => x.startMinutesFromOpen + ':' + x.agentCount).join(' ') === '0:11 300:10',
+    'D33.7 coverage ON = 21 (even spread 0:11 300:10, Item 1), coverage OFF = 28 (OFF > ON only because the ON answer uses the spread roster)',
     `withCoverage=${searchWithCoverage.recommendedHC} withoutCoverage=${searchNoCoverage.recommendedHC}`
   );
 
@@ -3711,7 +3715,10 @@ console.log('\n--- Suite D50: roster polish at fixed HC ---');
     assert(rpC !== undefined && rpC.status === 'no_improvement' && typeof rpC.reason === 'string' && rpC.reason.length > 0 && rpC.movesApplied === undefined, 'D50.4a rescued roster leaves nothing to re-spread: status no_improvement with reason, no moves applied (was kept_current_failed_gate, 0 moves)', `status=${rpC?.status} reason=${rpC?.reason}`);
     // Here the current roster is a placement RESCUE (uniform/repair cannot pass at all: OFF is infeasible),
     // so HC is compared against that existing behaviour by construction, not against OFF.
-    assert(offC.recommendedHC === null && onC.recommendedHC !== null, 'D50.4b control: HC still comes from the unchanged search (placement rescue), polish only re-spreads', `off=${offC.recommendedHC} on=${onC.recommendedHC}`);
+    // Re-pinned 2026-10-14 (Item 1, L28 / P1-9: the even spread over the coverage starts is a second layout tried when the repair roster fails): placement OFF was
+    // infeasible (null); the spread layout (0:15 240:14) now passes, so OFF recommends 29. Placement ON is unchanged at 18 (a placement rescue); the control still
+    // proves the ON headcount comes from the search, not the polish: ON 18 <= OFF 29.
+    assert(offC.recommendedHC === 29 && onC.recommendedHC === 18, 'D50.4b control: HC still comes from the unchanged search (placement rescue, ON 18), polish only re-spreads; OFF was infeasible and is now 29 via the even-spread layout (Item 1)', `off=${offC.recommendedHC} on=${onC.recommendedHC}`);
     const winC = onC.shiftPlacement?.winningDistribution?.__POOLED__?.slaps ?? [];
     const onShiftC = (rpC.profile.bucketStartMinutes as number[]).map((st) => winC.reduce((acc, sl) => (sl.startMinutesFromOpen <= st && st < sl.startMinutesFromOpen + 8 * 60 ? acc + sl.agentCount : acc), 0));
     assert(JSON.stringify(onShiftC) === JSON.stringify(rpC.profile.onShiftCurrent) && slotsOf(onC.finalDESResult?.shiftDistributionUsed) === slotsOf(onC.shiftPlacement?.winningDistribution), 'D50.4c kept-current: final roster (and audit DES roster) is exactly the pre-polish current roster', `final=${JSON.stringify(onShiftC)} current=${JSON.stringify(rpC.profile.onShiftCurrent)}`);
@@ -3902,7 +3909,7 @@ console.log('\n--- Suite D51: roster polish, siloed ---');
     return { on, rp };
   };
 
-  await checkScenario('D51.1', mkIv51((h) => (h >= 12 && h < 16 ? 14 : 3), (h) => (h >= 12 && h < 16 ? 10 : 2)), mkSla51(85, 3), 'no_improvement', { hc: 14, gross: 16 });
+  await checkScenario('D51.1', mkIv51((h) => (h >= 12 && h < 16 ? 14 : 3), (h) => (h >= 12 && h < 16 ? 10 : 2)), mkSla51(85, 3), 'no_improvement', { hc: 13, gross: 14 }); // Re-pinned 2026-10-14 (Item 1): 14 / 16 -> 13 / 14. The even spread over the coverage starts passes at 13 (A=0:4 240:3, B=0:3 240:3); placement OFF drops 17 -> 13 the same way, so ON still equals OFF.
   const part = await checkScenario('D51.2', mkIv51((h) => (h === 8 ? 60 : 4), (h) => (h === 8 ? 40 : 3)), mkSla51(95, 4), 'adopted_partial');
   assert(part.rp?.movesApplied > 0 && part.rp?.movesApplied < part.rp?.movesTotal, 'D51.2i partial: 0 < k* < K', `${part.rp?.movesApplied}/${part.rp?.movesTotal}`);
 
@@ -5161,7 +5168,10 @@ console.log('\n--- Suite D65: F3 statistics describe the adopted roster ---');
   // (g) siloed (D52 fixture). Re-pinned 2026-10-08 (P1-6): N 19 -> 18; adopted_partial -> no_improvement; mean 99.5 -> 99.3 (CI [99.2, 99.3]);
   //   rp 574fd697c0fc5960 -> f10ac0c20fe7cf73; others 51ae9df0b3740505 -> 9db7e75aa8ce963c; roster digest ef0e7a02e1a93f74 -> 7ccb9a8cd5d81ac2; binding label unchanged.
   //   The adopted-vector property of this slot (a vector is adopted for each queue) lives on in D73.2 / D73.4.
-  await polishCase('D65.4 siloed (D52 fixture)', { intervals: iv2, categories: cat2, labor: laborOn65, sla: mkSla65(95, 4), seed: 42, userMaxHC: 60, arch: 'siloed' }, { N: 18, mean: 99.3, rp: 'f10ac0c20fe7cf73', others: '9db7e75aa8ce963c', dist: '7ccb9a8cd5d81ac2', bind: 'statistical_primary_sla|Primary SLA 95% Target (Statistical DES, 90% CI)', status: 'no_improvement' });
+  //   Re-pinned 2026-10-14 (Item 1 A4): 'others' 9db7e75aa8ce963c -> 4b5bc4d4961616be. Verified checkpoint vs new: HC 18, gross 20, adopted roster (A=0:8 240:3 | B=0:5 240:2)
+  //   and the history's N / passed flags (15F 17F 18P 19P 20P 21P 22P) are identical; only the failing N's rows differ (they now describe the coverage-satisfying repair /
+  //   spread roster, not the uniform one) and boundaryEvidence (the N-1 run uses that same roster).
+  await polishCase('D65.4 siloed (D52 fixture)', { intervals: iv2, categories: cat2, labor: laborOn65, sla: mkSla65(95, 4), seed: 42, userMaxHC: 60, arch: 'siloed' }, { N: 18, mean: 99.3, rp: 'f10ac0c20fe7cf73', others: '4b5bc4d4961616be', dist: '7ccb9a8cd5d81ac2', bind: 'statistical_primary_sla|Primary SLA 95% Target (Statistical DES, 90% CI)', status: 'no_improvement' });
 
   // (f) nothing adopted: the full result must be byte-identical to today
   {
@@ -5175,14 +5185,18 @@ console.log('\n--- Suite D65: F3 statistics describe the adopted roster ---');
     // Re-pinned 2026-10-08 (P1-6): digest 4f9350ef4421701d -> 21068fd81ff08d7a. Not only the digest moved: the RECOMMENDATION itself moved 12 -> 9 (with Shift Placement ON
     // the search now tries a ladder of simple start-time rosters, each confirmed on a second independent replication block, before rejecting a headcount;
     // the status is still no_improvement). The new headcount is asserted explicitly in D65.5c.
-    assert(dg(a) === '21068fd81ff08d7a' && dg(aa) === dg(a), 'D65.5b no_improvement: full result pinned (P1-6: digest 4f9350ef4421701d -> 21068fd81ff08d7a because the recommendation moved 12 -> 9) and sync = async', `sync ${dg(a)} async ${dg(aa)}`);
-    assert(a.recommendedHC === 9 && aa.recommendedHC === 9, 'D65.5c no_improvement scenario: recommended HC is 9 in sync and async (P1-6: was 12)', `sync ${a.recommendedHC} async ${aa.recommendedHC}`);
+    // Re-pinned 2026-10-14 (Item 1, L28 / P1-9): the even spread over the coverage starts (0:4 240:4) passes at 8, so the recommendation moved 9 -> 8 (still
+    // no_improvement); digest 21068fd81ff08d7a -> 26d8f22fd14ab032 (sync = async).
+    assert(dg(a) === '26d8f22fd14ab032' && dg(aa) === dg(a), 'D65.5b no_improvement: full result pinned (P1-6: 12 -> 9; Item 1: 9 -> 8, digest 21068fd81ff08d7a -> 26d8f22fd14ab032) and sync = async', `sync ${dg(a)} async ${dg(aa)}`);
+    assert(a.recommendedHC === 8 && aa.recommendedHC === 8, 'D65.5c no_improvement scenario: recommended HC is 8 in sync and async (P1-6: was 12; Item 1 even-spread layout: 9 -> 8)', `sync ${a.recommendedHC} async ${aa.recommendedHC}`);
     const off: Scn = { intervals: iv1, categories: cat1, labor: laborOff65, sla: sla65, seed: 42, userMaxHC: 40 };
     const o: any = searchOptimalHC(baseOf(off));
     const oa: any = await searchOptimalHCAsync(baseOf(off));
     // Re-pinned 2026-10-08 (P2-9): digest 9038b551a950a83b -> dd646445fac9906d. The recommended HC is unchanged (9); only the
     // `boundaryEvidence` block and the new `fixedShifts` field on the result differ.
-    assert(o.rosterPolish === undefined && dg(o) === 'dd646445fac9906d' && dg(oa) === dg(o), 'D65.6 placement OFF: full result pinned (P2-9: only boundaryEvidence + fixedShifts differ from the pre-change digest 9038b551a950a83b) and sync = async', `sync ${dg(o)} async ${dg(oa)}`);
+    // Re-pinned 2026-10-14 (Item 1, spread passes): digest dd646445fac9906d -> 849aa48b20e81991. The placement-OFF recommendation moved 9 -> 7 (gross 10 -> 8; the even
+    // spread 0:4 240:3 passes the gate and the confirmation block).
+    assert(o.rosterPolish === undefined && dg(o) === '849aa48b20e81991' && dg(oa) === dg(o), 'D65.6 placement OFF: full result pinned (P2-9: only boundaryEvidence + fixedShifts differ from the pre-change digest 9038b551a950a83b) and sync = async', `sync ${dg(o)} async ${dg(oa)}`);
   }
   // (i) placement stays opt-in
   assert(!DEFAULT_LABOR.shiftPlacementEnabled, 'D65.7 default labor config: shiftPlacementEnabled is OFF', `got ${String(DEFAULT_LABOR.shiftPlacementEnabled)}`);
@@ -6130,18 +6144,26 @@ console.log('\n--- Suite D72: P1-6 / L23 rescue ladder with a confirmation block
     });
 
   // ---- Recorded from the UNCHANGED code (checkpoint 7ad848f, 2026-10-08): recommended HC with Shift Placement ON, [coverage ON, coverage OFF] ----
+  // (Item 1, 2026-10-14: these stay the UNCHANGED-code values on purpose; D72.9 checks the new placement-ON answers are <= them.)
   const PRE_ON: Record<string, [number | null, number | null]> = {
     min: [9, 10], d33: [22, 21], d50: [9, 7], d50c: [29, 29], d50p: [11, 11], d51a: [17, 13], d51b: [20, 21], d52: [19, 21],
     'smp-support': [27, 28], 'smp-healthcare': [31, 31], 'smp-claims': [31, 31],
   };
   // ---- Shift Placement OFF controls: full-result digests recorded from the UNCHANGED code, [coverage ON, coverage OFF] ----
   const OFF_CTRL: Record<string, [string, string]> = {
-    d33: ['9bfa6b712030ca31', 'e7648280481a50de'],
-    d50: ['7e51ccbdd49beee7', '99118c71f91661d0'],
-    d51a: ['5a50233e9e8ebe81', 'b039820a28ec7405'],
-    min: ['9fbac7c6e70685e6', 'fd7188fda9d2d415'],
+    // Re-pinned 2026-10-14 (Item 1, L28 / P1-9). d33 [coverage ON]: 9bfa6b712030ca31 -> 182ef9a29f103996. The HC moved 22 -> 21 (the even spread 0:11 300:10 passes; same
+    // owner-approved change as D33.7 / D72.6b); the coverage-OFF digest is unchanged.
+    d33: ['182ef9a29f103996', 'e7648280481a50de'],
+    // Re-pinned 2026-10-14 (Item 1, spread passes): d50 [coverage ON] 7e51ccbdd49beee7 -> f72ba2b9f58c361a (HC 9 -> 7, gross 10 -> 8, 0:8 240:1 -> 0:4 240:3);
+    // d51a [coverage ON] 5a50233e9e8ebe81 -> f0162988cc498a17 (HC 17 -> 13, gross 19 -> 14, A=0:8 240:1 B=0:7 240:1 -> A=0:4 240:3 B=0:3 240:3). Coverage-OFF digests unchanged.
+    d50: ['f72ba2b9f58c361a', '99118c71f91661d0'],
+    d51a: ['f0162988cc498a17', 'b039820a28ec7405'],
+    // Re-pinned 2026-10-14 (Item 1 A4), min [coverage ON]: 9fbac7c6e70685e6 -> dd6858f403235959 and smp-support [coverage ON]: 04e10423ae3aa168 -> e6abddaaf9f4d90e. Verified
+    // checkpoint vs new: HC (9 / 27), gross HC (10 / 34), roster (0:8 240:1 / 0:26 150:1) and the history's N / passed flags are identical; only boundaryEvidence (the N-1 run
+    // now uses the coverage-satisfying repair roster instead of uniform) and the failing N's history rows differ.
+    min: ['dd6858f403235959', 'fd7188fda9d2d415'],
     'smp-claims': ['c817d697e8592d00', '5ebe0d840e798f15'],
-    'smp-support': ['04e10423ae3aa168', 'cca2b247a10fb364'],
+    'smp-support': ['e6abddaaf9f4d90e', 'cca2b247a10fb364'],
   };
 
   // ============================================================================================
@@ -6381,7 +6403,8 @@ console.log('\n--- Suite D72: P1-6 / L23 rescue ladder with a confirmation block
     const fx = FX.d33;
     const on = S72('d33', true, true);
     assert(on.rec === 21 && PRE_ON.d33[0] === 22, 'D72.6a D33 file, coverage ON, Shift Placement ON: recommended HC 21 (unchanged code: 22)', `got ${on.rec}`);
-    assert(S72('d33', true, false).rec === 21 && S72('d33', false, true).rec === 22, 'D72.6b CONTROLS: coverage OFF + placement ON stays 21; placement OFF stays 22', `${S72('d33', true, false).rec} / ${S72('d33', false, true).rec}`);
+    // Re-pinned 2026-10-14 (Item 1, L28 / P1-9): placement OFF, coverage ON was 22; the even spread (0:11 300:10) now passes at 21 (same value as D33.7).
+    assert(S72('d33', true, false).rec === 21 && S72('d33', false, true).rec === 21, 'D72.6b CONTROLS: coverage OFF + placement ON stays 21; placement OFF, coverage ON 22 -> 21 (Item 1: even-spread layout, as D33.7)', `${S72('d33', true, false).rec} / ${S72('d33', false, true).rec}`);
     if (typeof brl === 'function' && typeof dcs === 'function') {
       // Which route rescues 21? Walk the ladder independently (no pre-screen) with the unmodified gate on both blocks.
       const pSets = primarySets(fx); const cSets = confirmSets(fx);
@@ -6419,7 +6442,7 @@ console.log('\n--- Suite D72: P1-6 / L23 rescue ladder with a confirmation block
   // ============================================================================================
   // D72.8 never a false accept on the moved suite fixtures
   // ============================================================================================
-  const NEW_ON_COV_ON: Record<string, number> = { d50: 7, d51a: 14, d52: 18 }; // measured after the change (unchanged code: 9 / 17 / 19)
+  const NEW_ON_COV_ON: Record<string, number> = { d50: 7, d51a: 13, d52: 18 }; // measured after the change (unchanged code: 9 / 17 / 19); d51a 14 -> 13 on 2026-10-14 (Item 1: the even spread passes at 13)
   if (typeof brl === 'function' && typeof dcs === 'function') {
     for (const [name, cov] of [['d50', true], ['d51a', true], ['d52', true]] as Array<[string, boolean]>) {
       const fx = FX[name];
@@ -6431,14 +6454,46 @@ console.log('\n--- Suite D72: P1-6 / L23 rescue ladder with a confirmation block
       const rep = evalAt(fx, cov, on.rec, on.win, pSets, fx.seed);
       assert(rep.passesAllConstraints, `D72.8a ${name} (pre-change ${pre}, now ${on.rec}): the reported roster re-evaluated independently at full R with the unmodified SLA passes (primary block)`, `low=${rep.primaryStats.ci95Low}`);
       if (on.rec < pre) {
-        // A rescue happened: some ladder rung passes the full-R gate on BOTH blocks at the new headcount.
-        const ld = brl({ n: on.rec, cases: pSets[0].cases, calendar: fx.calendar, labor: laborFor(fx, true), queueArchitecture: fx.arch });
-        const both = ld.filter((d) => evalAt(fx, cov, on.rec as number, d, pSets, fx.seed).passesAllConstraints && evalAt(fx, cov, on.rec as number, d, cSets, dcs(fx.seed)).passesAllConstraints);
-        assert(both.length > 0, `D72.8b ${name}: at the new headcount ${on.rec} at least one ladder roster passes the unmodified gate on the primary AND the confirmation block`, `rungs=${ld.length}`);
+        // Re-targeted 2026-10-14 (Item 1, L28 / P1-9). The headcount moved below the old pin by one of two routes. (1) The even-spread layout over the coverage
+        // starts (a second layout tried when the repair roster fails): then the reported roster IS the spread roster and it passes the unmodified gate on BOTH
+        // blocks. (2) A rescue ladder rung (original D72.8b): some rung passes the full-R gate on BOTH blocks. d51a (13) now takes route 1 (spread); the
+        // ladder route is still pinned on d50 and d52 here and proven to be the ADOPTED roster, with the spread failing, in D72.8c.
+        const plan8 = (hcNs as any).planCoverageRepair({ n: on.rec, sla: slaFor(fx, cov), calendar: fx.calendar, labor: laborFor(fx, true), queueArchitecture: fx.arch, representativeCases: pSets[0].cases });
+        if (plan8.spread && on.win && rosterStr72(on.win) === rosterStr72(plan8.spread)) {
+          const pOk = evalAt(fx, cov, on.rec, plan8.spread, pSets, fx.seed).passesAllConstraints;
+          const cOk = evalAt(fx, cov, on.rec, plan8.spread, cSets, dcs(fx.seed)).passesAllConstraints;
+          assert(pOk && cOk, `D72.8b ${name}: at the new headcount ${on.rec} the adopted roster is the even-spread layout (${rosterStr72(on.win)}) and it passes the unmodified gate on the primary AND the confirmation block`, `primary=${pOk} confirm=${cOk}`);
+        } else {
+          const ld = brl({ n: on.rec, cases: pSets[0].cases, calendar: fx.calendar, labor: laborFor(fx, true), queueArchitecture: fx.arch });
+          const both = ld.filter((d) => evalAt(fx, cov, on.rec as number, d, pSets, fx.seed).passesAllConstraints && evalAt(fx, cov, on.rec as number, d, cSets, dcs(fx.seed)).passesAllConstraints);
+          assert(both.length > 0, `D72.8b ${name}: at the new headcount ${on.rec} at least one ladder roster passes the unmodified gate on the primary AND the confirmation block`, `rungs=${ld.length}`);
+        }
       }
     }
   } else {
     assert(false, 'D72.8 never a false accept on the moved suite fixtures (D50 / D51 / D52)', 'rescue helpers are not exported');
+  }
+
+  // ============================================================================================
+  // D72.8c the ladder path is still exercised (Item 1, 2026-10-14): at these headcounts the repair roster AND the even spread both fail the gate
+  // (or the spread fails confirmation) and the ADOPTED roster is a ladder rung - not the repair roster, not the spread roster.
+  // ============================================================================================
+  if (typeof brl === 'function' && typeof dcs === 'function') {
+    for (const [name, n8] of [['d52', 18], ['d50c', 18]] as Array<[string, number]>) {
+      const fx = FX[name];
+      const on = S72(name, true, true);
+      const pSets = primarySets(fx); const cSets = confirmSets(fx);
+      const plan8 = (hcNs as any).planCoverageRepair({ n: n8, sla: slaFor(fx, true), calendar: fx.calendar, labor: laborFor(fx, true), queueArchitecture: fx.arch, representativeCases: pSets[0].cases });
+      const winStr = rosterStr72(on.win);
+      const ld = brl({ n: n8, cases: pSets[0].cases, calendar: fx.calendar, labor: laborFor(fx, true), queueArchitecture: fx.arch });
+      const rung = ld.findIndex((d) => rosterStr72(d) === winStr);
+      assert(on.rec === n8 && !!on.win && rung >= 0 && winStr !== rosterStr72(plan8.dist ?? undefined) && winStr !== rosterStr72(plan8.spread ?? undefined),
+        `D72.8c ${name}: recommended HC ${n8}, and the adopted roster (${winStr}) is ladder rung ${rung}, not the repair roster (${rosterStr72(plan8.dist ?? undefined)}) nor the spread roster (${rosterStr72(plan8.spread ?? undefined)})`, `rec=${on.rec} win=${winStr}`);
+      const repOk = !!plan8.dist && evalAt(fx, true, n8, plan8.dist, pSets, fx.seed).passesAllConstraints;
+      const spP = !!plan8.spread && evalAt(fx, true, n8, plan8.spread, pSets, fx.seed).passesAllConstraints;
+      const spC = !!plan8.spread && evalAt(fx, true, n8, plan8.spread, cSets, dcs(fx.seed)).passesAllConstraints;
+      assert(!repOk && !(spP && spC), `D72.8c ${name}: at N=${n8} the repair roster fails the gate and the spread roster fails it (primary ${spP}, confirmation ${spC}) - so only a ladder rung can pass`, `repair=${repOk} spreadPrimary=${spP} spreadConfirm=${spC}`);
+    }
   }
 
   // ============================================================================================
@@ -6489,11 +6544,24 @@ console.log('\n--- Suite D72: P1-6 / L23 rescue ladder with a confirmation block
       const lab = laborFor(fx, true);
       const slaX = slaFor(fx, cov);
       const covPlan = (hcNs as any).planCoverageRepair({ n, sla: slaX, calendar: fx.calendar, labor: lab, queueArchitecture: fx.arch, representativeCases: sets[0].cases });
-      if (covPlan.dist && evalAt(fx, cov, n, covPlan.dist, sets, fx.seed).passesAllConstraints) return { pass: true, via: 'repair' };
+      const repairEv = covPlan.dist ? evalAt(fx, cov, n, covPlan.dist, sets, fx.seed) : null;
+      if (repairEv && repairEv.passesAllConstraints) return { pass: true, via: 'repair' };
+      // Item 1 (L28 / P1-9): the repair roster failed -> the even spread over the same starts, accepted only if it also passes the confirmation block
+      // (the same shared state machine the searches drive).
+      const ccs = (hcNs as any).createCoverageSpreadSearch as ((p: any) => { next: () => any; record: (e: any) => void; result: () => any }) | undefined;
+      if (repairEv && covPlan.spread && typeof ccs === 'function') {
+        const sp = ccs({ repairRoster: covPlan.dist, spreadRoster: covPlan.spread, repairResult: repairEv, confirmEnabled: true });
+        const ctxS = { sla: slaX, categories: fx.categories, replications: fx.reps, baseSeed: fx.seed, precomputedCaseSets: sets, confirmation: blk };
+        for (let c = sp.next(); c !== null; c = sp.next()) {
+          const p = c.stage === 'confirm' ? rre(c.stage, ctxS) : { sla: slaX, categories: fx.categories, replications: fx.reps, baseSeed: fx.seed, precomputedCaseSets: sets };
+          sp.record(evaluateCandidateStatistical({ operationalHC: n, intervals: fx.intervals, openingWIP: [], categories: p.categories, calendar: fx.calendar, labor: lab, sla: p.sla, baseSeed: p.baseSeed, replications: p.replications, queueArchitecture: fx.arch, precomputedCaseSets: p.precomputedCaseSets, shiftDistribution: c.roster }));
+        }
+        if (sp.result().adopted) return { pass: true, via: 'spread' };
+      }
       if (!covPlan.repairFirst && evalAt(fx, cov, n, undefined, sets, fx.seed).passesAllConstraints) return { pass: true, via: 'uniform' };
       const an = computeCandidatePlacementDistribution({ n, cases: sets[0].cases, calendar: fx.calendar, labor: lab, queueArchitecture: fx.arch });
       if (an && evalAt(fx, cov, n, an, sets, fx.seed).passesAllConstraints) return { pass: true, via: 'analytic' };
-      const rs = crs({ ladder: brl({ n, cases: sets[0].cases, calendar: fx.calendar, labor: lab, queueArchitecture: fx.arch }), alreadyTried: [covPlan.dist, an] });
+      const rs = crs({ ladder: brl({ n, cases: sets[0].cases, calendar: fx.calendar, labor: lab, queueArchitecture: fx.arch }), alreadyTried: [covPlan.dist, covPlan.spread, an] });
       const ctx = { sla: slaX, categories: fx.categories, replications: fx.reps, baseSeed: fx.seed, precomputedCaseSets: sets, confirmation: blk };
       for (let c = rs.next(); c !== null; c = rs.next()) {
         const p = rre(c.stage, ctx);
@@ -6502,7 +6570,9 @@ console.log('\n--- Suite D72: P1-6 / L23 rescue ladder with a confirmation block
       const w = rs.result().winner;
       return { pass: w !== null, via: w ? `rung${w.rung}` : 'none' };
     };
-    for (const [name, cov, lo, hi] of [['min', false, 3, 14], ['d51a', true, 6, 18], ['d52', true, 10, 24]] as Array<[string, boolean, number, number]>) {
+    // Item 1 (2026-10-14): d51a is now passed by the even-spread layout at 13-16 (no ladder-only N), so its 12c expectation is 'spread'; the ladder route is
+    // exercised by d52 (N=18) and by d50c (N=18..28, repair and spread both fail there), so 'rung' is still required of those sweeps.
+    for (const [name, cov, lo, hi, route] of [['min', false, 3, 14, 'rung'], ['d51a', true, 6, 18, 'spread'], ['d52', true, 10, 24, 'rung'], ['d50c', true, 16, 30, 'rung']] as Array<[string, boolean, number, number, string]>) {
       const fx = FX[name];
       const sets = primarySets(fx);
       const blk = ccb({ intervals: fx.intervals, openingWIP: [], categories: fx.categories, calendar: fx.calendar, sla: slaFor(fx, cov), seed: fx.seed, replications: fx.reps });
@@ -6514,7 +6584,7 @@ console.log('\n--- Suite D72: P1-6 / L23 rescue ladder with a confirmation block
       const cvTag = cov ? 'coverage ON' : 'coverage OFF';
       assert(rows.some((r) => r.pass) && rows.some((r) => !r.pass), `D72.12a setup (${name}, ${fx.arch}, ${cvTag}): the swept range N=${lo}..${hi} contains both a failing and a passing N`, dump);
       assert(holes.length === 0, `D72.12b ${name} (${fx.arch}, ${cvTag}): pass/fail is monotone in N over ${lo}..${hi} with the ladder active`, holes.join('; ') || dump);
-      assert(rows.some((r) => r.pass && r.via.startsWith('rung')), `D72.12c ${name} (${cvTag}): the sweep includes at least one N that only the ladder passes (so the ladder is really exercised)`, dump);
+      assert(rows.some((r) => r.pass && r.via.startsWith(route)), `D72.12c ${name} (${cvTag}): the sweep includes at least one N that only ${route === 'rung' ? 'the ladder' : 'the even-spread layout'} passes (so that route is really exercised)`, dump);
       const rec = S72(name, true, cov).rec;
       const firstPass = rows.find((r) => r.pass)?.n;
       assert(rec === firstPass, `D72.12d ${name} (${cvTag}): the search's recommendation (${rec}) is the lowest passing N of the sweep (${firstPass})`, dump);
@@ -6913,6 +6983,259 @@ console.log('\n--- Suite D73: P1-6 replacement fixtures for the roster-polish pa
   assert(present, 'D77.2a real evaluation results carry the three boolean cap flags', '');
   assert(consistent, 'D77.2b flags agree with failingReasons on every swept N', '');
   assert(sawOccFalse && sawOccTrue && sawAsaFalse, 'D77.2c setup: the sweep exercises failing and passing occupancy cap and a failing BO ASA cap (coverage never fails with a uniform roster; its flag is checked for consistency only)', `occF=${sawOccFalse} occT=${sawOccTrue} asaF=${sawAsaFalse}`);
+}
+
+// =================================================================
+// Suite D78 - Item 1 (L28 / P1-9, HC-14): spread layout tried when the coverage-repair roster fails
+//
+// Minimum Coverage ON builds one "repair" roster (the minimum seats at every late cover start, the rest at
+// opening). If that roster fails the gate, a second layout - the SAME agents spread evenly over the SAME starts
+// (buildCoverageSpreadDistribution) - is tried before N is rejected, confirmed on the second replication block.
+// One shared pure state machine (createCoverageSpreadSearch) drives both searches. When nothing passes, the
+// reported failing result describes a coverage-satisfying roster (spread, else repair), never the uniform
+// zero-coverage layout. Pre-change: D78.a (helper absent), D78.b (24x7 infeasible), D78.c (message "as few as 0
+// agents"), D78.d (D33 21 vs 22), D78.g/h (machine absent) fail; D78.e and the unchanged-answer controls hold.
+// =================================================================
+console.log('\n--- Suite D78: spread layout when the coverage-repair roster fails (L28 / P1-9) ---');
+{
+  const spreadFn = (hcNs as any).buildCoverageSpreadDistribution as ((r: ShiftDistributionByCategory | null | undefined) => ShiftDistributionByCategory | null) | undefined;
+  const machine = (hcNs as any).createCoverageSpreadSearch as ((p: any) => { next: () => any; record: (e: any) => void; result: () => any }) | undefined;
+  assert(typeof spreadFn === 'function', 'D78.0 buildCoverageSpreadDistribution is exported', `typeof=${typeof spreadFn}`);
+  assert(typeof machine === 'function', 'D78.0b createCoverageSpreadSearch is exported', `typeof=${typeof machine}`);
+
+  const calD33: CalendarConfig = { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 22 };
+  const labD33: LaborConfig = { ...LABOR, dailyProductiveHours: 9 };
+  const slaBase: SLAPolicyConfig = {
+    primaryPct: 80, primaryWindow: 4, primaryUnit: 'hours', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes',
+    asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'next_open',
+    occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 90,
+  };
+  const sortedSlaps = (d: ShiftSlapDistribution) => [...d.slaps].sort((a, b) => a.startMinutesFromOpen - b.startMinutesFromOpen);
+  const countsOf = (d: ShiftSlapDistribution) => sortedSlaps(d).map((s) => s.agentCount);
+  const offsetsOf = (d: ShiftSlapDistribution) => sortedSlaps(d).map((s) => s.startMinutesFromOpen);
+  const rosterStr78 = (d: ShiftDistributionByCategory | undefined) => (d ? Object.keys(d).sort().map((k) => `${k === '__POOLED__' ? '' : k + '='}${sortedSlaps(d[k]).map((s) => `${s.startMinutesFromOpen}:${s.agentCount}`).join(' ')}`).join(' | ') : 'uniform');
+
+  // ---- D78.a helper unit tests ----
+  const cal14: CalendarConfig = { ...CAL_24X7 };
+  const lab14: LaborConfig = { ...DEFAULT_LABOR };
+  const scenarios78: Array<{ name: string; cal: CalendarConfig; lab: LaborConfig; min: number }> = [
+    { name: 'D33 14h window / 9h shift (2 starts)', cal: calD33, lab: labD33, min: 1 },
+    { name: '24x7 / 7.5h shift (4 starts)', cal: cal14, lab: lab14, min: 1 },
+    { name: '24x7 / 7.5h shift, 2 agents per interval', cal: cal14, lab: lab14, min: 2 },
+  ];
+  if (typeof spreadFn === 'function') {
+    for (const sc of scenarios78) {
+      const bad: string[] = [];
+      let prev: ShiftDistributionByCategory | null = null; let prevN = -1; let repairMin = -1; let checked = 0;
+      for (let n = 1; n <= 200; n++) {
+        const rep = buildCoverageRepairDistribution({ n, calendar: sc.cal, labor: sc.lab, minAgentsPerInterval: sc.min, queueArchitecture: 'pooled' });
+        if (!rep) { if (spreadFn(rep) !== null) bad.push(`n=${n} spread of a null repair roster is not null`); continue; }
+        if (repairMin < 0) repairMin = n;
+        const sp = spreadFn(rep);
+        const eff = sp ?? rep;
+        const rd = rep.__POOLED__, ed = eff.__POOLED__;
+        const m = Math.min(...rd.slaps.filter((s) => s.startMinutesFromOpen > 0).map((s) => s.agentCount));
+        const tot = (d: ShiftSlapDistribution) => d.slaps.reduce((a, s) => a + s.agentCount, 0);
+        if (tot(ed) !== n || tot(rd) !== n) bad.push(`n=${n} total ${tot(ed)}/${tot(rd)}`);
+        if (JSON.stringify(offsetsOf(ed)) !== JSON.stringify(offsetsOf(rd))) bad.push(`n=${n} starts changed`);
+        const c = countsOf(ed); const k = c.length;
+        if (c.some((x) => x < m)) bad.push(`n=${n} a start (offset 0 included) has fewer than the minimum ${m}: ${c.join(',')}`);
+        const rest = n - m * k; const base = Math.floor(rest / k); const extra = rest % k;
+        if (c.some((x, i) => x !== m + base + (i < extra ? 1 : 0))) bad.push(`n=${n} not even / ties not to earliest: ${c.join(',')}`);
+        if (JSON.stringify(spreadFn(rep)) !== JSON.stringify(sp)) bad.push(`n=${n} not deterministic`);
+        if (sp && JSON.stringify(countsOf(sp.__POOLED__)) === JSON.stringify(countsOf(rd))) bad.push(`n=${n} returned a spread equal to the repair roster instead of null`);
+        if (!sp && JSON.stringify(c) !== JSON.stringify(countsOf(rd))) bad.push(`n=${n} null but rosters differ`);
+        if (prev && prevN === n - 1) {
+          const pc = countsOf(prev.__POOLED__);
+          if (pc.length === c.length && pc.some((x, i) => c[i] < x)) bad.push(`n=${n} a start lost a seat vs n=${n - 1}: ${pc.join(',')} -> ${c.join(',')}`);
+        }
+        prev = eff; prevN = n; checked++;
+      }
+      assert(checked > 100 && bad.length === 0, `D78.a ${sc.name}: totals preserved, same starts, every start (offset 0 too) >= minimum, even split with ties to the earliest start, deterministic, house-monotone over N=${repairMin}..200`, bad.slice(0, 4).join('; '));
+    }
+    // exact pins
+    const r21 = buildCoverageRepairDistribution({ n: 21, calendar: calD33, labor: labD33, minAgentsPerInterval: 1, queueArchitecture: 'pooled' });
+    assert(rosterStr78(spreadFn(r21) ?? undefined) === '0:11 300:10', 'D78.a2 D33 N=21: repair 0:20 300:1 -> spread 0:11 300:10 (extra seat to the EARLIEST start)', `got ${rosterStr78(spreadFn(r21) ?? undefined)} from ${rosterStr78(r21 ?? undefined)}`);
+    const r43 = buildCoverageRepairDistribution({ n: 43, calendar: calD33, labor: labD33, minAgentsPerInterval: 1, queueArchitecture: 'pooled' });
+    assert(rosterStr78(spreadFn(r43) ?? undefined) === '0:22 300:21', 'D78.a3 N=43: spread 0:22 300:21', `got ${rosterStr78(spreadFn(r43) ?? undefined)}`);
+    const r20x = buildCoverageRepairDistribution({ n: 20, calendar: cal14, labor: lab14, minAgentsPerInterval: 1, queueArchitecture: 'pooled' });
+    assert(rosterStr78(spreadFn(r20x) ?? undefined) === '0:5 450:5 900:5 990:5', 'D78.a4 24x7 N=20: spread 0:5 450:5 900:5 990:5', `got ${rosterStr78(spreadFn(r20x) ?? undefined)} from ${rosterStr78(r20x ?? undefined)}`);
+    const r23x = buildCoverageRepairDistribution({ n: 23, calendar: cal14, labor: lab14, minAgentsPerInterval: 1, queueArchitecture: 'pooled' });
+    assert(rosterStr78(spreadFn(r23x) ?? undefined) === '0:6 450:6 900:6 990:5', 'D78.a4b 24x7 N=23: the 3 extra seats go to the 3 EARLIEST starts (0:6 450:6 900:6 990:5)', `got ${rosterStr78(spreadFn(r23x) ?? undefined)}`);
+    // null cases
+    assert(spreadFn(null) === null && spreadFn(undefined) === null, 'D78.a5 null / undefined repair roster -> null', '');
+    assert(spreadFn({ __POOLED__: { slapMinutes: 30, slaps: [{ startMinutesFromOpen: 0, agentCount: 9 }] } }) === null, 'D78.a6 single-start roster -> null', '');
+    const evenAlready: ShiftDistributionByCategory = { __POOLED__: { slapMinutes: 30, slaps: [{ startMinutesFromOpen: 0, agentCount: 2 }, { startMinutesFromOpen: 300, agentCount: 2 }] } };
+    assert(spreadFn(evenAlready) === null, 'D78.a7 a roster that is already even -> null (equals the repair roster)', '');
+    // siloed: per-category totals preserved, per-category minimum kept
+    const wl = new Map<string, number>([['A', 6000], ['B', 3000], ['C', 1000]]);
+    const badS: string[] = []; let sPrev: ShiftDistributionByCategory | null = null; let sPrevN = -1; let sChecked = 0; let sSpread = 0;
+    for (let n = 1; n <= 200; n++) {
+      const rep = buildCoverageRepairDistribution({ n, calendar: cal14, labor: lab14, minAgentsPerInterval: 1, queueArchitecture: 'siloed', categoryWorkloadMinutes: wl });
+      if (!rep) continue;
+      const sp = spreadFn(rep); const eff = sp ?? rep;
+      if (sp) sSpread++;
+      if (Object.keys(eff).sort().join() !== Object.keys(rep).sort().join()) badS.push(`n=${n} category keys changed`);
+      for (const key of Object.keys(rep)) {
+        const tr = rep[key].slaps.reduce((a, s) => a + s.agentCount, 0), te = eff[key].slaps.reduce((a, s) => a + s.agentCount, 0);
+        if (tr !== te) badS.push(`n=${n} ${key} total ${te} != ${tr}`);
+        if (countsOf(eff[key]).some((x) => x < 1)) badS.push(`n=${n} ${key} has an empty start`);
+        const pc = sPrev && sPrevN === n - 1 ? sPrev[key] : undefined;
+        if (pc && pc.slaps.length === eff[key].slaps.length && countsOf(pc).some((x, i) => countsOf(eff[key])[i] < x)) badS.push(`n=${n} ${key} lost a seat`);
+      }
+      sPrev = eff; sPrevN = n; sChecked++;
+    }
+    assert(sChecked > 100 && sSpread > 50 && badS.length === 0, 'D78.a8 siloed (3 categories): per-category totals preserved, same keys, no empty start, house-monotone per category', badS.slice(0, 4).join('; ') || `checked=${sChecked} spread=${sSpread}`);
+  }
+  const planOf = (hcNs as any).planCoverageRepair as (p: any) => any;
+  {
+    const cases78: any[] = [{ category: 'General', totalAhtMinutes: 30 }];
+    const plan = planOf({ n: 20, sla: { ...DEFAULT_SLA }, calendar: cal14, labor: lab14, queueArchitecture: 'pooled', representativeCases: cases78 });
+    assert(plan.spread !== undefined && plan.spread !== null && rosterStr78(plan.spread) === '0:5 450:5 900:5 990:5', 'D78.a9 planCoverageRepair returns the spread roster (one shared place for both searches)', `spread=${rosterStr78(plan.spread ?? undefined)}`);
+    const planOff = planOf({ n: 20, sla: { ...DEFAULT_SLA, minCoverageEnabled: false }, calendar: cal14, labor: lab14, queueArchitecture: 'pooled', representativeCases: cases78 });
+    assert(!planOff.attempt && !planOff.spread, 'D78.a10 coverage OFF: no repair attempt and no spread (spread exists only with a repair roster)', JSON.stringify({ attempt: planOff.attempt, spread: planOff.spread }));
+  }
+
+  // ---- fixtures ----
+  const iv14: StandardInterval[] = [];
+  for (let d = 0; d < 7; d++) for (let k = 0; k < 48; k++) {
+    const s = new Date(2026, 9, 12 + d, 0, k * 30);
+    iv14.push({ intervalIndex: iv14.length, start: s, end: new Date(s.getTime() + 1800000), volume: 6, category: 'General' });
+  }
+  const cat14: CategoryConfig[] = [{ id: 'g', name: 'General', ahtMinutes: 30, shrinkagePct: 0.2, priority: 1 }];
+  const p14 = (cov: boolean, extra: any = {}) => ({
+    intervals: iv14, openingWIP: [] as OpeningWIPCase[], categories: cat14, calendar: cal14, labor: { ...DEFAULT_LABOR },
+    sla: { ...DEFAULT_SLA, minCoverageEnabled: cov }, seed: 42, userMaxHC: 80, replications: 5, queueArchitecture: 'pooled' as const,
+    dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness, ...extra,
+  });
+  const on14 = searchOptimalHC(p14(true)); const off14 = searchOptimalHC(p14(false));
+  const on14a: any = await searchOptimalHCAsync(p14(true));
+
+  // ---- D78.b HC-14 ----
+  assert(off14.recommendedHC !== null, 'D78.b0 setup: HC-14 coverage OFF finds an answer', `rec=${off14.recommendedHC}`);
+  assert(on14.recommendedHC !== null && !on14.isInfeasible, 'D78.b1 HC-14 (24x7, 7 days, 6 cases / 30 min, AHT 30, SLA 80% / 6 h, R=5, max 80), coverage ON: a recommendation exists (was infeasible)', `rec=${on14.recommendedHC} reason=${on14.infeasibleReason}`);
+  assert(on14.recommendedHC === 20 && off14.recommendedHC === 20, 'D78.b2 HC-14 coverage ON = coverage OFF = 20 (the even spread 0:5 450:5 900:5 990:5 passes the gate and the confirmation block)', `on=${on14.recommendedHC} off=${off14.recommendedHC}`);
+  assert((on14.finalDESResult?.minCoverageObserved ?? 0) >= 1 && !!on14.finalDESResult?.passesCoverage, 'D78.b3 HC-14 ON: the audit run at the recommended N has minimum coverage >= 1', `minCov=${on14.finalDESResult?.minCoverageObserved}`);
+  assert(on14a.recommendedHC === on14.recommendedHC && rosterStr78(on14a.finalDESResult?.shiftDistributionUsed) === rosterStr78(on14.finalDESResult?.shiftDistributionUsed) && on14a.bindingConstraintDescription === on14.bindingConstraintDescription && JSON.stringify(on14a.searchHistory) === JSON.stringify(on14.searchHistory), 'D78.b4 HC-14 ON: sync === async (HC, roster, label, full search history)', `sync=${on14.recommendedHC}/${rosterStr78(on14.finalDESResult?.shiftDistributionUsed)} async=${on14a.recommendedHC}/${rosterStr78(on14a.finalDESResult?.shiftDistributionUsed)}`);
+  {
+    const winSp = rosterStr78(on14.finalDESResult?.shiftDistributionUsed);
+    assert(on14.recommendedHC !== null && winSp.split(' ').length >= 3, 'D78.b5 HC-14 ON: the reported roster is a multi-start layout (spread or repair), not uniform', winSp);
+  }
+
+  // ---- D78.c failure messages ----
+  {
+    const capped = searchOptimalHC(p14(true, { userMaxHC: 19 }));
+    const cappedA: any = await searchOptimalHCAsync(p14(true, { userMaxHC: 19 }));
+    assert(capped.isInfeasible && cappedA.isInfeasible, 'D78.c0 setup: HC-14 with a cap of 19 is infeasible (sync and async)', `sync=${capped.recommendedHC} async=${cappedA.recommendedHC}`);
+    const txt = (r: any) => `${r.infeasibleReason ?? ''} || ${(r.searchHistory ?? []).map((h: any) => (h.failingReasons ?? []).join('; ')).join(' || ')}`;
+    assert(!/as few as 0 agent/.test(txt(capped)) && !/as few as 0 agent/.test(txt(cappedA)), 'D78.c1 infeasible search: no reported reason says "as few as 0 agents" when a repair roster existed (reasons describe the coverage-satisfying roster)', txt(capped).slice(0, 300));
+    assert(/Increase userMaxHC/.test(capped.infeasibleReason ?? ''), 'D78.c2 the exhausted-search message wording is unchanged (still ends "Increase userMaxHC or review SLA/labor parameters.")', capped.infeasibleReason);
+    assert(capped.infeasibleReason === cappedA.infeasibleReason, 'D78.c3 sync === async failure message', `${capped.infeasibleReason} | ${cappedA.infeasibleReason}`);
+    const overCap = searchOptimalHC(p14(true, { userMaxHC: 5 }));
+    assert(/strictly exceeds/.test(overCap.infeasibleReason ?? '') && /Increase userMaxHC or adjust volume \/ AHT assumptions\./.test(overCap.infeasibleReason ?? ''), 'D78.c4 baseline-over-cap message wording unchanged', overCap.infeasibleReason);
+  }
+
+  // ---- D78.d D33 fixture and support + answer-time 60: sync === async ----
+  const catD33: CategoryConfig[] = [{ id: 'c1', name: 'General', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 }];
+  const ivD33: StandardInterval[] = [];
+  for (let day = 0; day < 5; day++) for (let h = 8; h < 22; h++) for (let m = 0; m < 60; m += 30) ivD33.push({ intervalIndex: ivD33.length, start: new Date(2026, 2, 2 + day, h, m), end: new Date(2026, 2, 2 + day, h, m + 30), volume: 20, category: 'General' });
+  const pD33 = (cov: boolean) => ({ intervals: ivD33, openingWIP: [] as OpeningWIPCase[], categories: catD33, calendar: calD33, labor: labD33, sla: { ...slaBase, minCoverageEnabled: cov }, seed: 42, userMaxHC: 60, replications: 5 });
+  const d33On = searchOptimalHC(pD33(true)); const d33OnA: any = await searchOptimalHCAsync(pD33(true));
+  const d33Off = searchOptimalHC(pD33(false));
+  const sig = (r: any) => `${r.recommendedHC}|${rosterStr78(r.finalDESResult?.shiftDistributionUsed)}|${r.bindingConstraintType}|${r.bindingConstraintDescription}|${JSON.stringify(r.searchHistory)}`;
+  assert(sig(d33On) === sig(d33OnA), 'D78.d1 D33 fixture, coverage ON: sync === async (HC, roster, label, history)', `sync=${sig(d33On).slice(0, 80)} async=${sig(d33OnA).slice(0, 80)}`);
+  assert(d33On.recommendedHC === 21 && d33Off.recommendedHC === 28, 'D78.d2 D33 fixture: coverage ON 21 (was 22), coverage OFF 28 unchanged', `on=${d33On.recommendedHC} off=${d33Off.recommendedHC}`);
+  assert((d33On.finalDESResult?.minCoverageObserved ?? 0) >= 1, 'D78.d3 D33 ON: audit run keeps minimum coverage >= 1', `minCov=${d33On.finalDESResult?.minCoverageObserved}`);
+  {
+    const { rows } = buildSampleDataset('support', new Date(2026, 9, 5, 8, 0, 0, 0));
+    const ivs = mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+    const cats = discoverAndSyncCategories(ivs, DEFAULT_CATEGORIES, DEFAULT_SLA);
+    const pS = (cov: boolean) => ({ intervals: ivs, openingWIP: [] as OpeningWIPCase[], categories: cats, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: { ...DEFAULT_SLA, minCoverageEnabled: cov, boAsaEnabled: true, boAsaTarget: 60, boAsaUnit: 'minutes' as const }, seed: DEFAULT_SIM_PARAMS.seed, userMaxHC: DEFAULT_SIM_PARAMS.maxHCSearch, replications: DEFAULT_SIM_PARAMS.replications, queueArchitecture: 'pooled' as const, dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness });
+    const sOn = searchOptimalHC(pS(true)); const sOnA: any = await searchOptimalHCAsync(pS(true));
+    assert(sig(sOn) === sig(sOnA), 'D78.d4 support + answer-time 60 min, coverage ON: sync === async (HC, roster, label, history)', `sync=${sOn.recommendedHC} async=${sOnA.recommendedHC}`);
+    assert(sOn.recommendedHC !== null && sOn.recommendedHC < 46, 'D78.d5 support + answer-time 60 min, coverage ON: below the old 46', `rec=${sOn.recommendedHC}`);
+  }
+
+  // ---- D78.e three built-in samples at defaults are unchanged ----
+  for (const [type, hc, gross] of [['claims', 31, 40], ['support', 27, 34], ['healthcare', 31, 39]] as Array<['claims' | 'support' | 'healthcare', number, number]>) {
+    const { rows } = buildSampleDataset(type, new Date(2026, 9, 5, 8, 0, 0, 0));
+    const ivs = mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+    const cats = discoverAndSyncCategories(ivs, DEFAULT_CATEGORIES, DEFAULT_SLA);
+    const r = searchOptimalHC({ intervals: ivs, openingWIP: [], categories: cats, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, seed: DEFAULT_SIM_PARAMS.seed, userMaxHC: DEFAULT_SIM_PARAMS.maxHCSearch, replications: DEFAULT_SIM_PARAMS.replications, queueArchitecture: 'pooled', dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness });
+    assert(r.recommendedHC === hc && r.staffing.grossHCTotal === gross, `D78.e sample ${type} (defaults, coverage ON): HC ${hc} / gross ${gross} unchanged`, `got ${r.recommendedHC}/${r.staffing.grossHCTotal}`);
+  }
+
+  // ---- D78.f monotonicity sweep on HC-14: the recommended N and N+1..N+3 all pass the gate with repair-or-spread ----
+  if (on14.recommendedHC !== null) {
+    const sets = hcNs.generatePrecomputedReplications({ intervals: iv14, openingWIP: [], categories: cat14, calendar: cal14, sla: { ...DEFAULT_SLA }, baseSeed: 42, replications: 5 });
+    const reps = sets[0].cases as CaseEntity[];
+    const rows: string[] = []; let allPass = true;
+    for (let n = on14.recommendedHC; n <= on14.recommendedHC + 3; n++) {
+      const plan = planOf({ n, sla: { ...DEFAULT_SLA }, calendar: cal14, labor: { ...DEFAULT_LABOR }, queueArchitecture: 'pooled', representativeCases: reps });
+      let pass = false;
+      for (const roster of [plan.dist, plan.spread]) {
+        if (!roster || pass) continue;
+        pass = evaluateCandidateStatistical({ operationalHC: n, intervals: iv14, openingWIP: [], categories: cat14, calendar: cal14, labor: { ...DEFAULT_LABOR }, sla: { ...DEFAULT_SLA }, baseSeed: 42, replications: 5, queueArchitecture: 'pooled', precomputedCaseSets: sets, shiftDistribution: roster, dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness }).passesAllConstraints;
+      }
+      rows.push(`${n}${pass ? 'P' : 'F'}`); if (!pass) allPass = false;
+    }
+    assert(allPass, 'D78.f HC-14 monotonicity: the recommended N and N+1..N+3 all pass with repair-or-spread', rows.join(' '));
+  } else assert(false, 'D78.f HC-14 monotonicity sweep', 'no recommendation');
+
+  // ---- D78.g the shared state machine (spread acceptance + reported failing roster, A4 / A5 / A10) ----
+  if (typeof machine === 'function') {
+    const rep: ShiftDistributionByCategory = { __POOLED__: { slapMinutes: 30, slaps: [{ startMinutesFromOpen: 0, agentCount: 9 }, { startMinutesFromOpen: 300, agentCount: 1 }] } };
+    const spr: ShiftDistributionByCategory = { __POOLED__: { slapMinutes: 30, slaps: [{ startMinutesFromOpen: 0, agentCount: 5 }, { startMinutesFromOpen: 300, agentCount: 5 }] } };
+    const ev = (pass: boolean, reasons: string[], tag: string): any => ({ passesAllConstraints: pass, failingReasons: reasons, tag });
+    const repairEv = ev(false, ['Coverage: minimum coverage was as few as 0 agents'], 'repair');
+    const mk = (confirmEnabled: boolean) => machine({ repairRoster: rep, spreadRoster: spr, repairResult: repairEv, confirmEnabled });
+    {
+      const m = mk(true); const s1 = m.next();
+      assert(s1 && s1.stage === 'primary' && s1.roster === spr, 'D78.g1 first step evaluates the spread roster on the primary block', JSON.stringify(s1));
+      m.record(ev(true, [], 'sp-primary')); const s2 = m.next();
+      assert(s2 && s2.stage === 'confirm', 'D78.g2 a primary pass is not adopted yet: the confirmation block runs next (A5)', JSON.stringify(s2));
+      m.record(ev(true, [], 'sp-confirm'));
+      const r = m.result();
+      assert(m.next() === null && r.adopted && r.adopted.tag === 'sp-primary', 'D78.g3 confirmed pass -> adopted, carrying the PRIMARY-block evaluation', JSON.stringify(r));
+    }
+    {
+      const m = mk(true); m.next(); m.record(ev(false, ['Primary SLA: 70% < 80%'], 'sp-primary'));
+      const r = m.result();
+      assert(m.next() === null && r.adopted === null && r.reportedResult.tag === 'sp-primary' && r.reportedRoster === spr && r.reportedReasons[0].startsWith('Primary SLA'), 'D78.g4 primary fail -> not adopted; the reported failing result and roster are the SPREAD ones (A4)', JSON.stringify(r));
+    }
+    {
+      const m = mk(true); m.next(); m.record(ev(true, [], 'sp-primary')); m.next(); m.record(ev(false, ['Primary SLA: CI low 78% < 80%'], 'sp-confirm'));
+      const r = m.result();
+      assert(r.adopted === null && r.reportedResult.passesAllConstraints === false && r.reportedRoster === rep && r.reportedReasons[0].startsWith('Primary SLA'), 'D78.g5 confirmation fail -> not adopted (a lucky pass stops); reported = the failing repair result, reasons = the confirmation failure', JSON.stringify(r));
+    }
+    {
+      const m = mk(false); m.next(); m.record(ev(true, [], 'sp-probe'));
+      const r = m.result();
+      assert(m.next() === null && r.adopted && r.adopted.tag === 'sp-probe', 'D78.g6 probe evaluations (no confirmation block) adopt on a primary pass', JSON.stringify(r));
+    }
+    // A10: mixed case - repair fails only on coverage, spread fails on SLA -> never labelled Minimum Coverage Floor
+    {
+      const m = mk(true); m.next(); m.record(ev(false, ['Primary SLA: 70% < 80%'], 'sp-primary'));
+      const r = m.result();
+      const below = { passesAllConstraints: false, failingReasons: ['Primary SLA: 70% < 80%'] };
+      const slaCfg: SLAPolicyConfig = { ...DEFAULT_SLA };
+      const label = hcNs.resolveCoverageBinding(below, r.reportedReasons, slaCfg, 21);
+      assert(label === null, 'D78.h1 mixed case (repair fails only on coverage, spread fails on SLA at N-1): the binding label is NOT "Minimum Coverage Floor"', JSON.stringify(label));
+      const control = hcNs.resolveCoverageBinding({ passesAllConstraints: false, failingReasons: ['Coverage: x'] }, ['Coverage: x'], slaCfg, 21);
+      assert(control !== null && control.type === 'min_coverage', 'D78.h2 control: coverage-only failure with no spread outcome still labels "Minimum Coverage Floor"', JSON.stringify(control));
+    }
+  } else {
+    assert(false, 'D78.g / D78.h shared state machine and A10 label test', 'createCoverageSpreadSearch is not exported');
+  }
+  // ---- D78.i label never says "Minimum Coverage Floor" when spread passed one agent lower (searches) ----
+  assert(!/Minimum Coverage Floor/.test(on14.bindingConstraintDescription) && !/Minimum Coverage Floor/.test(d33On.bindingConstraintDescription), 'D78.i HC-14 and D33 (ON): the binding label is not "Minimum Coverage Floor" when the spread layout passes one agent lower', `${on14.bindingConstraintDescription} | ${d33On.bindingConstraintDescription}`);
+  // ---- D78.j A1: coverage OFF may exceed ON only when the ON answer uses a spread roster ----
+  {
+    const usedSpread = rosterStr78(d33On.finalDESResult?.shiftDistributionUsed);
+    const usedCounts = usedSpread.split(' ').map((x) => Number(x.split(':')[1]));
+    const isEven = usedCounts.length >= 2 && Math.max(...usedCounts) - Math.min(...usedCounts) <= 1;
+    assert((d33Off.recommendedHC ?? Infinity) <= (d33On.recommendedHC ?? Infinity) || isEven,'D78.j D33: OFF > ON is explained by the ON answer using the spread (multi-start) roster', `on=${d33On.recommendedHC} (${usedSpread}) off=${d33Off.recommendedHC}`);
+  }
 }
 
 console.log('\n==================================================');

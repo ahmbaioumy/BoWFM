@@ -700,6 +700,103 @@ export function buildCoverageRepairDistribution(params: {
   return any ? result : null;
 }
 
+/**
+ * The second layout tried when the coverage-repair roster fails the gate (Item 1, L28 / P1-9): the SAME
+ * agents (same total, per category when siloed) over the SAME cover starts, split evenly instead of
+ * "minimum at every late start, everyone else at opening". Rule (exact): let m be the repair roster's
+ * per-late-start count (the coverage minimum). Every start - offset 0 included - is first set to m; the
+ * remaining total - m*starts seats are dealt one at a time to the start with the fewest seats, ties to the
+ * earliest start (equivalently m + base + (i < extra) over the starts sorted by offset). House-monotone:
+ * the N+1 roster is the N roster plus one seat, so no start ever loses a seat as N grows. Pure and
+ * deterministic. Null when the repair roster is null, has a single start in every key, or the spread
+ * equals the repair roster. A second layout, NOT a search for the best layout.
+ */
+export function buildCoverageSpreadDistribution(repair: ShiftDistributionByCategory | null | undefined): ShiftDistributionByCategory | null {
+  if (!repair) return null;
+  const out: ShiftDistributionByCategory = {};
+  let changed = false;
+  for (const key of Object.keys(repair).sort()) {
+    const d = repair[key];
+    const slaps = [...d.slaps].filter((s) => s.agentCount > 0).sort((a, b) => a.startMinutesFromOpen - b.startMinutesFromOpen);
+    const k = slaps.length;
+    const late = slaps.filter((s) => s.startMinutesFromOpen > 0);
+    if (k < 2 || late.length === 0) {
+      out[key] = d;
+      continue;
+    }
+    const m = Math.min(...late.map((s) => s.agentCount));
+    const total = slaps.reduce((a, s) => a + s.agentCount, 0);
+    const rest = total - m * k;
+    if (rest < 0) {
+      out[key] = d;
+      continue;
+    }
+    const base = Math.floor(rest / k);
+    const extra = rest % k;
+    const spread = slaps.map((s, i) => ({ startMinutesFromOpen: s.startMinutesFromOpen, agentCount: m + base + (i < extra ? 1 : 0) }));
+    if (spread.some((s, i) => s.agentCount !== slaps[i].agentCount)) changed = true;
+    out[key] = { slapMinutes: d.slapMinutes, slaps: spread };
+  }
+  return changed ? out : null;
+}
+
+export type SpreadStage = 'primary' | 'confirm';
+
+/**
+ * Acceptance state machine for the spread layout at one candidate N (same pattern as createRescueSearch:
+ * the caller evaluates whatever next() returns and record()s it; sync and async drive the SAME machine).
+ * primary (the caller's own replication count and the unchanged gate) -> if it passes and confirmation is
+ * enabled (full-R evaluations only, never the 5-rep leap probes), confirm (the rescue ladder's confirmation
+ * block, same unchanged gate) -> adopted. A roster that clears only the primary block is a lucky pass on the
+ * same random draws and is NOT adopted.
+ * Reported failing result (A4 / A10): a coverage-satisfying roster, never the uniform zero-coverage one -
+ * the spread result when it failed the primary block, else the failing repair result (with the confirmation
+ * failure's reasons) when the spread cleared primary but failed confirmation.
+ */
+export function createCoverageSpreadSearch<T extends { passesAllConstraints: boolean; failingReasons: string[] }>(params: {
+  repairRoster: ShiftDistributionByCategory;
+  spreadRoster: ShiftDistributionByCategory;
+  repairResult: T;
+  confirmEnabled: boolean;
+}) {
+  let stage: SpreadStage | 'done' = 'primary';
+  let primaryEv: T | null = null;
+  let adopted: T | null = null;
+  let reportedResult: T = params.repairResult;
+  let reportedRoster: ShiftDistributionByCategory = params.repairRoster;
+  let reportedReasons: string[] = params.repairResult.failingReasons;
+  return {
+    /** The roster + stage to evaluate next, or null when finished. */
+    next(): { roster: ShiftDistributionByCategory; stage: SpreadStage } | null {
+      return stage === 'done' ? null : { roster: params.spreadRoster, stage };
+    },
+    record(ev: T): void {
+      if (stage === 'done') return;
+      if (stage === 'primary') {
+        if (!ev.passesAllConstraints) {
+          reportedResult = ev;
+          reportedRoster = params.spreadRoster;
+          reportedReasons = ev.failingReasons;
+          stage = 'done';
+        } else if (!params.confirmEnabled) {
+          adopted = ev;
+          stage = 'done';
+        } else {
+          primaryEv = ev;
+          stage = 'confirm';
+        }
+        return;
+      }
+      if (ev.passesAllConstraints) adopted = primaryEv;
+      else reportedReasons = ev.failingReasons; // reported result / roster stay the failing repair ones
+      stage = 'done';
+    },
+    result(): { adopted: T | null; reportedResult: T; reportedRoster: ShiftDistributionByCategory; reportedReasons: string[] } {
+      return { adopted, reportedResult, reportedRoster, reportedReasons };
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------------------------
 // Rescue ladder (PRD P1-6 / L23) - only when labor.shiftPlacementEnabled. When a headcount N has
 // failed with everyone at opening, with the coverage-repair roster and with the analytic placement
@@ -980,10 +1077,10 @@ export function planCoverageRepair(params: {
   labor: LaborConfig;
   queueArchitecture: 'pooled' | 'siloed';
   representativeCases: CaseEntity[] | undefined;
-}): { attempt: boolean; repairFirst: boolean; dist: ShiftDistributionByCategory | null } {
+}): { attempt: boolean; repairFirst: boolean; dist: ShiftDistributionByCategory | null; spread: ShiftDistributionByCategory | null } {
   const { n, sla, calendar, labor, queueArchitecture, representativeCases } = params;
   const minAgentsRequired = resolveMinAgentsPerInterval(sla, n);
-  if (!representativeCases || minAgentsRequired <= 0) return { attempt: false, repairFirst: false, dist: null };
+  if (!representativeCases || minAgentsRequired <= 0) return { attempt: false, repairFirst: false, dist: null, spread: null };
   let catWorkloadMinutes: Map<string, number> | undefined;
   if (queueArchitecture === 'siloed') {
     catWorkloadMinutes = new Map<string, number>();
@@ -995,7 +1092,9 @@ export function planCoverageRepair(params: {
     n, calendar, labor, minAgentsPerInterval: minAgentsRequired, queueArchitecture, categoryWorkloadMinutes: catWorkloadMinutes,
   });
   const structurallyUnmet = !calendar.is24x7 && labor.dailyProductiveHours * 60 < getDailyWindowLengthHours(calendar) * 60 - 1e-9;
-  return { attempt: true, repairFirst: structurallyUnmet && dist !== null, dist };
+  // `spread`: the second layout tried when the repair roster fails the gate (buildCoverageSpreadDistribution);
+  // null when there is no repair roster or the spread would equal it.
+  return { attempt: true, repairFirst: structurallyUnmet && dist !== null, dist, spread: buildCoverageSpreadDistribution(dist) };
 }
 
 /** Repair-failure record for one evaluated N: string[] = repair was evaluated and failed with
@@ -2905,6 +3004,9 @@ export function searchOptimalHC(params: {
 
   // Rescue ladder confirmation block (PRD P1-6): built lazily, once per search, shared by every N and rung.
   const rescueConfirmation = createConfirmationBlock({ intervals, openingWIP, categories, calendar, sla, seed, replications: R });
+  const rescueCtx = { sla, categories, replications: R, baseSeed: seed, precomputedCaseSets, confirmation: rescueConfirmation };
+  // Coverage-satisfying roster whose failure is reported at an N where nothing passed (repair / spread layout; A4). Not set for passing Ns.
+  const reportedDistributionByN = new Map<number, ShiftDistributionByCategory>();
 
   function evaluateN(n: number, overrideR?: number) {
     const rToUse = overrideR ?? R;
@@ -2920,6 +3022,12 @@ export function searchOptimalHC(params: {
     let finalRes: ReturnType<typeof evaluateCandidateStatistical> | undefined;
     let winningDist: ShiftDistributionByCategory | undefined;
     let coverageRes: ReturnType<typeof evaluateCandidateStatistical> | undefined;
+    // Coverage-satisfying roster whose failure is REPORTED when nothing passes at this N (A4): the spread
+    // result if the spread layout was evaluated, else the failing repair result - never the uniform one.
+    let reportedRes: ReturnType<typeof evaluateCandidateStatistical> | undefined;
+    let reportedDist: ShiftDistributionByCategory | undefined;
+    let reportedReasons: string[] | undefined;
+    // "Repair, then spread (confirmed)" - ONE step; createCoverageSpreadSearch is the shared state machine the async twin drives too.
     const runRepair = () => {
       coverageRes = evaluateCandidateStatistical({
         operationalHC: n, intervals, openingWIP, categories, calendar, labor, sla,
@@ -2929,12 +3037,37 @@ export function searchOptimalHC(params: {
       if (coverageRes.passesAllConstraints) {
         finalRes = coverageRes;
         winningDist = covPlan.dist!;
+        return;
+      }
+      reportedRes = coverageRes;
+      reportedDist = covPlan.dist!;
+      reportedReasons = coverageRes.failingReasons;
+      if (!covPlan.spread) return;
+      const spreadSearch = createCoverageSpreadSearch<typeof coverageRes>({
+        repairRoster: covPlan.dist!, spreadRoster: covPlan.spread, repairResult: coverageRes, confirmEnabled: rToUse === R,
+      });
+      for (let step = spreadSearch.next(); step !== null; step = spreadSearch.next()) {
+        spreadSearch.record(evaluateCandidateStatistical({
+          operationalHC: n, intervals, openingWIP, calendar, labor, queueArchitecture, shiftDistribution: step.roster, dispatchFairness,
+          ...(step.stage === 'confirm'
+            ? resolveRescueEvaluation('confirm', rescueCtx)
+            : { sla, categories, replications: rToUse, baseSeed: seed, precomputedCaseSets }),
+        }));
+      }
+      const spreadOutcome = spreadSearch.result();
+      if (spreadOutcome.adopted) {
+        finalRes = spreadOutcome.adopted;
+        winningDist = covPlan.spread;
+      } else {
+        reportedRes = spreadOutcome.reportedResult;
+        reportedDist = spreadOutcome.reportedRoster;
+        reportedReasons = spreadOutcome.reportedReasons;
       }
     };
     if (covPlan.repairFirst) {
       runRepair();
-      // Structurally-unmet uniform cannot pass, so a failing repair IS this N's best-effort result.
-      if (!finalRes) finalRes = coverageRes;
+      // Structurally-unmet uniform cannot pass, so the failing coverage-satisfying roster (spread, else repair) IS this N's best-effort result.
+      if (!finalRes) finalRes = reportedRes;
     }
     if (!finalRes) {
       const uniformRes = evaluateCandidateStatistical({
@@ -2952,12 +3085,16 @@ export function searchOptimalHC(params: {
         dispatchFairness,
       });
       finalRes = uniformRes;
-      if (!uniformRes.passesAllConstraints && covPlan.attempt && covPlan.dist && !coverageRes) runRepair();
+      if (!uniformRes.passesAllConstraints && covPlan.attempt && covPlan.dist && !coverageRes) {
+        runRepair();
+        // Repair (and spread) did not pass: report the coverage-satisfying roster, not the uniform zero-coverage one (A4).
+        if (!finalRes.passesAllConstraints && reportedRes) finalRes = reportedRes;
+      }
     }
-    const repairReasons = coverageRepairReasons(covPlan, finalRes, coverageRes);
+    const repairReasons = coverageRepairReasons(covPlan, finalRes, reportedReasons ? { passesAllConstraints: false, failingReasons: reportedReasons } : coverageRes);
 
     // Rosters already tried at this N, so the rescue ladder below never repeats one.
-    const triedRosters: Array<ShiftDistributionByCategory | null | undefined> = [covPlan.dist];
+    const triedRosters: Array<ShiftDistributionByCategory | null | undefined> = [covPlan.dist, covPlan.spread];
     if (labor.shiftPlacementEnabled && !finalRes.passesAllConstraints && representativeCases) {
       const placementDist = computeCandidatePlacementDistribution({
         n,
@@ -2996,7 +3133,6 @@ export function searchOptimalHC(params: {
         ladder: buildRescueLadder({ n, cases: representativeCases, calendar, labor, queueArchitecture }),
         alreadyTried: triedRosters,
       });
-      const rescueCtx = { sla, categories, replications: R, baseSeed: seed, precomputedCaseSets, confirmation: rescueConfirmation };
       for (let c = rescue.next(); c !== null; c = rescue.next()) {
         rescue.record(evaluateCandidateStatistical({
           operationalHC: n, intervals, openingWIP, calendar, labor, queueArchitecture, shiftDistribution: c.roster, dispatchFairness,
@@ -3019,6 +3155,8 @@ export function searchOptimalHC(params: {
       } else {
         winningDistributionByN.delete(n);
       }
+      if (!winningDist && reportedDist && !finalRes.passesAllConstraints) reportedDistributionByN.set(n, reportedDist);
+      else reportedDistributionByN.delete(n);
     }
     return finalRes;
   }
@@ -3254,7 +3392,7 @@ export function searchOptimalHC(params: {
     seed: auditSeed,
     queueArchitecture,
     precomputedCases: precomputedCaseSets ? precomputedCaseSets[repIdx] : undefined,
-    shiftDistribution: winningDistributionByN.get(evalN),
+    shiftDistribution: winningDistributionByN.get(evalN) ?? reportedDistributionByN.get(evalN),
     dispatchFairness,
   });
 
@@ -3285,7 +3423,7 @@ export function searchOptimalHC(params: {
       seed: auditSeed,
       queueArchitecture,
       precomputedCases: precomputedCaseSets ? precomputedCaseSets[repIdx] : undefined,
-      shiftDistribution: winningDistributionByN.get(evalN - 1),
+      shiftDistribution: winningDistributionByN.get(evalN - 1) ?? reportedDistributionByN.get(evalN - 1),
       dispatchFairness,
     });
   }
@@ -3642,6 +3780,9 @@ export async function searchOptimalHCAsync(params: {
 
   // Rescue ladder confirmation block (PRD P1-6): built lazily, once per search, shared by every N and rung.
   const rescueConfirmation = createConfirmationBlock({ intervals, openingWIP, categories, calendar, sla, seed, replications: R });
+  const rescueCtx = { sla, categories, replications: R, baseSeed: seed, precomputedCaseSets, confirmation: rescueConfirmation };
+  // Coverage-satisfying roster whose failure is reported at an N where nothing passed (repair / spread layout; A4). Not set for passing Ns.
+  const reportedDistributionByN = new Map<number, ShiftDistributionByCategory>();
 
   function buildHistorySnapshot(): SearchProgressState['evaluatedHistory'] {
     const list: SearchProgressState['evaluatedHistory'] = [];
@@ -3684,6 +3825,11 @@ export async function searchOptimalHCAsync(params: {
     let finalRes: Awaited<ReturnType<typeof evaluateCandidateStatisticalAsync>> | undefined;
     let winningDist: ShiftDistributionByCategory | undefined;
     let coverageRes: Awaited<ReturnType<typeof evaluateCandidateStatisticalAsync>> | undefined;
+    // Coverage-satisfying roster whose failure is REPORTED when nothing passes at this N (A4) - see searchOptimalHC's evaluateN.
+    let reportedRes: Awaited<ReturnType<typeof evaluateCandidateStatisticalAsync>> | undefined;
+    let reportedDist: ShiftDistributionByCategory | undefined;
+    let reportedReasons: string[] | undefined;
+    // "Repair, then spread (confirmed)": the sync twin's step, driven through the same createCoverageSpreadSearch machine.
     const runRepair = async () => {
       if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
       coverageRes = await evaluateCandidateStatisticalAsync({
@@ -3694,12 +3840,51 @@ export async function searchOptimalHCAsync(params: {
       if (coverageRes.passesAllConstraints) {
         finalRes = coverageRes;
         winningDist = covPlan.dist!;
+        return;
+      }
+      reportedRes = coverageRes;
+      reportedDist = covPlan.dist!;
+      reportedReasons = coverageRes.failingReasons;
+      if (!covPlan.spread) return;
+      const spreadSearch = createCoverageSpreadSearch<typeof coverageRes>({
+        repairRoster: covPlan.dist!, spreadRoster: covPlan.spread, repairResult: coverageRes, confirmEnabled: rToUse === R,
+      });
+      for (let step = spreadSearch.next(); step !== null; step = spreadSearch.next()) {
+        if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
+        spreadSearch.record(await evaluateCandidateStatisticalAsync({
+          operationalHC: n, intervals, openingWIP, calendar, labor, queueArchitecture, shiftDistribution: step.roster, dispatchFairness,
+          shouldCancel,
+          onRepProgress: (completedReps, totalReps) => {
+            onProgress?.({
+              status: 'searching',
+              phase: `Phase 2: Statistical Primary SLA Search (Testing N = ${n})`,
+              currentN: n,
+              nMin: nMinAnalytical,
+              maxN: searchCap,
+              percent: progressPct,
+              evaluatedHistory: buildHistorySnapshot(),
+              currentMessage: `${msg} (trying an even spread of start times, ${completedReps}/${totalReps} replications)`,
+            });
+          },
+          ...(step.stage === 'confirm'
+            ? resolveRescueEvaluation('confirm', rescueCtx)
+            : { sla, categories, replications: rToUse, baseSeed: seed, precomputedCaseSets }),
+        }));
+      }
+      const spreadOutcome = spreadSearch.result();
+      if (spreadOutcome.adopted) {
+        finalRes = spreadOutcome.adopted;
+        winningDist = covPlan.spread;
+      } else {
+        reportedRes = spreadOutcome.reportedResult;
+        reportedDist = spreadOutcome.reportedRoster;
+        reportedReasons = spreadOutcome.reportedReasons;
       }
     };
     if (covPlan.repairFirst) {
       await runRepair();
-      // Structurally-unmet uniform cannot pass, so a failing repair IS this N's best-effort result.
-      if (!finalRes) finalRes = coverageRes;
+      // Structurally-unmet uniform cannot pass, so the failing coverage-satisfying roster (spread, else repair) IS this N's best-effort result.
+      if (!finalRes) finalRes = reportedRes;
     }
     if (!finalRes) {
       const uniformRes = await evaluateCandidateStatisticalAsync({
@@ -3730,15 +3915,19 @@ export async function searchOptimalHCAsync(params: {
         },
       });
       finalRes = uniformRes;
-      if (!uniformRes.passesAllConstraints && covPlan.attempt && covPlan.dist && !coverageRes) await runRepair();
+      if (!uniformRes.passesAllConstraints && covPlan.attempt && covPlan.dist && !coverageRes) {
+        await runRepair();
+        // Repair (and spread) did not pass: report the coverage-satisfying roster, not the uniform zero-coverage one (A4).
+        if (!finalRes.passesAllConstraints && reportedRes) finalRes = reportedRes;
+      }
     }
-    const repairReasons = coverageRepairReasons(covPlan, finalRes, coverageRes);
+    const repairReasons = coverageRepairReasons(covPlan, finalRes, reportedReasons ? { passesAllConstraints: false, failingReasons: reportedReasons } : coverageRes);
 
     // Same shared computeCandidatePlacementDistribution / pickPlacementOrUniform as
     // searchOptimalHC's evaluateN — see that function's comment for the guarantees this
     // preserves (never-worse, monotone-safe gate).
     // Rosters already tried at this N, so the rescue ladder below never repeats one.
-    const triedRosters: Array<ShiftDistributionByCategory | null | undefined> = [covPlan.dist];
+    const triedRosters: Array<ShiftDistributionByCategory | null | undefined> = [covPlan.dist, covPlan.spread];
     if (labor.shiftPlacementEnabled && !finalRes.passesAllConstraints && representativeCases) {
       if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
       const placementDist = computeCandidatePlacementDistribution({
@@ -3789,7 +3978,6 @@ export async function searchOptimalHCAsync(params: {
         ladder: buildRescueLadder({ n, cases: representativeCases, calendar, labor, queueArchitecture }),
         alreadyTried: triedRosters,
       });
-      const rescueCtx = { sla, categories, replications: R, baseSeed: seed, precomputedCaseSets, confirmation: rescueConfirmation };
       for (let c = rescue.next(); c !== null; c = rescue.next()) {
         if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
         rescue.record(await evaluateCandidateStatisticalAsync({
@@ -3826,6 +4014,8 @@ export async function searchOptimalHCAsync(params: {
       } else {
         winningDistributionByN.delete(n);
       }
+      if (!winningDist && reportedDist && !finalRes.passesAllConstraints) reportedDistributionByN.set(n, reportedDist);
+      else reportedDistributionByN.delete(n);
     }
     return finalRes;
   }
@@ -4146,7 +4336,7 @@ export async function searchOptimalHCAsync(params: {
     seed: auditSeed,
     queueArchitecture,
     precomputedCases: precomputedCaseSets ? precomputedCaseSets[repIdx] : undefined,
-    shiftDistribution: winningDistributionByN.get(evalN),
+    shiftDistribution: winningDistributionByN.get(evalN) ?? reportedDistributionByN.get(evalN),
     dispatchFairness,
   });
 
@@ -4176,7 +4366,7 @@ export async function searchOptimalHCAsync(params: {
       seed: auditSeed,
       queueArchitecture,
       precomputedCases: precomputedCaseSets ? precomputedCaseSets[repIdx] : undefined,
-      shiftDistribution: winningDistributionByN.get(evalN - 1),
+      shiftDistribution: winningDistributionByN.get(evalN - 1) ?? reportedDistributionByN.get(evalN - 1),
       dispatchFairness,
     });
   }
