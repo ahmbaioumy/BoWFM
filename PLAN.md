@@ -1865,3 +1865,39 @@ Re-check of A12: user-side FAIL, challenger FAIL (FINDINGS "Item 1 review round 
   - S2 Test that `CaseMinHeap.compare` and `compareByUrgency` (`des-engine.ts`) rank cases identically. Test only, no dispatch change.
 - **Item 7 (after items 2–6): opt-in Poisson arrival counts.** SLA-config flag, default OFF (OFF = byte-identical results, regression test). ConfigFlow toggle next to Workload Floor. Per-interval count ~ Poisson(mean = interval volume) from a separate seeded stream (seed + interval index) so CRN holds across candidate N; normal approximation above ~30 expected. Opening WIP stays fixed. R unchanged (wider CI may raise HC — intended). Results badge + note "Volume variability on: not comparable with replay runs." Docs PRD / project_context, rebuild, check:artifact. Slotted last because it is opt-in (no default change) and should be measured against the default numbers after items 2–6; it overlaps ConfigFlow / wfm.ts / engine with item 1 and items 2–5.
 - FYI from that session: CLAUDE.md "never duplicate an algorithm" bullet corrected; D8 fixed, D11 still open.
+
+---
+
+# BUILD PLAN — Small fixes S1 + S2 (2026-10-14; owner: "approve, push, continue to the small fixes and item 2")
+
+**Task:** remove the wall-clock fallback from `computeIntervalHorizon` and pin that the heap order and the real dispatch order agree.
+**End user:** WFM planner. **Tier 2** (S1 changes behaviour on an edge input). Reviewers: `tester` + `auditor`.
+**Skills:** `wfm-engine-testing` (fail-first).
+
+## S1 — `computeIntervalHorizon` (`src/utils/calendar.ts:497-521`)
+- Today: no valid interval and no valid backlog arrival → `horizonStart = new Date()` (`:519`), non-deterministic.
+- Change: in that case throw `Error("No valid demand interval or backlog arrival date: the planning horizon cannot be set. Check the date columns of the uploaded file.")`. Doc comment updated.
+- Callers must never surface this as a crash:
+  - `ConfigFlow.tsx:74` already guards `intervals.length > 0` — but intervals may all be invalid dates; guard must use a shared predicate (e.g. export `hasValidHorizonInput(intervals, openingWIP)` from calendar.ts) or catch → hint null.
+  - `csv-parser.ts:1400` (`validateDataQuality`) runs unconditionally: when there is no valid horizon input, skip the horizon-dependent warnings (A uses no horizon — keep it; B and C need the horizon) and never throw. The existing invalid-timestamp / empty-file blocking issues already block the run. Remove the stale comment at `:1437` about the `new Date()` fallback (keep the guard if still needed).
+  - `des-engine.ts:613`, `hc-search.ts` callers: unchanged; a run cannot start without valid data (blocking DQ). Builder verifies with one test that a direct engine call with no valid data throws the clear message, not a later obscure error.
+- The other `new Date()` fallbacks in calendar.ts (`:113`, `:188`, `:250`) are NOT in scope — builder lists their callers in the report for the backlog.
+## S2 — test only
+- Test that `CaseMinHeap.compare` (`des-engine.ts:185`) and `compareByUrgency` (`:247`) give the same sign on a deterministic set of case pairs (seeded `createPrng`; ties, equal deadlines, parked/in-progress, overdue, different categories). If they DISAGREE on any pair: do not change dispatch; report the pairs (expose via an exported test hook only if needed, minimal).
+
+## Steps (sonnet-executor, fail-first)
+1. Suite D80 before the RESULTS block of `scripts/verify-sizing-fixes.mts`: S1 throws with no valid input (fails today: returns a date); backlog-only still gives arrival + 7 days; valid data unchanged; `validateDataQuality` with all-invalid dates does not throw and still returns its blocking issue; three samples unchanged (31/27/31). S2 comparator agreement.
+2. Implement. 3. `npm run lint`, `npm run build:standalone`, `npm test`. 4. PRD (§10/§11 if a limitation/backlog line changes; version 1.24.2 → 1.24.3), project_context §11 + counts, docs/wfm/07 entry. 5. Commit.
+
+## Scope lock
+`src/utils/calendar.ts`, `src/utils/csv-parser.ts` (horizon guard only), `src/components/ConfigFlow.tsx` (hint guard only), `src/utils/des-engine.ts` (export for test only, if unavoidable), `scripts/verify-sizing-fixes.mts` (D80), `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`, `BoWFM.html`.
+
+## Acceptance
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | No wall clock in the horizon | D80; grep shows no `new Date()` in `computeIntervalHorizon` |
+| 2 | No crash on bad dates | D80 `validateDataQuality` all-invalid; browser: upload a file whose dates are all invalid → Data Quality message, page alive, zero console errors |
+| 3 | Valid data identical | samples 31/40, 27/34, 31/39; npm test green |
+| 4 | Heap = dispatch order | D80 S2 pairs |
+| 5 | Mutation | restore the `new Date()` fallback → D80 fails |
+| 6 | Docs + artifact | check:artifact passes |
