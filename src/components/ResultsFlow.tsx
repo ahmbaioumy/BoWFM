@@ -232,8 +232,12 @@ function ResultsFlowBody({
       d.slaps.some((s) => s.startMinutesFromOpen > 0 && s.agentCount > 0)
     );
   // Roster the recommended headcount actually passed with (final audit run); shown whenever it is not everyone at opening.
-  const startTimeLines = searchOutput.isInfeasible ? null : startTimeSplitLines(des.shiftDistributionUsed, calendar);
-  const startTimeNotes = searchOutput.isInfeasible ? null : startTimeSplitNotes(des.shiftDistributionUsed, calendar, sla.minCoverageEnabled !== false);
+  // Siloed seat counts come from the audit run's agent list so a category with no roster entry (at opening) is still listed.
+  const startTimeSeats: Record<string, number> | null = des.agentFairness?.perCategory
+    ? Object.fromEntries(Object.entries(des.agentFairness.perCategory).map(([k, m]) => [k, m.agents]))
+    : null;
+  const startTimeLines = searchOutput.isInfeasible ? null : startTimeSplitLines(des.shiftDistributionUsed, calendar, startTimeSeats);
+  const startTimeNotes = searchOutput.isInfeasible ? null : startTimeSplitNotes(des.shiftDistributionUsed, calendar, searchOutput.winningLayout, startTimeSeats);
   const singleShiftRemedy =
     sla.minCoverageEnabled === false
       ? 'Turn the Minimum Coverage Floor on or enable Shift Placement (Labor & Config)'

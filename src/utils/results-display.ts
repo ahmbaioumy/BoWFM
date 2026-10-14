@@ -1,6 +1,7 @@
 /**
  * Display-only helpers for the Results screen. No engine behaviour lives here.
  */
+import type { WinningLayout } from '../types/wfm';
 
 /**
  * Category label for a siloed agent who handled no cases. Uses the category the engine
@@ -69,62 +70,70 @@ function clockLabel(openMinutes: number, offsetMinutes: number): string {
   return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
 }
 
+type StartDist = Record<string, { slaps: Array<{ startMinutesFromOpen: number; agentCount: number }> }>;
+type StartCalendar = { is24x7?: boolean; dailyOpenHour: number; dailyOpenMinute: number };
+
 /**
  * One text line per category (pooled: a single line) listing how many agents start at each clock time.
  * Clock time = calendar open time + the start offset (24x7: open is 00:00); offsets past midnight wrap.
+ * Siloed: a category that has agents (`seatCounts`, from the audit run) but no roster entry starts at opening
+ * and is listed as "<Category>: N agents at <open time>", so the lines sum to the recommended headcount.
  * Returns null (hide the block) when there is no roster or every agent starts at opening (offset 0).
  */
 export function startTimeSplitLines(
-  dist: Record<string, { slaps: Array<{ startMinutesFromOpen: number; agentCount: number }> }> | undefined | null,
-  calendar: { is24x7?: boolean; dailyOpenHour: number; dailyOpenMinute: number },
+  dist: StartDist | undefined | null,
+  calendar: StartCalendar,
+  seatCounts?: Record<string, number> | null,
 ): StartTimeLine[] | null {
   if (!dist) return null;
   const openMin = calendar.is24x7 ? 0 : calendar.dailyOpenHour * 60 + calendar.dailyOpenMinute;
+  const agentsAt = (count: number, offset: number) =>
+    `${count} ${count === 1 ? 'agent' : 'agents'} at ${clockLabel(openMin, offset)}`;
   const lines: StartTimeLine[] = [];
   let anyLater = false;
-  for (const key of Object.keys(dist).sort()) {
-    const active = dist[key].slaps
+  const keys = new Set(Object.keys(dist));
+  if (!keys.has(POOLED_KEY) && seatCounts) for (const k of Object.keys(seatCounts)) keys.add(k);
+  for (const key of Array.from(keys).sort()) {
+    const active = (dist[key]?.slaps ?? [])
       .filter((s) => s.agentCount > 0)
       .sort((a, b) => a.startMinutesFromOpen - b.startMinutesFromOpen);
-    if (active.length === 0) continue;
+    if (active.length === 0) {
+      const seats = seatCounts?.[key] ?? 0;
+      if (seats > 0 && key !== POOLED_KEY) lines.push({ category: key, text: agentsAt(seats, 0) });
+      continue;
+    }
     if (active.some((s) => s.startMinutesFromOpen > 0)) anyLater = true;
     lines.push({
       category: key === POOLED_KEY ? null : key,
-      text: active
-        .map((s) => `${s.agentCount} ${s.agentCount === 1 ? 'agent' : 'agents'} at ${clockLabel(openMin, s.startMinutesFromOpen)}`)
-        .join(', '),
+      text: active.map((s) => agentsAt(s.agentCount, s.startMinutesFromOpen)).join(', '),
     });
   }
   return anyLater && lines.length > 0 ? lines : null;
 }
 
 export const START_TIME_HEADING = 'Start times this headcount needs';
+export const START_TIME_HEADING_USED = 'Start times used for this headcount';
 export const START_TIME_REASON = 'Rostering everyone at opening would not meet the targets with this headcount.';
+export const START_TIME_REASON_USED = 'These are the start times this headcount was tested with.';
 export const START_TIME_SPREAD_NOTE =
   'This roster splits agents evenly across start times. That is why turning the coverage floor off can give a higher headcount.';
 
-/** True when a (non-trivial) roster splits agents as evenly as possible across 2+ start times in every category with 2+ starts. */
-function isEvenSplit(dist: Record<string, { slaps: Array<{ startMinutesFromOpen: number; agentCount: number }> }>): boolean {
-  let multi = false;
-  for (const key of Object.keys(dist)) {
-    const counts = dist[key].slaps.filter((s) => s.agentCount > 0).map((s) => s.agentCount);
-    if (counts.length < 2) continue;
-    multi = true;
-    if (Math.max(...counts) - Math.min(...counts) > 1) return false;
-  }
-  return multi;
-}
-
-/** Static texts for the start-time block; null when the block is hidden. spreadNote only with the coverage floor on and an even-split roster. */
+/**
+ * Static texts for the start-time block; null when the block is hidden. The "everyone at opening would not meet the
+ * targets" claim is made only for layouts reached after the all-at-opening roster failed (repair, spread, placement,
+ * ladder); polish or an unknown layout gets the neutral wording. The spread note only when the spread layout won.
+ */
 export function startTimeSplitNotes(
-  dist: Record<string, { slaps: Array<{ startMinutesFromOpen: number; agentCount: number }> }> | undefined | null,
-  calendar: { is24x7?: boolean; dailyOpenHour: number; dailyOpenMinute: number },
-  coverageFloorOn: boolean,
+  dist: StartDist | undefined | null,
+  calendar: StartCalendar,
+  winningLayout?: WinningLayout | null,
+  seatCounts?: Record<string, number> | null,
 ): { heading: string; reason: string; spreadNote: string | null } | null {
-  if (!startTimeSplitLines(dist, calendar) || !dist) return null;
+  if (!startTimeSplitLines(dist, calendar, seatCounts) || !dist) return null;
+  const established = winningLayout === 'repair' || winningLayout === 'spread' || winningLayout === 'placement' || winningLayout === 'ladder';
   return {
-    heading: START_TIME_HEADING,
-    reason: START_TIME_REASON,
-    spreadNote: coverageFloorOn && isEvenSplit(dist) ? START_TIME_SPREAD_NOTE : null,
+    heading: established ? START_TIME_HEADING : START_TIME_HEADING_USED,
+    reason: established ? START_TIME_REASON : START_TIME_REASON_USED,
+    spreadNote: winningLayout === 'spread' ? START_TIME_SPREAD_NOTE : null,
   };
 }

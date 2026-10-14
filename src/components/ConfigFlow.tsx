@@ -395,7 +395,8 @@ export function ConfigFlow({
             ) : (
               <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs text-slate-600">
                 Every agent starts one shift at business open (and, when the Minimum Coverage Floor is on,
-                a minimal number of agents start later so the business is never unattended),
+                a minimal number of agents start later so the business is never unattended; if that
+                roster fails, the search also tries spreading the same agents evenly over those start times),
                 and each agent's shift ends after the daily productive hours, counted from their start.
                 Enabling placement also re-spreads the roster across business hours after Req HC is
                 fixed — headcount is never changed by it.
@@ -1096,7 +1097,7 @@ export function ConfigFlow({
                   >
                     {calendar.is24x7
                       ? 'Coverage floor is off: nothing checks that agents are on shift while the business is open. With the floor ON the search also tries spreading start times evenly, so turning it OFF can give a higher headcount. (This is not the Workload Floor switch.)'
-                      : 'Coverage floor is off. This does not lower headcount: with no later starts, every agent works one shift from opening time and leaves when it ends, so later hours are unstaffed. Headcount can go up, and a short SLA can become unreachable at any headcount. With the floor ON the search also tries spreading start times evenly, so turning it OFF can give a higher headcount. (This is not the Workload Floor switch.)'}
+                      : 'Coverage floor is off. This does not lower headcount: with no later starts, every agent works one shift from opening time and leaves when it ends, so later hours are unstaffed. Headcount can go up (with the floor ON the search can also spread start times evenly, which can make it lower than with the floor OFF), and a short SLA can become unreachable at any headcount. (This is not the Workload Floor switch.)'}
                   </div>
                 )}
               </div>

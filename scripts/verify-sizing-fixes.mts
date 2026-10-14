@@ -5073,7 +5073,7 @@ console.log('\n--- Suite D64: F2 24x7 park resumes when capacity exists ---');
 console.log('\n--- Suite D65: F3 statistics describe the adopted roster ---');
 {
   // Key-order-insensitive digest: the async search assembles its result object in a different key order than the sync one (same values).
-  const sortKeys = (_k: string, v: any) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v);
+  const sortKeys = (_k: string, v: any) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().filter((k) => k !== 'winningLayout').map((k) => [k, v[k]])) : v); // winningLayout (Item 1 rework 2, display-only label) is left out so the pinned pre-change digests still prove nothing else moved
   const dg = (x: unknown) => createHash('sha1').update(JSON.stringify(x, sortKeys)).digest('hex').slice(0, 16);
   const cal65: CalendarConfig = { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 20 };
   const laborOff65: LaborConfig = { ...LABOR, dailyProductiveHours: 8 };
@@ -6045,7 +6045,7 @@ console.log('\n--- Suite D71: P2-9 shift end without a start distribution ---');
 console.log('\n--- Suite D72: P1-6 / L23 rescue ladder with a confirmation block ---');
 {
   const M72 = 2147483647;
-  const sortKeys72 = (_k: string, v: any) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().map((k) => [k, v[k]])) : v);
+  const sortKeys72 = (_k: string, v: any) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().filter((k) => k !== 'winningLayout').map((k) => [k, v[k]])) : v); // winningLayout (Item 1 rework 2, display-only label) is left out so the pinned pre-change digests still prove nothing else moved
   // Digest over the WHOLE search result. Dates are written as minutes from the first interval so the pinned digests do not depend on the machine's time zone.
   const dig72 = (x: unknown, base: number): string => {
     const rep = function (this: any, k: string, v: any) {
@@ -7248,7 +7248,7 @@ console.log('\n--- Suite D79: start-time block and roster-source end-to-end (A12
 {
   const rdNs: any = await import('../src/utils/results-display');
   const fn = rdNs.startTimeSplitLines as ((d: ShiftDistributionByCategory | undefined, c: CalendarConfig) => Array<{ category: string | null; text: string }> | null) | undefined;
-  const noteFn = rdNs.startTimeSplitNotes as ((d: ShiftDistributionByCategory | undefined, c: CalendarConfig, coverageOn: boolean) => { heading: string; reason: string; spreadNote: string | null } | null) | undefined;
+  const noteFn = rdNs.startTimeSplitNotes as ((d: ShiftDistributionByCategory | undefined, c: CalendarConfig, layout?: string | null, seats?: Record<string, number> | null) => { heading: string; reason: string; spreadNote: string | null } | null) | undefined;
   assert(typeof fn === 'function' && typeof noteFn === 'function', 'D79.0 startTimeSplitLines / startTimeSplitNotes are exported from results-display.ts', `typeof=${typeof fn}/${typeof noteFn}`);
   const mkD = (pairs: Array<[number, number]>): ShiftSlapDistribution => ({ slapMinutes: 30, slaps: pairs.map(([o, c]) => ({ startMinutesFromOpen: o, agentCount: c })) as any });
   const calDay: CalendarConfig = { ...DEFAULT_CALENDAR, is24x7: false, dailyOpenHour: 8, dailyOpenMinute: 0, dailyCloseHour: 22, dailyCloseMinute: 0 };
@@ -7264,11 +7264,27 @@ console.log('\n--- Suite D79: start-time block and roster-source end-to-end (A12
     assert(wrap2?.[0]?.text === '2 agents at 20:15, 3 agents at 12:45', 'D79.c2 day calendar opening 20:15: offset 990 wraps past midnight to 12:45', JSON.stringify(wrap2));
     assert(fn({ __POOLED__: mkD([[0, 21]]) }, calDay) === null && fn({ A: mkD([[0, 4]]), B: mkD([[0, 2], [60, 0]]) }, calDay) === null, 'D79.d everyone at opening (zero-count later starts ignored) -> block hidden (null)', '');
     assert(fn(undefined, calDay) === null && fn({}, calDay) === null, 'D79.e no distribution -> hidden (null)', '');
-    const n1 = noteFn({ __POOLED__: mkD([[0, 11], [300, 10]]) }, calDay, true);
-    assert(!!n1 && n1.heading === 'Start times this headcount needs' && n1.reason === 'Rostering everyone at opening would not meet the targets with this headcount.' && typeof n1.spreadNote === 'string' && /evenly/.test(n1.spreadNote), 'D79.f notes: heading, reason, and spread note when roster is an even split and the coverage floor is on', JSON.stringify(n1));
-    const n2 = noteFn({ __POOLED__: mkD([[0, 11], [300, 10]]) }, calDay, false);
-    const n3 = noteFn({ __POOLED__: mkD([[0, 20], [300, 1]]) }, calDay, true);
-    assert(n2?.spreadNote === null && n3?.spreadNote === null, 'D79.g no spread note when the coverage floor is off, or the roster is not an even split (repair roster)', `${n2?.spreadNote} | ${n3?.spreadNote}`);
+    const dPool = { __POOLED__: mkD([[0, 11], [300, 10]]) };
+    const nSpread = noteFn(dPool, calDay, 'spread');
+    assert(!!nSpread && nSpread.heading === 'Start times this headcount needs' && nSpread.reason === 'Rostering everyone at opening would not meet the targets with this headcount.' && typeof nSpread.spreadNote === 'string' && /evenly/.test(nSpread.spreadNote), 'D79.f spread layout: heading "needs", reason, and the spread note', JSON.stringify(nSpread));
+    // A13.2 / A13.3: reason line only for layouts reached after the all-at-opening roster failed; spread note only for 'spread'.
+    for (const lay of ['repair', 'placement', 'ladder'] as const) {
+      const nn = noteFn(dPool, calDay, lay);
+      assert(nn?.heading === 'Start times this headcount needs' && nn.reason === 'Rostering everyone at opening would not meet the targets with this headcount.' && nn.spreadNote === null, `D79.g ${lay}: heading "needs" + reason, NO spread note even for an even 11/10 split`, JSON.stringify(nn));
+    }
+    for (const lay of ['polish', undefined, 'uniform'] as const) {
+      const nn = noteFn(dPool, calDay, lay);
+      assert(nn?.heading === 'Start times used for this headcount' && nn.reason === 'These are the start times this headcount was tested with.' && nn.spreadNote === null, `D79.g2 ${String(lay)}: neutral heading and reason, no spread note`, JSON.stringify(nn));
+    }
+    // A13.4 siloed: a category with agents but no roster entry is listed at opening; lines sum to the headcount.
+    {
+      const seatsIn = { Billing: 5, Claims: 3 };
+      const sl = (fn as any)({ Billing: mkD([[0, 1], [60, 4]]) }, calDay, seatsIn) as Array<{ category: string | null; text: string }> | null;
+      const sumTxt = (ls: Array<{ text: string }> | null) => (ls ?? []).reduce((a, l) => a + l.text.split(', ').reduce((b, part) => b + Number(part.split(' ')[0]), 0), 0);
+      assert(JSON.stringify(sl) === JSON.stringify([{ category: 'Billing', text: '1 agent at 08:00, 4 agents at 09:00' }, { category: 'Claims', text: '3 agents at 08:00' }]) && sumTxt(sl) === 8, 'D79.g3 siloed: Claims has 3 agents but no roster entry -> listed "Claims: 3 agents at 08:00"; lines sum to 8', JSON.stringify(sl));
+      const sl2 = (fn as any)({ Billing: mkD([[0, 5]]) }, calDay, seatsIn);
+      assert(sl2 === null, 'D79.g4 siloed: nobody starts later -> block still hidden', JSON.stringify(sl2));
+    }
   }
 
   // ---- HC-14 end-to-end (24x7, 7 days, 6 cases / 30 min, AHT 30, SLA 80% / 6 h) ----
@@ -7320,6 +7336,69 @@ console.log('\n--- Suite D79: start-time block and roster-source end-to-end (A12
     if (typeof fn === 'function') {
       const ls = fn(sOn.finalDESResult?.shiftDistributionUsed, DEFAULT_CALENDAR);
       assert(ls?.[0]?.text === '22 agents at 08:00, 21 agents at 10:30', 'D79.m support + answer-time 60: helper prints "22 agents at 08:00, 21 agents at 10:30" (sums to the recommended 43)', JSON.stringify(ls));
+    }
+  }
+
+  // ---- A13.1: winningLayout is recorded by ONE shared classifier; sync == async on every fixture ----
+  {
+    const cls = (hcNs as any).classifyWinningLayout as ((w: any, t: any) => string) | undefined;
+    assert(typeof cls === 'function', 'D79.n0 classifyWinningLayout is exported from hc-search.ts (the one shared classifier)', `typeof=${typeof cls}`);
+    if (typeof cls === 'function') {
+      const mk1 = (): any => ({ __POOLED__: { slapMinutes: 30, slaps: [{ startMinutesFromOpen: 0, agentCount: 1 }] } });
+      const rA = mk1(), rB = mk1(), rC = mk1(), rD = mk1();
+      assert(cls(undefined, {}) === 'uniform' && cls(rA, { repair: rA, spread: rB }) === 'repair' && cls(rB, { repair: rA, spread: rB }) === 'spread' && cls(rC, { repair: rA, spread: rB, placement: rC }) === 'placement' && cls(rD, { repair: rA, spread: rB, placement: rC, ladderWon: true }) === 'ladder', 'D79.n1 classifier: no roster -> uniform; identity -> repair / spread / placement; ladder winner -> ladder', '');
+    }
+    const lay = (r: any) => (r.winningLayout ?? 'none') as string;
+    const same = (a: any, b: any) => lay(a) === lay(b) && a.recommendedHC === b.recommendedHC;
+    // HC-14 (24x7 pooled, coverage ON): the even spread wins.
+    assert(lay(outH) === 'spread' && same(outH, outHa), 'D79.n2 HC-14: winningLayout "spread", sync == async', `sync=${lay(outH)} async=${lay(outHa)}`);
+    // D33 file (08:00-22:00, 9 h shift, flat 20, SLA 80% / 4 h, 5 reps): the even spread passes at 21.
+    const calD: CalendarConfig = { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 22 };
+    const ivD: StandardInterval[] = [];
+    for (let day = 0; day < 5; day++) for (let h = 8; h < 22; h++) for (let m = 0; m < 60; m += 30) ivD.push({ intervalIndex: ivD.length, start: new Date(2026, 2, 2 + day, h, m), end: new Date(2026, 2, 2 + day, h, m + 30), volume: 20, category: 'General' });
+    const slaD: SLAPolicyConfig = { primaryPct: 80, primaryWindow: 4, primaryUnit: 'hours', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes', asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'next_open', occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 90, minCoverageEnabled: true };
+    const pD = { intervals: ivD, openingWIP: [] as OpeningWIPCase[], categories: [{ id: 'c1', name: 'General', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 }] as CategoryConfig[], calendar: calD, labor: { ...LABOR, dailyProductiveHours: 9 }, sla: slaD, seed: 42, userMaxHC: 60, replications: 5, queueArchitecture: 'pooled' as const };
+    const d33s = searchOptimalHC(pD); const d33a: any = await searchOptimalHCAsync(pD);
+    assert(lay(d33s) === 'spread' && same(d33s, d33a), 'D79.n3 D33: winningLayout "spread", sync == async', `sync=${lay(d33s)}/${d33s.recommendedHC} async=${lay(d33a)}/${d33a.recommendedHC}`);
+    // Uniform pass: the support sample at the app defaults - everyone at opening passes.
+    {
+      const { rows } = buildSampleDataset('support', new Date(2026, 9, 5, 8, 0, 0, 0));
+      const ivS = mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+      const catS = discoverAndSyncCategories(ivS, DEFAULT_CATEGORIES, DEFAULT_SLA);
+      const pU = { intervals: ivS, openingWIP: [] as OpeningWIPCase[], categories: catS, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: { ...DEFAULT_SLA, minCoverageEnabled: false }, seed: DEFAULT_SIM_PARAMS.seed, userMaxHC: DEFAULT_SIM_PARAMS.maxHCSearch, replications: DEFAULT_SIM_PARAMS.replications, queueArchitecture: 'pooled' as const, dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness };
+      const us = searchOptimalHC(pU); const ua: any = await searchOptimalHCAsync(pU);
+      console.log(`  (D79 winningLayout support sample, coverage OFF: sync=${lay(us)} async=${lay(ua)} HC=${us.recommendedHC}/${ua.recommendedHC})`);
+      assert(lay(us) === 'uniform' && same(us, ua), 'D79.n4 support sample, coverage OFF: the all-at-opening roster passes -> winningLayout "uniform", sync == async', `sync=${lay(us)}/${us.recommendedHC} async=${lay(ua)}/${ua.recommendedHC}`);
+      if (typeof fn === 'function') assert(fn(us.finalDESResult?.shiftDistributionUsed, DEFAULT_CALENDAR) === null, 'D79.n5 uniform pass: start-time block hidden', '');
+      // Same sample, coverage ON (app default): the coverage-repair roster is tried first and wins -> "repair".
+      const pR = { ...pU, sla: DEFAULT_SLA };
+      const rr = searchOptimalHC(pR); const rra: any = await searchOptimalHCAsync(pR);
+      console.log(`  (D79 winningLayout support sample, coverage ON: sync=${lay(rr)} async=${lay(rra)} HC=${rr.recommendedHC}/${rra.recommendedHC})`);
+      assert(lay(rr) === 'repair' && same(rr, rra), 'D79.n5b support sample, coverage ON: winningLayout "repair", sync == async', `sync=${lay(rr)} async=${lay(rra)}`);
+    }
+    // Placement-ON fixtures (D72 d52 / d50c) and the D76 polish fixtures.
+    const calP: CalendarConfig = { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 20 };
+    const labP: LaborConfig = { ...LABOR, dailyProductiveHours: 8, shiftPlacementEnabled: true, shiftSlapMinutes: 30 };
+    const mkIvP = (cats: Array<[string, (h: number) => number]>): StandardInterval[] => {
+      const out: StandardInterval[] = [];
+      for (let day = 0; day < 5; day++) for (let h = 8; h < 20; h++) for (let m = 0; m < 60; m += 30) for (const [category, vf] of cats) out.push({ intervalIndex: out.length, start: new Date(2026, 2, 2 + day, h, m), end: new Date(2026, 2, 2 + day, h, m + 30), volume: vf(h), category });
+      return out;
+    };
+    const slaP = (pct: number, w: number): SLAPolicyConfig => ({ ...slaD, primaryPct: pct, primaryWindow: w });
+    const c1P: CategoryConfig[] = [{ id: 'c1', name: 'General', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 }];
+    const c2P: CategoryConfig[] = [{ id: 'A', name: 'A', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 }, { id: 'B', name: 'B', ahtMinutes: 25, shrinkagePct: 0.1, priority: 2 }];
+    const fxP: Array<{ name: string; want: string[]; ivs: StandardInterval[]; cats: CategoryConfig[]; sla: SLAPolicyConfig; arch: 'pooled' | 'siloed'; maxHC: number }> = [
+      { name: 'd52 (siloed, placement ON)', want: ['ladder'], ivs: mkIvP([['A', (h) => (h === 8 ? 60 : 4)], ['B', (h) => (h >= 12 && h < 16 ? 10 : 2)]]), cats: c2P, sla: slaP(95, 4), arch: 'siloed', maxHC: 60 },
+      { name: 'd50c (pooled, placement ON)', want: ['ladder'], ivs: mkIvP([['General', (h) => (h === 8 ? 60 : 5)]]), cats: c1P, sla: slaP(97, 2), arch: 'pooled', maxHC: 40 },
+      { name: 'D76 pooled spike (polish)', want: ['polish'], ivs: mkIvP([['General', (h) => (h === 8 ? 20 : 4)]]), cats: c1P, sla: slaP(85, 3), arch: 'pooled', maxHC: 60 },
+      { name: 'D76 siloed spike (polish)', want: ['polish'], ivs: mkIvP([['A', (h) => (h === 8 ? 14 : 3)], ['B', (h) => (h >= 12 && h < 16 ? 7 : 2)]]), cats: c2P, sla: slaP(95, 4), arch: 'siloed', maxHC: 60 },
+    ];
+    for (const fx of fxP) {
+      const pp = { intervals: fx.ivs, openingWIP: [] as OpeningWIPCase[], categories: fx.cats, calendar: calP, labor: labP, sla: fx.sla, seed: 42, userMaxHC: fx.maxHC, replications: 6, queueArchitecture: fx.arch };
+      const rs = searchOptimalHC(pp); const ra: any = await searchOptimalHCAsync(pp);
+      console.log(`  (D79 winningLayout ${fx.name}: sync=${lay(rs)} async=${lay(ra)} HC=${rs.recommendedHC}/${ra.recommendedHC})`);
+      assert(fx.want.includes(lay(rs)) && same(rs, ra), `D79.n6 ${fx.name}: winningLayout ${fx.want.join('/')} and sync == async`, `sync=${lay(rs)} async=${lay(ra)}`);
+      if (fx.want[0] === 'polish') assert(['adopted', 'adopted_partial'].includes((rs as any).rosterPolish?.status), `D79.n7 ${fx.name}: polish adopted -> layout polish`, `status=${(rs as any).rosterPolish?.status}`);
     }
   }
 }
