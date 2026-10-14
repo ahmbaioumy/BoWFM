@@ -1191,3 +1191,12 @@ Moved cases re-pinned with supervisor approval (the headcount moves, so they are
 | d50 | 9 -> 7 | 10 -> 8 | 0:8 240:1 -> 0:4 240:3 | D72.10 |
 | d51a | 17 -> 13 | 19 -> 14 | A=0:8 240:1, B=0:7 240:1 -> A=0:4 240:3, B=0:3 240:3 | D72.10 |
 | D65.6 fixture | 9 -> 7 | 10 -> 8 | 0:8 240:1 -> 0:4 240:3 | D65.6 |
+
+# Item 1 review round 1 (2026-10-14) — supervisor verdicts
+
+- Tester: PASS (13/13). Free gate clean; samples 31/40, 27/34, 31/39; npm test 1,609 green; independent fresh-seed re-simulation: d51a 13, support+60 43, D33 21, HC-14 20 pass 20/20 seeds and 12/12 fresh CI batches (d51a occupancy margin thin: 96.2% vs 100% cap).
+- Auditor: PASS. All design points and A1-A11 implemented; one shared state machine; no re-pin increases HC; scope respected.
+- User-side: FAIL. Challenger (final): FAIL. Shared major, ACCEPTED -> rework round 1:
+  - R1 [major] The answer depends on a staggered start-time roster that Results never shows when Shift Placement is OFF (only source `ResultsFlow.tsx:994` reads `searchOutput.shiftPlacement`, built only with placement ON, `hc-search.ts:3558-3563` / `4516-4520`); the single-shift note (`ResultsFlow.tsx:231`) disappears, so nothing is shown. Planner rostering all at opening would fail SLA.
+  - R2 [major] Coverage OFF can be higher than ON (d51a 13 vs 19, D33 21 vs 28, support+60 43 vs 46); on-screen note `ConfigFlow.tsx ~1099` says OFF "does not lower headcount... can go up" without the reason; only PRD L33 explains.
+- Minor (backlog): Sensitivity grid cells may assume different rosters without a label (`SensitivityFlow.tsx:87-107`); no monotonicity break found in D33 volume sweep 10-24 x 3 seeds. Runtime 1.4-1.9x on large files with no HC change (support+60 1.93x, AJM_Simu 1.44x, EGS_Only 1.39x) — to owner. No direct end-to-end test for A4 (audit/N-1 roster) — add in rework. Spread helper ignores zero-count starts (harmless). Coverage-failure reason has no remedy text.
