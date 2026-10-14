@@ -1183,4 +1183,11 @@ Per-fixture diff, checkpoint vs new (sync): recommended HC, gross HC, winning ro
 | smp-support, placement OFF, coverage ON (D72.10) | 27 -> 27 | 34 -> 34 | 0:26 150:1 -> same | 21F 26F 27P 28P -> same | boundaryEvidence, searchHistory |
 | D52 siloed, placement ON (D65.4 `others` digest) | 18 -> 18 | 20 -> 20 | A=0:8 240:3, B=0:5 240:2 -> same | 15F 17F 18P 19P 20P 21P 22P -> same | boundaryEvidence, searchHistory |
 
-Reclassified (the headcount moves, so they are NOT group A): D72.10 d33 (22 -> 21, gross 24 -> 23, the same value as D33.7 / D72.6b; re-pinned with D72.11c, its async twin), D72.10 d50 (9 -> 7, gross 10 -> 8, 0:8 240:1 -> 0:4 240:3), D72.10 d51a (17 -> 13, gross 19 -> 14, A=0:8 240:1 B=0:7 240:1 -> A=0:4 240:3 B=0:3 240:3) and D65.6 (placement OFF, 9 -> 7, gross 10 -> 8). All decreases, by the same spread mechanism.
+Moved cases re-pinned with supervisor approval (the headcount moves, so they are NOT group A; old -> new in the table below and in the text): D72.10 d33 (22 -> 21, gross 24 -> 23, the same value as D33.7 / D72.6b; re-pinned with D72.11c, its async twin), D72.10 d50 (9 -> 7, gross 10 -> 8, 0:8 240:1 -> 0:4 240:3), D72.10 d51a (17 -> 13, gross 19 -> 14, A=0:8 240:1 B=0:7 240:1 -> A=0:4 240:3 B=0:3 240:3) and D65.6 (placement OFF, 9 -> 7, gross 10 -> 8). All decreases, by the same spread mechanism.
+
+| Moved case (placement OFF, coverage ON) | HC | Gross HC | Roster | Test |
+|---|---|---|---|---|
+| d33 | 22 -> 21 | 24 -> 23 | 0:21 300:1 -> 0:11 300:10 | D72.10, D72.11c |
+| d50 | 9 -> 7 | 10 -> 8 | 0:8 240:1 -> 0:4 240:3 | D72.10 |
+| d51a | 17 -> 13 | 19 -> 14 | A=0:8 240:1, B=0:7 240:1 -> A=0:4 240:3, B=0:3 240:3 | D72.10 |
+| D65.6 fixture | 9 -> 7 | 10 -> 8 | 0:8 240:1 -> 0:4 240:3 | D65.6 |

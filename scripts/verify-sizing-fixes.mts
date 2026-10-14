@@ -5194,7 +5194,9 @@ console.log('\n--- Suite D65: F3 statistics describe the adopted roster ---');
     const oa: any = await searchOptimalHCAsync(baseOf(off));
     // Re-pinned 2026-10-08 (P2-9): digest 9038b551a950a83b -> dd646445fac9906d. The recommended HC is unchanged (9); only the
     // `boundaryEvidence` block and the new `fixedShifts` field on the result differ.
-    assert(o.rosterPolish === undefined && dg(o) === 'dd646445fac9906d' && dg(oa) === dg(o), 'D65.6 placement OFF: full result pinned (P2-9: only boundaryEvidence + fixedShifts differ from the pre-change digest 9038b551a950a83b) and sync = async', `sync ${dg(o)} async ${dg(oa)}`);
+    // Re-pinned 2026-10-14 (Item 1, spread passes): digest dd646445fac9906d -> 849aa48b20e81991. The placement-OFF recommendation moved 9 -> 7 (gross 10 -> 8; the even
+    // spread 0:4 240:3 passes the gate and the confirmation block).
+    assert(o.rosterPolish === undefined && dg(o) === '849aa48b20e81991' && dg(oa) === dg(o), 'D65.6 placement OFF: full result pinned (P2-9: only boundaryEvidence + fixedShifts differ from the pre-change digest 9038b551a950a83b) and sync = async', `sync ${dg(o)} async ${dg(oa)}`);
   }
   // (i) placement stays opt-in
   assert(!DEFAULT_LABOR.shiftPlacementEnabled, 'D65.7 default labor config: shiftPlacementEnabled is OFF', `got ${String(DEFAULT_LABOR.shiftPlacementEnabled)}`);
@@ -6142,6 +6144,7 @@ console.log('\n--- Suite D72: P1-6 / L23 rescue ladder with a confirmation block
     });
 
   // ---- Recorded from the UNCHANGED code (checkpoint 7ad848f, 2026-10-08): recommended HC with Shift Placement ON, [coverage ON, coverage OFF] ----
+  // (Item 1, 2026-10-14: these stay the UNCHANGED-code values on purpose; D72.9 checks the new placement-ON answers are <= them.)
   const PRE_ON: Record<string, [number | null, number | null]> = {
     min: [9, 10], d33: [22, 21], d50: [9, 7], d50c: [29, 29], d50p: [11, 11], d51a: [17, 13], d51b: [20, 21], d52: [19, 21],
     'smp-support': [27, 28], 'smp-healthcare': [31, 31], 'smp-claims': [31, 31],
@@ -6151,8 +6154,10 @@ console.log('\n--- Suite D72: P1-6 / L23 rescue ladder with a confirmation block
     // Re-pinned 2026-10-14 (Item 1, L28 / P1-9). d33 [coverage ON]: 9bfa6b712030ca31 -> 182ef9a29f103996. The HC moved 22 -> 21 (the even spread 0:11 300:10 passes; same
     // owner-approved change as D33.7 / D72.6b); the coverage-OFF digest is unchanged.
     d33: ['182ef9a29f103996', 'e7648280481a50de'],
-    d50: ['7e51ccbdd49beee7', '99118c71f91661d0'],
-    d51a: ['5a50233e9e8ebe81', 'b039820a28ec7405'],
+    // Re-pinned 2026-10-14 (Item 1, spread passes): d50 [coverage ON] 7e51ccbdd49beee7 -> f72ba2b9f58c361a (HC 9 -> 7, gross 10 -> 8, 0:8 240:1 -> 0:4 240:3);
+    // d51a [coverage ON] 5a50233e9e8ebe81 -> f0162988cc498a17 (HC 17 -> 13, gross 19 -> 14, A=0:8 240:1 B=0:7 240:1 -> A=0:4 240:3 B=0:3 240:3). Coverage-OFF digests unchanged.
+    d50: ['f72ba2b9f58c361a', '99118c71f91661d0'],
+    d51a: ['f0162988cc498a17', 'b039820a28ec7405'],
     // Re-pinned 2026-10-14 (Item 1 A4), min [coverage ON]: 9fbac7c6e70685e6 -> dd6858f403235959 and smp-support [coverage ON]: 04e10423ae3aa168 -> e6abddaaf9f4d90e. Verified
     // checkpoint vs new: HC (9 / 27), gross HC (10 / 34), roster (0:8 240:1 / 0:26 150:1) and the history's N / passed flags are identical; only boundaryEvidence (the N-1 run
     // now uses the coverage-satisfying repair roster instead of uniform) and the failing N's history rows differ.
