@@ -7300,24 +7300,27 @@ console.log('\n--- Suite D79: start-time block and roster-source end-to-end (A12
     const failed = outH.boundaryEvidence?.failedResult;
     const nH = outH.recommendedHC ?? 0;
     const sumOf = (d: ShiftDistributionByCategory | undefined) => d ? Object.values(d).reduce((a, x) => a + x.slaps.reduce((b, s) => b + s.agentCount, 0), 0) : 0;
-    assert(!!fdr && sumOf(fdr.shiftDistributionUsed) === nH && fdr.operationalHC === nH && rosterOf(fdr.shiftDistributionUsed) === '0:5 450:5 900:5 990:5', 'D79.j A4 final audit run at N=20 ran on the winning roster', `sum=${sumOf(fdr?.shiftDistributionUsed)} n=${nH}`);
+    assert(!!fdr && sumOf(fdr.shiftDistributionUsed) === nH && fdr.operationalHC === nH && rosterOf(fdr.shiftDistributionUsed) === '0:5 450:5 900:5 990:5', 'D79.j A4 HC-14 final audit run at N=20 ran on the winning roster', `sum=${sumOf(fdr?.shiftDistributionUsed)} n=${nH}`);
   }
-  // The N-1 evidence run needs a case where the search actually judged N-1: the D33 fixture (coverage ON, 21 agents; 20 is tried and fails).
+  // The N-1 evidence run needs a case where the search actually judged N-1: support sample + answer-time 60 min, coverage ON
+  // (recommended 43; 42 is tried with the 21+21 spread and fails). HC-14 and D33 start at their floor, so N-1 is never tried there.
   {
-    const calD = { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 22 } as CalendarConfig;
-    const catD: CategoryConfig[] = [{ id: 'c1', name: 'General', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 }];
-    const ivD: StandardInterval[] = [];
-    for (let day = 0; day < 5; day++) for (let h = 8; h < 22; h++) for (let m = 0; m < 60; m += 30) ivD.push({ intervalIndex: ivD.length, start: new Date(2026, 2, 2 + day, h, m), end: new Date(2026, 2, 2 + day, h, m + 30), volume: 20, category: 'General' });
-    const pD = { intervals: ivD, openingWIP: [] as OpeningWIPCase[], categories: catD, calendar: calD, labor: { ...LABOR, dailyProductiveHours: 9 }, sla: { primaryPct: 80, primaryWindow: 4, primaryUnit: 'hours', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes', asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'next_open', occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 90, minCoverageEnabled: true } as SLAPolicyConfig, seed: 42, userMaxHC: 60, replications: 5 };
-    const dOn = searchOptimalHC(pD);
-    const dOnA: any = await searchOptimalHCAsync(pD);
-    const sumD = (d: ShiftDistributionByCategory | undefined) => d ? Object.values(d).reduce((a, x) => a + x.slaps.reduce((b, s) => b + s.agentCount, 0), 0) : 0;
-    const nD = dOn.recommendedHC ?? 0;
-    const fD = dOn.boundaryEvidence?.failedResult;
-    const histNs = dOn.searchHistory.map((h: any) => h.operationalHC ?? h.n ?? h.hc);
-    assert(nD === 21 && dOn.finalDESResult?.operationalHC === 21 && sumD(dOn.finalDESResult?.shiftDistributionUsed) === 21 && rosterOf(dOn.finalDESResult?.shiftDistributionUsed).split(' ').length >= 2, 'D79.k1 D33 coverage ON: final audit run at N=21 ran on the winning multi-start roster', `n=${nD} roster=${rosterOf(dOn.finalDESResult?.shiftDistributionUsed)}`);
-    assert(!!fD && fD.operationalHC === 20 && sumD(fD.shiftDistributionUsed) === 20 && rosterOf(fD.shiftDistributionUsed).split(' ').length >= 2, 'D79.k2 D33 coverage ON: the N-1 evidence run (N=20) ran on the multi-start roster the search tried and rejected, not the uniform fallback', `n=${fD?.operationalHC} roster=${rosterOf(fD?.shiftDistributionUsed)} history=${histNs.join(',')}`);
-    assert(rosterOf(dOnA.boundaryEvidence?.failedResult?.shiftDistributionUsed) === rosterOf(fD?.shiftDistributionUsed) && rosterOf(dOnA.finalDESResult?.shiftDistributionUsed) === rosterOf(dOn.finalDESResult?.shiftDistributionUsed), 'D79.l2 D33 async twin: audit and N-1 rosters identical to sync', `sync=${rosterOf(fD?.shiftDistributionUsed)} async=${rosterOf(dOnA.boundaryEvidence?.failedResult?.shiftDistributionUsed)}`);
+    const { rows } = buildSampleDataset('support', new Date(2026, 9, 5, 8, 0, 0, 0));
+    const ivS = mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+    const catS = discoverAndSyncCategories(ivS, DEFAULT_CATEGORIES, DEFAULT_SLA);
+    const pS = { intervals: ivS, openingWIP: [] as OpeningWIPCase[], categories: catS, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: { ...DEFAULT_SLA, minCoverageEnabled: true, boAsaEnabled: true, boAsaTarget: 60, boAsaUnit: 'minutes' as const }, seed: DEFAULT_SIM_PARAMS.seed, userMaxHC: DEFAULT_SIM_PARAMS.maxHCSearch, replications: DEFAULT_SIM_PARAMS.replications, queueArchitecture: 'pooled' as const, dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness };
+    const sOn = searchOptimalHC(pS);
+    const sOnA: any = await searchOptimalHCAsync(pS);
+    const sumS = (d: ShiftDistributionByCategory | undefined) => d ? Object.values(d).reduce((a, x) => a + x.slaps.reduce((b, s) => b + s.agentCount, 0), 0) : 0;
+    const nS = sOn.recommendedHC ?? 0;
+    const fS = sOn.boundaryEvidence?.failedResult;
+    assert(nS === 43 && sOn.finalDESResult?.operationalHC === 43 && rosterOf(sOn.finalDESResult?.shiftDistributionUsed) === '0:22 150:21', 'D79.k1 support + answer-time 60, coverage ON: final audit run at N=43 ran on the winning roster 0:22 150:21', `n=${nS} roster=${rosterOf(sOn.finalDESResult?.shiftDistributionUsed)}`);
+    assert(!!fS && fS.operationalHC === 42 && sumS(fS.shiftDistributionUsed) === 42 && rosterOf(fS.shiftDistributionUsed) === '0:21 150:21', 'D79.k2 same run: the N-1 evidence run (N=42) ran on the roster the search tried and rejected (0:21 150:21), not the uniform fallback', `n=${fS?.operationalHC} roster=${rosterOf(fS?.shiftDistributionUsed)}`);
+    assert(rosterOf(sOnA.boundaryEvidence?.failedResult?.shiftDistributionUsed) === rosterOf(fS?.shiftDistributionUsed) && rosterOf(sOnA.finalDESResult?.shiftDistributionUsed) === rosterOf(sOn.finalDESResult?.shiftDistributionUsed), 'D79.l2 same run, async twin: audit and N-1 rosters identical to sync', `sync=${rosterOf(fS?.shiftDistributionUsed)} async=${rosterOf(sOnA.boundaryEvidence?.failedResult?.shiftDistributionUsed)}`);
+    if (typeof fn === 'function') {
+      const ls = fn(sOn.finalDESResult?.shiftDistributionUsed, DEFAULT_CALENDAR);
+      assert(ls?.[0]?.text === '22 agents at 08:00, 21 agents at 10:30', 'D79.m support + answer-time 60: helper prints "22 agents at 08:00, 21 agents at 10:30" (sums to the recommended 43)', JSON.stringify(ls));
+    }
   }
 }
 
