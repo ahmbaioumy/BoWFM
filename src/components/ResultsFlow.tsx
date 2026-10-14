@@ -25,7 +25,7 @@ import { formatDateTime24, getCalendarWorkingDaysInHorizon, getDailyWindowLength
 import { resolveClockStartPolicy, verifyAgentTimelineInvariants } from '../utils/des-engine';
 import { buildBreachExportRows, buildCaseExportRows, buildSliceExportRows } from '../utils/export-rows';
 import { clampConfidenceLevelPct, effectivePrimaryTarget } from '../utils/hc-search';
-import { historyPrimaryPasses, representativeTone } from '../utils/results-display';
+import { historyPrimaryPasses, representativeTone, startTimeSplitLines, startTimeSplitNotes } from '../utils/results-display';
 import {
   Users,
   CheckCircle2,
@@ -231,6 +231,9 @@ function ResultsFlowBody({
     !Object.values(des.shiftDistributionUsed ?? {}).some((d) =>
       d.slaps.some((s) => s.startMinutesFromOpen > 0 && s.agentCount > 0)
     );
+  // Roster the recommended headcount actually passed with (final audit run); shown whenever it is not everyone at opening.
+  const startTimeLines = searchOutput.isInfeasible ? null : startTimeSplitLines(des.shiftDistributionUsed, calendar);
+  const startTimeNotes = searchOutput.isInfeasible ? null : startTimeSplitNotes(des.shiftDistributionUsed, calendar, sla.minCoverageEnabled !== false);
   const singleShiftRemedy =
     sla.minCoverageEnabled === false
       ? 'Turn the Minimum Coverage Floor on or enable Shift Placement (Labor & Config)'
@@ -666,6 +669,31 @@ function ResultsFlowBody({
               data-testid="single-shift-note"
             >
               Every agent in this result starts at opening time and leaves after their daily productive hours, so later business hours have no one on shift. That can raise the headcount needed. To staff later hours, {sla.minCoverageEnabled === false ? 'turn the Minimum Coverage Floor on or enable' : 'enable'} Shift Placement (Labor &amp; Config). Results from version 1.20 or earlier (including exported files) assumed agents stayed until closing and will differ.
+            </div>
+          )}
+
+          {startTimeLines && startTimeNotes && (
+            <div
+              className="text-xs text-indigo-900 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2.5 leading-relaxed space-y-1"
+              data-testid="start-times-block"
+            >
+              <div>
+                <strong>{startTimeNotes.heading}:</strong>
+                {startTimeLines.length === 1 && startTimeLines[0].category === null ? (
+                  <> <span data-testid="start-times-line">{startTimeLines[0].text}</span></>
+                ) : (
+                  <ul className="list-disc pl-5">
+                    {startTimeLines.map((l) => (
+                      <li key={l.category ?? 'pooled'} data-testid="start-times-line">
+                        {l.category ? <strong>{l.category}: </strong> : null}
+                        {l.text}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div>{startTimeNotes.reason}</div>
+              {startTimeNotes.spreadNote && <div data-testid="start-times-spread-note">{startTimeNotes.spreadNote}</div>}
             </div>
           )}
 

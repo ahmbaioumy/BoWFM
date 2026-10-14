@@ -7238,6 +7238,89 @@ console.log('\n--- Suite D78: spread layout when the coverage-repair roster fail
   }
 }
 
+// ---------------------------------------------------------------------------
+// Suite D79 - Item 1 rework round 1 (A12.1-A12.3): show the start times the headcount needs
+// ---------------------------------------------------------------------------
+// Results must show the roster the recommended headcount passed with (R1) and explain that coverage OFF can be
+// higher (R2). Pure text helper in results-display.ts; the roster comes from finalDESResult.shiftDistributionUsed.
+// Fail-first: before the change the helper is absent (D79.0-D79.g, D79.i fail).
+console.log('\n--- Suite D79: start-time block and roster-source end-to-end (A12) ---');
+{
+  const rdNs: any = await import('../src/utils/results-display');
+  const fn = rdNs.startTimeSplitLines as ((d: ShiftDistributionByCategory | undefined, c: CalendarConfig) => Array<{ category: string | null; text: string }> | null) | undefined;
+  const noteFn = rdNs.startTimeSplitNotes as ((d: ShiftDistributionByCategory | undefined, c: CalendarConfig, coverageOn: boolean) => { heading: string; reason: string; spreadNote: string | null } | null) | undefined;
+  assert(typeof fn === 'function' && typeof noteFn === 'function', 'D79.0 startTimeSplitLines / startTimeSplitNotes are exported from results-display.ts', `typeof=${typeof fn}/${typeof noteFn}`);
+  const mkD = (pairs: Array<[number, number]>): ShiftSlapDistribution => ({ slapMinutes: 30, slaps: pairs.map(([o, c]) => ({ startMinutesFromOpen: o, agentCount: c })) as any });
+  const calDay: CalendarConfig = { ...DEFAULT_CALENDAR, is24x7: false, dailyOpenHour: 8, dailyOpenMinute: 0, dailyCloseHour: 22, dailyCloseMinute: 0 };
+  const cal247: CalendarConfig = { ...DEFAULT_CALENDAR, is24x7: true, dailyOpenHour: 8, dailyOpenMinute: 30 };
+  if (typeof fn === 'function' && typeof noteFn === 'function') {
+    const pooled = fn({ __POOLED__: mkD([[0, 11], [300, 10]]) }, calDay);
+    assert(JSON.stringify(pooled) === JSON.stringify([{ category: null, text: '11 agents at 08:00, 10 agents at 13:00' }]), 'D79.a pooled: "11 agents at 08:00, 10 agents at 13:00"', JSON.stringify(pooled));
+    const silo = fn({ Billing: mkD([[0, 1], [60, 4]]), Claims: mkD([[0, 3], [330, 2]]) }, calDay);
+    assert(JSON.stringify(silo) === JSON.stringify([{ category: 'Billing', text: '1 agent at 08:00, 4 agents at 09:00' }, { category: 'Claims', text: '3 agents at 08:00, 2 agents at 13:30' }]), 'D79.b siloed: one line per category, sorted by name, singular "1 agent"', JSON.stringify(silo));
+    const wrap = fn({ __POOLED__: mkD([[0, 5], [450, 5], [900, 5], [990, 5]]) }, cal247);
+    assert(wrap?.[0]?.text === '5 agents at 00:00, 5 agents at 07:30, 5 agents at 15:00, 5 agents at 16:30', 'D79.c 24x7 (open treated as 00:00): 0/450/900/990 -> 00:00, 07:30, 15:00, 16:30', JSON.stringify(wrap));
+    const wrap2 = fn({ __POOLED__: mkD([[0, 2], [990, 3]]) }, { ...calDay, dailyOpenHour: 20, dailyOpenMinute: 15 });
+    assert(wrap2?.[0]?.text === '2 agents at 20:15, 3 agents at 12:45', 'D79.c2 day calendar opening 20:15: offset 990 wraps past midnight to 12:45', JSON.stringify(wrap2));
+    assert(fn({ __POOLED__: mkD([[0, 21]]) }, calDay) === null && fn({ A: mkD([[0, 4]]), B: mkD([[0, 2], [60, 0]]) }, calDay) === null, 'D79.d everyone at opening (zero-count later starts ignored) -> block hidden (null)', '');
+    assert(fn(undefined, calDay) === null && fn({}, calDay) === null, 'D79.e no distribution -> hidden (null)', '');
+    const n1 = noteFn({ __POOLED__: mkD([[0, 11], [300, 10]]) }, calDay, true);
+    assert(!!n1 && n1.heading === 'Start times this headcount needs' && n1.reason === 'Rostering everyone at opening would not meet the targets with this headcount.' && typeof n1.spreadNote === 'string' && /evenly/.test(n1.spreadNote), 'D79.f notes: heading, reason, and spread note when roster is an even split and the coverage floor is on', JSON.stringify(n1));
+    const n2 = noteFn({ __POOLED__: mkD([[0, 11], [300, 10]]) }, calDay, false);
+    const n3 = noteFn({ __POOLED__: mkD([[0, 20], [300, 1]]) }, calDay, true);
+    assert(n2?.spreadNote === null && n3?.spreadNote === null, 'D79.g no spread note when the coverage floor is off, or the roster is not an even split (repair roster)', `${n2?.spreadNote} | ${n3?.spreadNote}`);
+  }
+
+  // ---- HC-14 end-to-end (24x7, 7 days, 6 cases / 30 min, AHT 30, SLA 80% / 6 h) ----
+  const calH: CalendarConfig = { ...CAL_24X7 };
+  const ivH: StandardInterval[] = [];
+  for (let d = 0; d < 7; d++) for (let k = 0; k < 48; k++) {
+    const s = new Date(2026, 9, 12 + d, 0, k * 30);
+    ivH.push({ intervalIndex: ivH.length, start: s, end: new Date(s.getTime() + 1800000), volume: 6, category: 'General' });
+  }
+  const catH: CategoryConfig[] = [{ id: 'g', name: 'General', ahtMinutes: 30, shrinkagePct: 0.2, priority: 1 }];
+  const pH = (extra: any = {}) => ({
+    intervals: ivH, openingWIP: [] as OpeningWIPCase[], categories: catH, calendar: calH, labor: { ...DEFAULT_LABOR },
+    sla: { ...DEFAULT_SLA, minCoverageEnabled: true }, seed: 42, userMaxHC: 80, replications: 5, queueArchitecture: 'pooled' as const,
+    dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness, ...extra,
+  });
+  const outH = searchOptimalHC(pH());
+  const outHa: any = await searchOptimalHCAsync(pH());
+  const rosterOf = (d: ShiftDistributionByCategory | undefined) => d ? Object.keys(d).sort().map((k) => [...d[k].slaps].sort((a, b) => a.startMinutesFromOpen - b.startMinutesFromOpen).map((s) => `${s.startMinutesFromOpen}:${s.agentCount}`).join(' ')).join(' | ') : 'uniform';
+  assert(outH.recommendedHC === 20 && rosterOf(outH.finalDESResult?.shiftDistributionUsed) === '0:5 450:5 900:5 990:5', 'D79.h HC-14 (Shift Placement off, coverage on): the result exposes roster 0:5 450:5 900:5 990:5 at HC 20', `hc=${outH.recommendedHC} roster=${rosterOf(outH.finalDESResult?.shiftDistributionUsed)}`);
+  assert(outHa.recommendedHC === 20 && rosterOf(outHa.finalDESResult?.shiftDistributionUsed) === '0:5 450:5 900:5 990:5', 'D79.h2 async twin exposes the same roster', `hc=${outHa.recommendedHC} roster=${rosterOf(outHa.finalDESResult?.shiftDistributionUsed)}`);
+  if (typeof fn === 'function') {
+    const lines = fn(outH.finalDESResult?.shiftDistributionUsed, calH);
+    assert(!!lines && lines.length === 1 && lines[0].text === '5 agents at 00:00, 5 agents at 07:30, 5 agents at 15:00, 5 agents at 16:30', 'D79.i HC-14: the helper prints 4 start times from the real result', JSON.stringify(lines));
+  } else assert(false, 'D79.i HC-14 helper text', 'startTimeSplitLines is missing');
+
+  // ---- A4: the final audit run and the N-1 evidence run use the roster the search judged them with ----
+  {
+    const fdr = outH.finalDESResult;
+    const failed = outH.boundaryEvidence?.failedResult;
+    const nH = outH.recommendedHC ?? 0;
+    const sumOf = (d: ShiftDistributionByCategory | undefined) => d ? Object.values(d).reduce((a, x) => a + x.slaps.reduce((b, s) => b + s.agentCount, 0), 0) : 0;
+    assert(!!fdr && sumOf(fdr.shiftDistributionUsed) === nH && fdr.operationalHC === nH && rosterOf(fdr.shiftDistributionUsed) === '0:5 450:5 900:5 990:5', 'D79.j A4 final audit run at N=20 ran on the winning roster', `sum=${sumOf(fdr?.shiftDistributionUsed)} n=${nH}`);
+  }
+  // The N-1 evidence run needs a case where the search actually judged N-1: the D33 fixture (coverage ON, 21 agents; 20 is tried and fails).
+  {
+    const calD = { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 22 } as CalendarConfig;
+    const catD: CategoryConfig[] = [{ id: 'c1', name: 'General', ahtMinutes: 20, shrinkagePct: 0.1, priority: 1 }];
+    const ivD: StandardInterval[] = [];
+    for (let day = 0; day < 5; day++) for (let h = 8; h < 22; h++) for (let m = 0; m < 60; m += 30) ivD.push({ intervalIndex: ivD.length, start: new Date(2026, 2, 2 + day, h, m), end: new Date(2026, 2, 2 + day, h, m + 30), volume: 20, category: 'General' });
+    const pD = { intervals: ivD, openingWIP: [] as OpeningWIPCase[], categories: catD, calendar: calD, labor: { ...LABOR, dailyProductiveHours: 9 }, sla: { primaryPct: 80, primaryWindow: 4, primaryUnit: 'hours', boAsaEnabled: false, boAsaTarget: 60, boAsaUnit: 'minutes', asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'next_open', occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 90, minCoverageEnabled: true } as SLAPolicyConfig, seed: 42, userMaxHC: 60, replications: 5 };
+    const dOn = searchOptimalHC(pD);
+    const dOnA: any = await searchOptimalHCAsync(pD);
+    const sumD = (d: ShiftDistributionByCategory | undefined) => d ? Object.values(d).reduce((a, x) => a + x.slaps.reduce((b, s) => b + s.agentCount, 0), 0) : 0;
+    const nD = dOn.recommendedHC ?? 0;
+    const fD = dOn.boundaryEvidence?.failedResult;
+    const histNs = dOn.searchHistory.map((h: any) => h.operationalHC ?? h.n ?? h.hc);
+    assert(nD === 21 && dOn.finalDESResult?.operationalHC === 21 && sumD(dOn.finalDESResult?.shiftDistributionUsed) === 21 && rosterOf(dOn.finalDESResult?.shiftDistributionUsed).split(' ').length >= 2, 'D79.k1 D33 coverage ON: final audit run at N=21 ran on the winning multi-start roster', `n=${nD} roster=${rosterOf(dOn.finalDESResult?.shiftDistributionUsed)}`);
+    assert(!!fD && fD.operationalHC === 20 && sumD(fD.shiftDistributionUsed) === 20 && rosterOf(fD.shiftDistributionUsed).split(' ').length >= 2, 'D79.k2 D33 coverage ON: the N-1 evidence run (N=20) ran on the multi-start roster the search tried and rejected, not the uniform fallback', `n=${fD?.operationalHC} roster=${rosterOf(fD?.shiftDistributionUsed)} history=${histNs.join(',')}`);
+    assert(rosterOf(dOnA.boundaryEvidence?.failedResult?.shiftDistributionUsed) === rosterOf(fD?.shiftDistributionUsed) && rosterOf(dOnA.finalDESResult?.shiftDistributionUsed) === rosterOf(dOn.finalDESResult?.shiftDistributionUsed), 'D79.l2 D33 async twin: audit and N-1 rosters identical to sync', `sync=${rosterOf(fD?.shiftDistributionUsed)} async=${rosterOf(dOnA.boundaryEvidence?.failedResult?.shiftDistributionUsed)}`);
+  }
+}
+
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');

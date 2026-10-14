@@ -1095,8 +1095,8 @@ export function ConfigFlow({
                     data-testid="coverage-floor-off-note"
                   >
                     {calendar.is24x7
-                      ? 'Coverage floor is off: nothing checks that agents are on shift while the business is open. (This is not the Workload Floor switch.)'
-                      : 'Coverage floor is off. This does not lower headcount: with no later starts, every agent works one shift from opening time and leaves when it ends, so later hours are unstaffed. Headcount can go up, and a short SLA can become unreachable at any headcount. (This is not the Workload Floor switch.)'}
+                      ? 'Coverage floor is off: nothing checks that agents are on shift while the business is open. With the floor ON the search also tries spreading start times evenly, so turning it OFF can give a higher headcount. (This is not the Workload Floor switch.)'
+                      : 'Coverage floor is off. This does not lower headcount: with no later starts, every agent works one shift from opening time and leaves when it ends, so later hours are unstaffed. Headcount can go up, and a short SLA can become unreachable at any headcount. With the floor ON the search also tries spreading start times evenly, so turning it OFF can give a higher headcount. (This is not the Workload Floor switch.)'}
                   </div>
                 )}
               </div>
