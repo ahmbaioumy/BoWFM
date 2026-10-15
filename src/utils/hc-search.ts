@@ -903,9 +903,13 @@ export function deriveConfirmationBaseSeed(seed: number): number {
 }
 
 /**
- * The confirmation block: R case sets from the derived seed, built ONCE per search (lazily, the first
- * time a rung clears the primary block) and reused for every candidate N and rung, so Common Random
- * Numbers holds inside the block. The single constructor both searches use.
+ * The confirmation block: R case sets from the derived seed. Generated lazily on the first sets() call and
+ * held until release(); the searches call release() after every confirmation evaluation, so the block is
+ * resident only while a confirmation stage runs (item 2 rework C1: the whole block used to stay in memory
+ * for the entire search, +1 GB on the largest file). Regeneration is deterministic from the derived seed,
+ * so every confirmation evaluation, at any N and rung, sees byte-identical sets: Common Random Numbers holds
+ * inside the block. Without release() the block is built once and reused. The single constructor both
+ * searches use.
  */
 export function createConfirmationBlock(params: {
   intervals: StandardInterval[];
@@ -915,7 +919,7 @@ export function createConfirmationBlock(params: {
   sla: SLAPolicyConfig;
   seed: number;
   replications: number;
-}): { baseSeed: number; sets: () => PrecomputedCaseSet[] } {
+}): { baseSeed: number; sets: () => PrecomputedCaseSet[]; release: () => void } {
   const baseSeed = deriveConfirmationBaseSeed(params.seed);
   let built: PrecomputedCaseSet[] | null = null;
   return {
@@ -933,6 +937,9 @@ export function createConfirmationBlock(params: {
         });
       }
       return built;
+    },
+    release: () => {
+      built = null;
     },
   };
 }
@@ -1055,7 +1062,7 @@ export function resolveRescueEvaluation(
     replications: number;
     baseSeed: number;
     precomputedCaseSets: PrecomputedCaseSet[];
-    confirmation: { baseSeed: number; sets: () => PrecomputedCaseSet[] };
+    confirmation: { baseSeed: number; sets: () => PrecomputedCaseSet[]; release?: () => void };
   }
 ): { sla: SLAPolicyConfig; categories: CategoryConfig[]; replications: number; baseSeed: number; precomputedCaseSets: PrecomputedCaseSet[] } {
   if (stage === 'screen') {
@@ -3098,7 +3105,7 @@ export function searchOptimalHC(params: {
   // Which layout produced that roster (A13.1); same shared classifier in the sync and async search.
   const winningLayoutByN = new Map<number, WinningLayout>();
 
-  // Rescue ladder confirmation block (PRD P1-6): built lazily, once per search, shared by every N and rung.
+  // Rescue ladder confirmation block (PRD P1-6): same sets for every N and rung (CRN), regenerated per confirmation stage and released after it (item 2 rework C1).
   const rescueConfirmation = createConfirmationBlock({ intervals, openingWIP, categories, calendar, sla, seed, replications: R });
   const rescueCtx = { sla, categories, replications: R, baseSeed: seed, precomputedCaseSets, confirmation: rescueConfirmation };
   // Coverage-satisfying roster whose failure is reported at an N where nothing passed (repair / spread layout; A4). Not set for passing Ns.
@@ -3139,6 +3146,7 @@ export function searchOptimalHC(params: {
             ? resolveRescueEvaluation('confirm', rescueCtx)
             : { sla, categories, replications: rToUse, baseSeed: seed, precomputedCaseSets }),
         }));
+        if (stage === 'confirm') rescueConfirmation.release();
       }
       const out = gate.result();
       if (out.confirmationGate !== null && !confirmationFailure) confirmationFailure = { res: out.failed!, roster, gate: out.confirmationGate };
@@ -3166,6 +3174,7 @@ export function searchOptimalHC(params: {
             ? resolveRescueEvaluation('confirm', rescueCtx)
             : { sla, categories, replications: rToUse, baseSeed: seed, precomputedCaseSets }),
         }));
+        if (step.stage === 'confirm') rescueConfirmation.release();
       }
       const spreadOutcome = spreadSearch.result();
       if (spreadOutcome.adopted) {
@@ -3227,6 +3236,7 @@ export function searchOptimalHC(params: {
           operationalHC: n, intervals, openingWIP, calendar, labor, queueArchitecture, shiftDistribution: c.roster, dispatchFairness,
           ...resolveRescueEvaluation(c.stage, rescueCtx),
         }));
+        if (c.stage === 'confirm') rescueConfirmation.release();
       }
       const rescued = rescue.result().winner;
       if (rescued) {
@@ -3241,7 +3251,7 @@ export function searchOptimalHC(params: {
     let confirmationOnlyGate: string | undefined;
     if (!finalRes.passesAllConstraints && confirmationFailure) {
       finalRes = confirmationFailure.res;
-      reportedDist = confirmationFailure.roster;
+      reportedDist = confirmationFailure.roster ?? reportedDist; // a uniform layout (roster undefined) must not erase the coverage-satisfying roster already recorded
       repairReasons = confirmationFailure.res.failingReasons;
       confirmationOnlyGate = confirmationFailure.gate;
     }
@@ -3424,8 +3434,14 @@ export function searchOptimalHC(params: {
         shiftDistribution: roster, dispatchFairness,
       });
       // P1-7: confirmation block evaluations (own map, never mixed into candidateEvals); baseline = the unpolished roster, evaluated lazily at the first primary pass.
-      const confirmCtx = resolveRescueEvaluation('confirm', { sla, categories, replications: R, baseSeed: seed, precomputedCaseSets, confirmation: rescueConfirmation });
-      const confirmEval = (roster: ShiftDistributionByCategory | undefined) => evaluateCandidateStatistical({ operationalHC: recommendedHC, intervals, openingWIP, calendar, labor, queueArchitecture, shiftDistribution: roster, dispatchFairness, ...confirmCtx });
+      // The block is regenerated for each evaluation and released right after (item 2 rework C1: not resident between runs).
+      const confirmEval = (roster: ShiftDistributionByCategory | undefined) => {
+        try {
+          return evaluateCandidateStatistical({ operationalHC: recommendedHC, intervals, openingWIP, calendar, labor, queueArchitecture, shiftDistribution: roster, dispatchFairness, ...resolveRescueEvaluation('confirm', rescueCtx) });
+        } finally {
+          rescueConfirmation.release();
+        }
+      };
       const confirmRoster = (key: string, roster: ShiftDistributionByCategory | undefined) => {
         let e = confirmEvals.get(key);
         if (!e) {
@@ -3589,6 +3605,7 @@ export function searchOptimalHC(params: {
       rawOccupancyPct: e.representativeResult.rawOccupancyPct,
       passed: e.passesAllConstraints,
       failingReasons: e.failingReasons,
+      ...(confirmationOnlyGateByN.has(hc) ? { confirmationOnlyFailure: true } : {}),
     });
   }
 
@@ -3889,7 +3906,7 @@ export async function searchOptimalHCAsync(params: {
   // Which layout produced that roster (A13.1); same shared classifier in the sync and async search.
   const winningLayoutByN = new Map<number, WinningLayout>();
 
-  // Rescue ladder confirmation block (PRD P1-6): built lazily, once per search, shared by every N and rung.
+  // Rescue ladder confirmation block (PRD P1-6): same sets for every N and rung (CRN), regenerated per confirmation stage and released after it (item 2 rework C1).
   const rescueConfirmation = createConfirmationBlock({ intervals, openingWIP, categories, calendar, sla, seed, replications: R });
   const rescueCtx = { sla, categories, replications: R, baseSeed: seed, precomputedCaseSets, confirmation: rescueConfirmation };
   // Coverage-satisfying roster whose failure is reported at an N where nothing passed (repair / spread layout; A4). Not set for passing Ns.
@@ -3970,6 +3987,7 @@ export async function searchOptimalHCAsync(params: {
             ? resolveRescueEvaluation('confirm', rescueCtx)
             : { sla, categories, replications: rToUse, baseSeed: seed, precomputedCaseSets }),
         }));
+        if (stage === 'confirm') rescueConfirmation.release();
       }
       const out = gate.result();
       if (out.confirmationGate !== null && !confirmationFailure) confirmationFailure = { res: out.failed!, roster, gate: out.confirmationGate };
@@ -4012,6 +4030,7 @@ export async function searchOptimalHCAsync(params: {
             ? resolveRescueEvaluation('confirm', rescueCtx)
             : { sla, categories, replications: rToUse, baseSeed: seed, precomputedCaseSets }),
         }));
+        if (step.stage === 'confirm') rescueConfirmation.release();
       }
       const spreadOutcome = spreadSearch.result();
       if (spreadOutcome.adopted) {
@@ -4101,6 +4120,7 @@ export async function searchOptimalHCAsync(params: {
           },
           ...resolveRescueEvaluation(c.stage, rescueCtx),
         }));
+        if (c.stage === 'confirm') rescueConfirmation.release();
       }
       const rescued = rescue.result().winner;
       if (rescued) {
@@ -4114,7 +4134,7 @@ export async function searchOptimalHCAsync(params: {
     let confirmationOnlyGate: string | undefined;
     if (!finalRes.passesAllConstraints && confirmationFailure) {
       finalRes = confirmationFailure.res;
-      reportedDist = confirmationFailure.roster;
+      reportedDist = confirmationFailure.roster ?? reportedDist; // a uniform layout (roster undefined) must not erase the coverage-satisfying roster already recorded
       repairReasons = confirmationFailure.res.failingReasons;
       confirmationOnlyGate = confirmationFailure.gate;
     }
@@ -4347,7 +4367,6 @@ export async function searchOptimalHCAsync(params: {
         });
       };
       // P1-7: confirmation block evaluations (own map, never mixed into candidateEvals); same rule as the sync twin, evaluator awaited, cancel honoured between runs.
-      const confirmCtx = resolveRescueEvaluation('confirm', { sla, categories, replications: R, baseSeed: seed, precomputedCaseSets, confirmation: rescueConfirmation });
       const confirmEval = async (roster: ShiftDistributionByCategory | undefined, movesNow: number) => {
         if (shouldCancel?.()) throw new Error('SIMULATION_CANCELLED');
         onProgress?.({
@@ -4360,11 +4379,17 @@ export async function searchOptimalHCAsync(params: {
           evaluatedHistory: buildHistorySnapshot(),
           currentMessage: `Confirming the polished roster on fresh days at N = ${recommendedHC} (${movesNow} of ${plan.totalMoves} moves)...`,
         });
-        return evaluateCandidateStatisticalAsync({
-          operationalHC: recommendedHC, intervals, openingWIP, categories: confirmCtx.categories, calendar, labor, sla: confirmCtx.sla,
-          baseSeed: confirmCtx.baseSeed, replications: confirmCtx.replications, queueArchitecture, precomputedCaseSets: confirmCtx.precomputedCaseSets,
-          shouldCancel, shiftDistribution: roster, dispatchFairness,
-        });
+        // Regenerated per evaluation and released right after (item 2 rework C1), same as the sync twin.
+        const confirmCtx = resolveRescueEvaluation('confirm', rescueCtx);
+        try {
+          return await evaluateCandidateStatisticalAsync({
+            operationalHC: recommendedHC, intervals, openingWIP, categories: confirmCtx.categories, calendar, labor, sla: confirmCtx.sla,
+            baseSeed: confirmCtx.baseSeed, replications: confirmCtx.replications, queueArchitecture, precomputedCaseSets: confirmCtx.precomputedCaseSets,
+            shouldCancel, shiftDistribution: roster, dispatchFairness,
+          });
+        } finally {
+          rescueConfirmation.release();
+        }
       };
       const confirmRoster = async (key: string, roster: ShiftDistributionByCategory | undefined, movesNow: number) => {
         let e = confirmEvals.get(key);
@@ -4546,6 +4571,7 @@ export async function searchOptimalHCAsync(params: {
       rawOccupancyPct: e.representativeResult.rawOccupancyPct,
       passed: e.passesAllConstraints,
       failingReasons: e.failingReasons,
+      ...(confirmationOnlyGateByN.has(hc) ? { confirmationOnlyFailure: true } : {}),
     });
   }
 

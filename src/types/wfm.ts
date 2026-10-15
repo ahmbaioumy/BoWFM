@@ -654,6 +654,8 @@ export interface HCSearchOutput {
     rawOccupancyPct: number;
     passed: boolean;
     failingReasons: string[];
+    /** True only when this N cleared the main simulated days and failed the second, independent set; the reason's numbers are the second set's (item 2 rework C3). */
+    confirmationOnlyFailure?: boolean;
   }>;
   finalDESResult?: DESResult;
   staffing?: StaffingRequirement;
@@ -688,7 +690,7 @@ export interface HCSearchOutput {
   rosterPolish?: RosterPolishResult;
   /**
    * P1-7: the polish was checked on the confirmation block (fresh case sets) against the unpolished roster.
-   * `baselinePasses` = the unpolished roster passes the unmodified gate there (false = headcount marginal on fresh days, open item P1-7-a);
+   * `baselinePasses` = the unpolished roster passes the unmodified gate there (false = headcount marginal on fresh days; the headcount itself is already confirmed on two sets, L25 / P1-8);
    * `adoptedPasses` = the roster kept (adopted polish, or the unpolished one) passes it; `evaluations` = extra full-R runs spent.
    * Present only when a polish candidate passed the primary gate. Not shown in the UI.
    */

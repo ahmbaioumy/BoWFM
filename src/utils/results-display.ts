@@ -36,6 +36,23 @@ export function historyPrimaryPasses(
   return row.primaryPct >= policyTargetPct;
 }
 
+/** Results line near the recommended headcount (item 2 rework C2); shown only when a recommendation exists. */
+export const CONFIRMED_TWO_SETS_TEXT = 'Confirmed on two independent sets of simulated days.';
+
+/** Status badge for a search-history row whose N cleared the main simulated days but failed the second set (amber, not red). */
+export const HISTORY_SECOND_SET_BADGE = 'Fail – 2nd set';
+
+/** Prefix that labels the numbers quoted in a confirmation-only failure reason as the second set's, not the main days'. */
+export const HISTORY_SECOND_SET_PREFIX = 'Figures quoted here are from the second set, not the main days. ';
+
+/**
+ * Reason text for a history row. A confirmation-only failure (engine flag, no string matching) is prefixed so the
+ * quoted numbers are read as the second set's; every other row is returned unchanged.
+ */
+export function historyReasonText(reason: string, row: { confirmationOnlyFailure?: boolean }): string {
+  return row.confirmationOnlyFailure ? `${HISTORY_SECOND_SET_PREFIX}${reason}` : reason;
+}
+
 /**
  * Tone for a representative-run SLA figure: 'ok' at/above target, 'amber' when below
  * target but the recommendation passed the confidence gate (engine supplied an

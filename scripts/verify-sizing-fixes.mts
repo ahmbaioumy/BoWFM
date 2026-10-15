@@ -7569,6 +7569,26 @@ console.log('\n--- Suite D81: reliable minimum - a passing headcount also passes
     assert(!!mb && !!m27 && mb[2] === m27[2], 'D81.a5 the evidence text and the history row quote the SAME failing gate line', `${mb?.[2]} | ${m27?.[2]}`);
     assert(starts >= 2, 'D81.a6 the N-1 evidence run uses the layout that passed the main days (a multi-start coverage roster), not the uniform one', `starts=${starts}`);
   }
+  // ---- D81.k rework round 1 (2026-10-15): C2 Results line, C3 history flag/badge, C1 block released between confirmation stages ----
+  {
+    const rdK: any = await import('../src/utils/results-display');
+    const rfK = readFileSync(join(resolve(import.meta.dirname, '..'), 'src', 'components', 'ResultsFlow.tsx'), 'utf-8');
+    assert(rdK.CONFIRMED_TWO_SETS_TEXT === 'Confirmed on two independent sets of simulated days.', 'D81.k1 C2 results-display exports the exact line "Confirmed on two independent sets of simulated days."', String(rdK.CONFIRMED_TWO_SETS_TEXT));
+    assert(/!isInfeasible && searchOutput\.recommendedHC !== null && \([\s\S]{0,200}CONFIRMED_TWO_SETS_TEXT/.test(rfK), 'D81.k2 C2 ResultsFlow renders the line only when a recommendation exists (feasible and recommendedHC set)', '');
+    const flagged = (sup.searchHistory as any[]).filter((h) => h.confirmationOnlyFailure === true);
+    assert(flagged.length >= 1 && flagged.every((h) => h.passed === false && h.failingReasons.length === 1 && !!CONF_RE.exec(h.failingReasons[0])) && row27?.confirmationOnlyFailure === true, 'D81.k3 C3 the engine flags the N=27 row (confirmation-only failure) on the history entry; no string matching in the UI', JSON.stringify(flagged.map((h) => h.hc)));
+    assert((sup.searchHistory as any[]).filter((h) => h.confirmationOnlyFailure !== true).every((h) => !CONF_RE.test(h.failingReasons[0] ?? '')) && (sup.searchHistory as any[]).every((h) => h.passed ? h.confirmationOnlyFailure === undefined : true), 'D81.k4 C3 every other row (passes, plain misses) carries no flag', '');
+    assert(supA.searchHistory.find((h: any) => h.hc === 27)?.confirmationOnlyFailure === true, 'D81.k5 C3 async search flags the same row', '');
+    assert(rdK.HISTORY_SECOND_SET_BADGE === 'Fail – 2nd set' && rdK.historyReasonText('R', { confirmationOnlyFailure: true }) === rdK.HISTORY_SECOND_SET_PREFIX + 'R' && rdK.historyReasonText('R', {}) === 'R' && rdK.historyReasonText('R', { confirmationOnlyFailure: false }) === 'R', 'D81.k6 C3 helper: flagged reason gets the second-set prefix, other reasons unchanged', rdK.HISTORY_SECOND_SET_PREFIX);
+    assert(/item\.confirmationOnlyFailure \? \( <span className="[^"]*text-amber[^"]*"[^>]*> <AlertTriangle[^>]*\/> \{HISTORY_SECOND_SET_BADGE\}/.test(rfK.replace(/\s+/g, ' ')), 'D81.k7 C3 ResultsFlow shows the amber "Fail - 2nd set" badge on the flag (red Fail otherwise); main-days cells keep their colours (historyPrimaryPasses unchanged)', '');
+    // C1: the block is not resident between confirmation stages; regenerated sets are byte-identical
+    const cbK = hcNs.createConfirmationBlock({ intervals: ivSup, openingWIP: [], categories: catSup, calendar: DEFAULT_CALENDAR, sla: DEFAULT_SLA, seed: DEFAULT_SIM_PARAMS.seed, replications: 4 });
+    const caseDigestK = (sets: any[]) => sets.map((x) => createHash('sha1').update(JSON.stringify(x.cases.map((c: any) => [c.category, c.arrival.getTime(), c.totalAhtMinutes]))).digest('hex').slice(0, 12));
+    const k1 = cbK.sets(); const d1 = JSON.stringify(caseDigestK(k1));
+    cbK.release();
+    const k2 = cbK.sets();
+    assert(typeof cbK.release === 'function' && k2 !== k1 && JSON.stringify(caseDigestK(k2)) === d1 && cbK.sets() === k2, 'D81.k8 C1 release() drops the block (next sets() is a new array) and the regenerated sets are identical; without release() the block is reused', '');
+  }
   // progress + leap probes
   {
     const conf = events.filter((e) => e.msg.includes('Confirming on a second set of simulated days'));

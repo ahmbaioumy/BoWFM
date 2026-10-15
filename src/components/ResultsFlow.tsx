@@ -25,7 +25,7 @@ import { formatDateTime24, getCalendarWorkingDaysInHorizon, getDailyWindowLength
 import { resolveClockStartPolicy, verifyAgentTimelineInvariants } from '../utils/des-engine';
 import { buildBreachExportRows, buildCaseExportRows, buildSliceExportRows } from '../utils/export-rows';
 import { clampConfidenceLevelPct, effectivePrimaryTarget } from '../utils/hc-search';
-import { historyPrimaryPasses, representativeTone, startTimeSplitLines, startTimeSplitNotes } from '../utils/results-display';
+import { CONFIRMED_TWO_SETS_TEXT, HISTORY_SECOND_SET_BADGE, historyPrimaryPasses, historyReasonText, representativeTone, startTimeSplitLines, startTimeSplitNotes } from '../utils/results-display';
 import {
   Users,
   CheckCircle2,
@@ -788,6 +788,11 @@ function ResultsFlowBody({
                         {recommendedN ? `N = ${recommendedN}` : '—'}
                       </span>
                       <span className="text-[10px] text-blue-600">Optimal result</span>
+                      {!isInfeasible && searchOutput.recommendedHC !== null && (
+                        <span className="text-[10px] text-blue-700 mt-1 block leading-snug" data-testid="confirmed-two-sets">
+                          {CONFIRMED_TWO_SETS_TEXT}
+                        </span>
+                      )}
                     </div>
                     <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 text-center">
                       <span className="text-[10px] font-bold text-slate-600 uppercase tracking-wider block">
@@ -884,6 +889,11 @@ function ResultsFlowBody({
                                       <CheckCircle2 className="w-3 h-3 text-emerald-600" />
                                       PASS
                                     </span>
+                                  ) : item.confirmationOnlyFailure ? (
+                                    <span className="inline-flex items-center gap-1 text-[10px] text-amber-800 bg-amber-100 px-1.5 py-0.5 rounded" data-testid="history-fail-second-set">
+                                      <AlertTriangle className="w-3 h-3 text-amber-600" />
+                                      {HISTORY_SECOND_SET_BADGE}
+                                    </span>
                                   ) : (
                                     <span className="inline-flex items-center gap-1 text-[10px] text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded">
                                       <AlertTriangle className="w-3 h-3 text-rose-500" />
@@ -896,8 +906,8 @@ function ResultsFlowBody({
                                     <span className="text-slate-300">—</span>
                                   ) : (
                                     item.failingReasons.map((reason, rIdx) => (
-                                      <div key={rIdx} className="text-[10px] text-rose-600 leading-snug">
-                                        {reason}
+                                      <div key={rIdx} className={`text-[10px] leading-snug ${item.confirmationOnlyFailure ? 'text-amber-800' : 'text-rose-600'}`}>
+                                        {historyReasonText(reason, item)}
                                       </div>
                                     ))
                                   )}
