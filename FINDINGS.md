@@ -1217,3 +1217,27 @@ Moved cases re-pinned with supervisor approval (the headcount moves, so they are
 - Builder deviation accepted: D65/D72 digest helpers skip the display-only `winningLayout` key (old digests still pass → nothing else moved).
 - Backlog (minor): split Coverage-OFF parenthetical into its own sentence; polish adoption always gets neutral wording (conservative); reason line says "targets" where coverage is the failing one; add a real siloed end-to-end check that listed seats sum to HC; seat counts depend on non-null agent categories (no path found today); Sensitivity grid layout labels (L34); runtime 1.4-1.9x on large files (owner); spread with coverage OFF (owner follow-up).
 - Supervisor verdict: ready for owner approval.
+
+# Item 2 build — before/after measurements (2026-10-15)
+
+Idle machine apart from other sessions' light load, one job at a time, sync search (Sensitivity: async, 25 cells), default settings unless stated. Before = HEAD 4dc1c8c, after = working tree with the confirmation rule. Wall time in seconds (CPU time is within 10 % of it).
+
+| Case | HC before -> after | Gross before -> after | Wall before -> after (s) | Ratio | Peak RSS before -> after (MB) |
+|---|---|---|---|---|---|
+| claims | 31 -> 31 | 40 -> 40 | 2.1 -> 3.7 | 1.8 (tiny run, noise) | 129 -> 148 |
+| support | 27 -> **28** | 34 -> **35** | 11.9 -> 8.3 | 0.7 | 131 -> 153 |
+| healthcare | 31 -> 31 | 39 -> 39 | 23.9 -> 18.2 | 0.8 | 145 -> 181 |
+| support + answer-time 60 | 43 -> 43 | 54 -> 54 | 31.7 -> 25.4 | 0.8 | 164 -> 156 |
+| AJM_Only | 16 -> 16 | 20 -> 20 | 17.6 -> 16.9 | 1.0 | 174 -> 221 |
+| AJM_Only + answer-time 60 | 28 -> 28 | 35 -> 35 | 62.9 -> 68.6 | 1.1 | 171 -> 226 |
+| AJM_Simu | 123 -> 123 | 154 -> 154 | 413 -> 317 | 0.8 | 1,706 -> 2,461 |
+| EGS_Only | 100 -> 100 | 125 -> 125 | 441 -> 577 | **1.31** | 1,408 -> 2,419 |
+| HC-14 (24x7, coverage ON) | 20 -> 20 | 35 -> 35 | 1.15 -> 1.28 | 1.1 | 121 -> 122 |
+| D33 fixture (coverage ON) | 21 -> 21 | 23 -> 23 | 2.5 -> 1.6 | 0.6 | 132 -> 127 |
+| Sensitivity grid, support sample, 25 cells | only centre cell 27/34 -> 28/35, 24 others identical | | 219 -> 315 | **1.44** | n/a |
+
+- Worst ratio 1.44 (Sensitivity grid), 1.31 (EGS_Only); none above the 1.5x flag or the 2.0x hard limit. EGS_Only did not run out of memory (peak RSS 2.4 GB vs 1.4 GB before: the confirmation block holds a second set of R case sets). The single-run ratios below 1 are because the higher support answer ends the walk earlier and because other sessions loaded the machine unevenly; treat 0.6-1.1 as noise.
+- Only support (and the Sensitivity centre cell, same data) moved, upwards by one agent (rule: HC may rise by the confirmation rule, never drop). No HC dropped anywhere.
+- Fresh-seed proof (suite D81.c, 10 seeds independent of the primary and confirmation blocks): support at 28 passes 10/10; the old answer 27 (its coverage-repair roster) passes 5/10 on the same seeds (probe p1.mts earlier: 8/20).
+- Mutations (D81 on a scratch copy, one confirmation dropped at a time): uniform sync -> 4 failures, repair sync -> 6, placement sync -> 2, uniform async -> 2, repair async -> 4, placement async -> 1; unmutated copy 37/37.
+- Existing pin that moved: D78.e support 27 / 34 -> 28 / 35 (confirmation result: 27 clears the main days at category CI low 80.0 but fails the second set).

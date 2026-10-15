@@ -3355,7 +3355,8 @@ console.log('\n--- Suite D45: availableMinutes accrual ---');
   // disappeared — it was never released).
   const SAMPLE_PINS: Record<string, [number, number, number]> = {
     'claims/pooled': [30, 31, 40], 'claims/siloed': [30, 31, 40],
-    'support/pooled': [20, 27, 34], 'support/siloed': [20, 21, 26],
+    'support/pooled': [20, 28, 35], // Re-pinned 2026-10-14 (Item 2): 27/34 -> 28/35, 27 clears the main days but not the confirmation block
+    'support/siloed': [20, 21, 26],
     'healthcare/pooled': [18, 31, 39], 'healthcare/siloed': [18, 27, 34],
   };
   for (const type of ['claims', 'support', 'healthcare'] as const) {
@@ -6148,9 +6149,10 @@ console.log('\n--- Suite D72: P1-6 / L23 rescue ladder with a confirmation block
 
   // ---- Recorded from the UNCHANGED code (checkpoint 7ad848f, 2026-10-08): recommended HC with Shift Placement ON, [coverage ON, coverage OFF] ----
   // (Item 1, 2026-10-14: these stay the UNCHANGED-code values on purpose; D72.9 checks the new placement-ON answers are <= them.)
+  // Re-pinned 2026-10-14 (Item 2): smp-support [coverage ON] 27 -> 28 - the confirmation rule raises the answer by one (27 fails the second set), so the never-worse bound moves with it.
   const PRE_ON: Record<string, [number | null, number | null]> = {
     min: [9, 10], d33: [22, 21], d50: [9, 7], d50c: [29, 29], d50p: [11, 11], d51a: [17, 13], d51b: [20, 21], d52: [19, 21],
-    'smp-support': [27, 28], 'smp-healthcare': [31, 31], 'smp-claims': [31, 31],
+    'smp-support': [28, 28], 'smp-healthcare': [31, 31], 'smp-claims': [31, 31],
   };
   // ---- Shift Placement OFF controls: full-result digests recorded from the UNCHANGED code, [coverage ON, coverage OFF] ----
   const OFF_CTRL: Record<string, [string, string]> = {
@@ -6166,7 +6168,8 @@ console.log('\n--- Suite D72: P1-6 / L23 rescue ladder with a confirmation block
     // now uses the coverage-satisfying repair roster instead of uniform) and the failing N's history rows differ.
     min: ['dd6858f403235959', 'fd7188fda9d2d415'],
     'smp-claims': ['c817d697e8592d00', '5ebe0d840e798f15'],
-    'smp-support': ['e6abddaaf9f4d90e', 'cca2b247a10fb364'],
+    // Re-pinned 2026-10-14 (Item 2) smp-support [coverage ON]: e6abddaaf9f4d90e -> bbe42346e24279eb (HC 27 -> 28, gross 34 -> 35: 27 clears the main days but not the confirmation block). Coverage-OFF digest unchanged.
+    'smp-support': ['bbe42346e24279eb', 'cca2b247a10fb364'],
   };
 
   // ============================================================================================
