@@ -1334,3 +1334,9 @@ Ticked: claims with Claims_Life 90: 31 / 40 (unchanged). Support + 60 with Billi
 Answer time OFF (must be byte-identical to 24c21f2): sha256 of the full result equal for claims (5,088,244 B), support (6,615,310 B), healthcare (9,151,188 B), AJM_Only (12,192,681 B).
 
 Mutation (scratch copy, D82 alone): pooled gate restored in place of the per-category gate -> 18 of 55 D82 checks fail (b1a, b1c, b2a, b3a, b5b, b6, b8, b9, b11, c1, c3, c4, c6a-c, c7a/b, c8).
+
+# Item 3 review round 2 (2026-10-16) — rework F commit edf7d9c
+
+- Tester PASS (browser: ASA off 31/40, 28/35, 31/39; support ASA 60 → 62/78, binding Technical_Escalations; own 30 on Billing_Support → 62, column shows own target; independent re-check 61 fails / 62 passes). Challenger PASS. User-side PASS.
+- Owner approved 2026-10-16; merged into main (fast-forward).
+- Backlog (minor): run-progress text says "Primary-Driven" when an answer-time target binds; upper bound shown in minutes even for hour/day targets; mean vs upper-bound verdict note; stale "follower" comments (hc-search.ts:2468, 2848, 2937; D82 test comments); unused `_sla` parameter; CI bound rounded to 0.1 before comparison (same as before).
