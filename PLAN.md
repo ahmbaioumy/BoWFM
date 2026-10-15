@@ -1971,3 +1971,26 @@ B7. Confirmation applies to every evaluation where `rToUse === R`, including run
 B8. D81.c threshold: ≥ 9/10 fresh seeds at the new N; D81.e asserts the search's own verdict (primary + confirmation) at 28..31 after measuring them.
 B9. Docs also: project_context §6 records the acceptance rule; CLAUDE.md frozen decision 8 gains one clause: "a passing candidate must also pass the same gate on the independent confirmation block (item 2, owner decision 2026-10-11)". Scope adds `CLAUDE.md` (that clause only).
 B10. Browser check: the Fail history row for N=27 on support shows the confirmation text, so a ≥ target figure is not misread.
+
+---
+
+# ROADMAP — remaining items after item 2 (2026-10-15)
+
+Rule for every engine item: facts (investigator) → build plan in PLAN.md → challenger → owner OK → builder fail-first → tester + auditor (+ user-side, challenger for Tier 3) → before/after headcounts → owner approve → push. One builder at a time on `hc-search.ts` / `des-engine.ts` / the test file.
+
+| Order | Item | What changes for the planner | Headcount effect | Tier | Proof |
+|---|---|---|---|---|---|
+| now | 2 Reliable minimum | an answer must also pass on a second set of days | support 27 → 28; others same | 3 | fresh-seed pass ≥ 9/10 |
+| 1 | Housekeeping: regenerate audit baseline | none (tests only) | none | 1 | baseline matches current engine |
+| 2 | 3 Per-category answer-time target | each category obeys its own target; blank = global | up only where a category is tighter; none if unused | 3 | tighter category raises HC in a fixture; samples identical without values |
+| 3 | 4 Drain until last deadline | no case failed before its deadline | down where cases land after the horizon (fixture 12 → 8) | 3 | holidays-after-horizon fixture; samples same |
+| 4 | 5 Backlog by deadline | old backlog no longer jumps ahead of new cases unless part-worked | small change where backlog is large | 3 | new-case SLA probe (was 93.3 %); before/after |
+| 5 | 6 Rounding ties .5 up | same answer in any category order | ±1 only on exact ties | 2 | 10 agents at 20 % → 13 any order; 123.75 h → N_min 2 |
+| 6 | Display: pooled run + category filter | occupancy / available show a dash with a note | none | 2 | browser check |
+| 7 | F7 (ask owner first) | fractional value floored before gross-up | to be measured | — | owner decision |
+| 8 | 7 Volume-variability mode (opt-in, owner to confirm) | optional stress mode, default off | none by default; up when on | 3 | OFF byte-identical; badge shown |
+| 9 | No-decision builds: settings-import checks, crash screen, leave-page warning, calendar guards, "outdated" note on exports, stale-text sweep | safer app, clearer messages | none | 1–2 | browser + tests |
+| 10 | Housekeeping: build tools to devDependencies; audit never-reviewed areas (report only) | none | none | 1 | artifact identical; report |
+| backlog | Run time of spread layout; Sensitivity layout labels; spread with coverage OFF; other `new Date()` fallbacks in calendar.ts; item 1/2 minor notes | — | — | — | — |
+
+Order reason: items 3–5 change the gate / simulation itself, so they go before rounding (6) and before the opt-in stress mode (7), which should be measured on the final default numbers. Baseline regeneration goes first so later diffs are clean. Detailed facts for 3–6, F7, G7 and the no-decision list: investigator dispatched 2026-10-15; each item gets its own BUILD PLAN section before its build.
