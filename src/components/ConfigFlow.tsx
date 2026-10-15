@@ -736,7 +736,7 @@ export function ConfigFlow({
                   </p>
                   {sla.boAsaEnabled && (
                     <p className="text-[11px] text-purple-700" data-testid="asa-own-rule">
-                      A category with its own answer-time target must meet it on its own; the others share the global target.
+                      Each category must meet its answer-time target on its own (its own target if ticked, otherwise the global target).
                     </p>
                   )}
                 </div>
@@ -839,7 +839,7 @@ export function ConfigFlow({
                             {/* BO ASA Target (Conditional) */}
                             {sla.boAsaEnabled && (
                               <td className="py-2.5 px-3">
-                                <label className="mb-1 inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-700 cursor-pointer">
+                                <label className="mb-1 inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-700 cursor-pointer" title="Ticking without changing the value has no effect: the category is then held to the same number as the global target.">
                                   <input
                                     type="checkbox"
                                     checked={asaOwn}

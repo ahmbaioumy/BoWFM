@@ -642,6 +642,8 @@ export interface HCSearchOutput {
   workloadReductionAppliedPct?: number; // Set only when the reduction was ON for this run; undefined = no reduction applied.
   primaryDrivenHC: number;
   primaryStatistical?: PrimarySLAStatisticalResult;
+  /** Item 3: per-category answer-time verdict of the statistical gate (present only when answer time is ON): target used (own = ticked), mean, upper CI bound, replications used, met / missed / not checked. */
+  categoryAsa?: Record<string, { own: boolean; target: number; targetValue: number; targetUnit: TimeUnit; mean: number; ciLow: number; ciHigh: number; n: number; judged: boolean; passes: boolean }>;
   queueArchitecture: 'pooled' | 'siloed';
   recommendedHC: number | null;
   isInfeasible: boolean;

@@ -248,9 +248,9 @@ function ResultsFlowBody({
   const primarySizingFloor = effectivePrimaryTarget(sla.primaryPct, sla);
   const headlineTone = representativeTone(des.primaryAchievedPct, primarySizingFloor, !!searchOutput.infeasibleAdjacentWarning);
   const slackOn = sla.slaAcceptanceSlackEnabled === true;
-  // Item 3: the answer-time target each category is held to (own = ticked in Config; others share the global target).
+  // Item 3: the answer-time target each category is held to (own = ticked in Config; others use the global target).
   const asaTargets = sla.boAsaEnabled ? resolveCategoryAsaTargets(categories, sla, calendar) : {};
-  const anyOwnAsa = Object.values(asaTargets).some((t) => t.own);
+  const asaVerdicts = searchOutput.categoryAsa ?? {};
   const primaryTargetLabel = slackOn
     ? `sizing floor ${primarySizingFloor}% (policy ${sla.primaryPct}%)`
     : `${sla.primaryPct}%`;
@@ -1108,20 +1108,18 @@ function ResultsFlowBody({
                   {des.boAsaMeanMinutes}m
                 </span>
                 <span className="text-xs text-slate-500">
-                  {sla.boAsaEnabled ? `${anyOwnAsa ? 'global ' : ''}target ≤ ${sla.boAsaTarget} ${sla.boAsaUnit}` : 'no ASA target enforced'}
+                  {sla.boAsaEnabled ? `global target ≤ ${sla.boAsaTarget} ${sla.boAsaUnit}` : 'no ASA target enforced'}
                 </span>
               </div>
               {sla.boAsaEnabled && (
                 <span className="text-[10px] text-purple-700 block mt-1" data-testid="asa-own-rule">
-                  {anyOwnAsa
-                    ? 'The global target applies to categories without their own target. A category with its own answer-time target must meet it on its own; the others share the global target.'
-                    : 'A category with its own answer-time target must meet it on its own; the others share the global target.'}
+                  Each category must meet its answer-time target on its own (its own target if ticked, otherwise the global target).
                 </span>
               )}
               <span className="text-[10px] text-slate-400 block mt-1">
                 {(sla.asaClockBasis || 'business_window') === 'business_window'
                   ? 'Mean wait time during open business hours'
-                  : 'Mean 24/7 elapsed wall-clock wait time'}
+                  : 'Mean 24/7 elapsed wall-clock wait time'}{sla.boAsaEnabled ? ' — all categories (for information)' : ''}
               </span>
             </div>
 
@@ -1240,17 +1238,13 @@ function ResultsFlowBody({
                           {catStats?.asaMeanMinutes !== undefined ? `${catStats.asaMeanMinutes}m` : '0m'}
                           {sla.boAsaEnabled && asaTargets[cat.category] && (() => {
                             const t = asaTargets[cat.category];
-                            if (!t.own) {
-                              return <span className="text-[10px] text-slate-400 font-normal ml-1" data-testid={`asa-target-${cat.category}`}>(global {sla.boAsaTarget} {sla.boAsaUnit}, shared)</span>;
-                            }
-                            const eligible = (catStats?.primaryEligible ?? 0) > 0;
-                            const ok = (catStats?.asaMeanMinutes ?? 0) <= t.targetMinutes;
+                            const v = asaVerdicts[cat.category];
+                            const label = t.own ? `own ${t.targetValue} ${t.targetUnit}` : `global ${t.targetValue} ${t.targetUnit}`;
+                            const state = !v ? 'not checked' : !v.judged ? 'no cases to measure, not checked' : v.passes ? 'met' : 'missed';
+                            const tone = !v || !v.judged ? 'text-slate-400' : v.passes ? 'text-emerald-600' : 'text-rose-600';
                             return (
-                              <span
-                                className={`text-[10px] font-normal ml-1 ${!eligible ? 'text-slate-400' : ok ? 'text-emerald-600' : 'text-rose-600'}`}
-                                data-testid={`asa-target-${cat.category}`}
-                              >
-                                (own {t.targetValue} {t.targetUnit}: {!eligible ? 'no cases to measure, not checked' : ok ? 'met' : 'missed'})
+                              <span className={`text-[10px] font-normal ml-1 ${tone}`} data-testid={`asa-target-${cat.category}`}>
+                                ({label}: {state}{v && v.judged ? `, upper bound ${v.ciHigh}m` : ''})
                               </span>
                             );
                           })()}

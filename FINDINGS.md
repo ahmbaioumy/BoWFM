@@ -1311,7 +1311,26 @@ Ticked (after only; before the tick is ignored, so the before answer is the unti
 | support, ASA 60, Billing_Support ticked own 30 | **62 / 78** (from 43 / 54) | "Backoffice ASA Target (≤ 60 minutes) for the categories without their own target" (after the label extension; the measured run predates it and read the Primary SLA label) | N-1 = 61 fails on the followers: Technical_Escalations alone 62.4 min > 60. Billing_Support left the pool, whose mean (59.5 at 43) was held down by it |
 
 Findings worth the owner's eye:
-- A tick on a fast category can RAISE the headcount a lot (support 43 -> 62) because the remaining categories lose the averaging benefit; a tick looser than the global can only keep or lower it. Written into PRD §6 and L30.
+- A tick on a fast category can RAISE the headcount a lot (support 43 -> 62) because the remaining categories lose the averaging benefit; [WITHDRAWN: the claim that a looser tick can only keep or lower the answer was false and the follower-pool design is replaced, see rework F below]. Written into PRD §6 and L30.
 - The existing binding label never named the answer-time gate on N-1 (AJM_Only + 60: N-1 = 27 fails BO ASA, label still "Primary SLA"). Left as is when nothing is ticked (identical output); with a tick the label now names the own category or the sharing categories.
 
 Tests: new suite D82 (52 checks) fails 33 of 51 on the unchanged engine (fail-first run of D82 alone, 18 passed = the "nothing ticked is identical" controls), 52 / 52 after. Mutations (D82 alone, scratch copies): copies treated as own (flag ignored) 16 fail (D82.a1, a1b, a4, b1d-f, b2a/b, b5b, b10, d3, d4, d6 claims / support / healthcare ASA on, e1); own loop skipped 13 fail (b1a-d, b3a, b8, b9, c1, c3, c4, c7a/b, f); followers pooled over all categories 9 fail (b1d/e, b2a, b5b, b6, c4, c6a/b, e1). Full results: see the test totals in the commit message / report.
+
+# Item 3 rework F — every category judged on its own (2026-10-15, after review round 1)
+
+Supersedes the follower-pool design measured in "Item 3 build" above (its ticked rows and the claim that a looser tick can only keep or lower the answer are withdrawn). Base: c218d39 merged into the item 3 branch. Node, default calendar / labor / R = 30 / seed 12345; before = 24c21f2 snapshot (answer-time-ON numbers from the first build's "before" runs on the same snapshot), after = new code.
+
+Answer time ON, nothing ticked (pins may only move UP):
+
+| Case | Before HC / gross | After HC / gross | Category that binds at N-1 | Time after |
+|---|---|---|---|---|
+| claims, ASA 60 | 31 / 40 | 31 / 40 | none (floor) | 4.5 s |
+| healthcare, ASA 60 | 42 / 53 | **52 / 65** | Provider_Inquiries 60.1 min at 51 | 175 s |
+| support, ASA 60 | 43 / 54 | **62 / 78** | Technical_Escalations 62.4 at 61 | 101 s |
+| AJM_Only, ASA 60 | 28 / 35 | **41 / 51** | Tech HVC 78.2 at 40 | 216 s |
+
+Ticked: claims with Claims_Life 90: 31 / 40 (unchanged). Support + 60 with Billing_Support ticked 30: 62 / 78; ticked 120: 62 / 78 (Technical_Escalations at the global 60 binds in all three).
+
+Answer time OFF (must be byte-identical to 24c21f2): sha256 of the full result equal for claims (5,088,244 B), support (6,615,310 B), healthcare (9,151,188 B), AJM_Only (12,192,681 B).
+
+Mutation (scratch copy, D82 alone): pooled gate restored in place of the per-category gate -> 18 of 55 D82 checks fail (b1a, b1c, b2a, b3a, b5b, b6, b8, b9, b11, c1, c3, c4, c6a-c, c7a/b, c8).

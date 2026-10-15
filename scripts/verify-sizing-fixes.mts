@@ -4436,7 +4436,8 @@ console.log('\n--- Suite D57: CI gates use the confidence bound, not the mean --
       rawOccupancyPct: o.occ ? o.occ[i] : 50,
       boAsaMeanMinutes: o.asa ? o.asa[i] : 0,
       minCoverageObserved: Infinity,
-      categoryStats: { A: { primaryPct: o.catA ? o.catA[i] : 100 }, B: { primaryPct: o.catB ? o.catB[i] : 100 } },
+      // Item 3: answer time is judged per category; the ASA samples belong to category A (B has no eligible cases, so it is not judged).
+      categoryStats: { A: { primaryPct: o.catA ? o.catA[i] : 100, ...(o.asa ? { primaryEligible: 10, asaMeanMinutes: o.asa[i] } : {}) }, B: { primaryPct: o.catB ? o.catB[i] : 100 } },
     }));
   const evalCI = (rs: any[], sla: SLAPolicyConfig) =>
     hcNs.computeStatisticalEvaluation(4, rs, rs.map((r) => r.primaryAchievedPct), rs.length, sla, BIZ_CAL, catsCI);
@@ -4472,7 +4473,7 @@ console.log('\n--- Suite D57: CI gates use the confidence bound, not the mean --
   const slaAsa: SLAPolicyConfig = { ...slaCI, boAsaEnabled: true, boAsaTarget: 41, boAsaUnit: 'minutes', asaClockBasis: 'business_window' };
   const af = evalCI(reps(allGood, { asa: [38, 42, 40, 39, 41] }), slaAsa);
   assert(af.passesOrgGates === false && af.passesPrimaryCI === true && af.passesCategorySLA === true && af.passesCoverage === true, 'D57.5a ASA mean 40 <= target 41 but upper bound 41.96 > 41 -> only the ASA gate fails', JSON.stringify({ o: af.passesOrgGates, p: af.passesPrimaryCI, c: af.passesCategorySLA }));
-  assert(af.failingReasons.length === 1 && /^BO ASA 95% CI/.test(af.failingReasons[0]) && /upper bound > target 41minutes \(41m\)/.test(af.failingReasons[0]), 'D57.5b exactly one failing reason: BO ASA upper bound > target 41 minutes', af.failingReasons.join(' | '));
+  assert(af.failingReasons.length === 1 && /^BO ASA \(category 'A'\) 95% CI/.test(af.failingReasons[0]) && /upper bound > target 41minutes \(41m\)/.test(af.failingReasons[0]), 'D57.5b exactly one failing reason: BO ASA upper bound > target 41 minutes', af.failingReasons.join(' | '));
   const ap = evalCI(reps(allGood, { asa: [38, 38, 38, 39, 39] }), slaAsa);
   assert(ap.passesOrgGates === true && ap.failingReasons.length === 0, 'D57.5c ASA [38,38,38,39,39] (upper bound 39.1 <= 41) passes', ap.failingReasons.join(' | '));
   const aoff = evalCI(reps(allGood, { asa: [38, 42, 40, 39, 41] }), { ...slaAsa, boAsaEnabled: false });
@@ -7159,7 +7160,7 @@ console.log('\n--- Suite D78: spread layout when the coverage-repair roster fail
     const pS = (cov: boolean) => ({ intervals: ivs, openingWIP: [] as OpeningWIPCase[], categories: cats, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: { ...DEFAULT_SLA, minCoverageEnabled: cov, boAsaEnabled: true, boAsaTarget: 60, boAsaUnit: 'minutes' as const }, seed: DEFAULT_SIM_PARAMS.seed, userMaxHC: DEFAULT_SIM_PARAMS.maxHCSearch, replications: DEFAULT_SIM_PARAMS.replications, queueArchitecture: 'pooled' as const, dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness });
     const sOn = searchOptimalHC(pS(true)); const sOnA: any = await searchOptimalHCAsync(pS(true));
     assert(sig(sOn) === sig(sOnA), 'D78.d4 support + answer-time 60 min, coverage ON: sync === async (HC, roster, label, history)', `sync=${sOn.recommendedHC} async=${sOnA.recommendedHC}`);
-    assert(sOn.recommendedHC !== null && sOn.recommendedHC < 46, 'D78.d5 support + answer-time 60 min, coverage ON: below the old 46', `rec=${sOn.recommendedHC}`);
+    assert(sOn.recommendedHC !== null && sOn.recommendedHC === 62, 'D78.d5 support + answer-time 60 min, coverage ON: 62 (was 43 while the pooled mean hid Technical_Escalations; Item 3 judges every category on its own, owner decision 2026-10-15)', `rec=${sOn.recommendedHC}`);
   }
 
   // ---- D78.e three built-in samples at defaults are unchanged ----
@@ -7325,7 +7326,7 @@ console.log('\n--- Suite D79: start-time block and roster-source end-to-end (A12
     assert(!!fdr && sumOf(fdr.shiftDistributionUsed) === nH && fdr.operationalHC === nH && rosterOf(fdr.shiftDistributionUsed) === '0:5 450:5 900:5 990:5', 'D79.j A4 HC-14 final audit run at N=20 ran on the winning roster', `sum=${sumOf(fdr?.shiftDistributionUsed)} n=${nH}`);
   }
   // The N-1 evidence run needs a case where the search actually judged N-1: support sample + answer-time 60 min, coverage ON
-  // (recommended 43; 42 is tried with the 21+21 spread and fails). HC-14 and D33 start at their floor, so N-1 is never tried there.
+  // (recommended 62 since Item 3, was 43; 61 is tried with the 31+30 spread and fails on Technical_Escalations' own answer time). HC-14 and D33 start at their floor, so N-1 is never tried there.
   {
     const { rows } = buildSampleDataset('support', new Date(2026, 9, 5, 8, 0, 0, 0));
     const ivS = mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
@@ -7336,12 +7337,12 @@ console.log('\n--- Suite D79: start-time block and roster-source end-to-end (A12
     const sumS = (d: ShiftDistributionByCategory | undefined) => d ? Object.values(d).reduce((a, x) => a + x.slaps.reduce((b, s) => b + s.agentCount, 0), 0) : 0;
     const nS = sOn.recommendedHC ?? 0;
     const fS = sOn.boundaryEvidence?.failedResult;
-    assert(nS === 43 && sOn.finalDESResult?.operationalHC === 43 && rosterOf(sOn.finalDESResult?.shiftDistributionUsed) === '0:22 150:21', 'D79.k1 support + answer-time 60, coverage ON: final audit run at N=43 ran on the winning roster 0:22 150:21', `n=${nS} roster=${rosterOf(sOn.finalDESResult?.shiftDistributionUsed)}`);
-    assert(!!fS && fS.operationalHC === 42 && sumS(fS.shiftDistributionUsed) === 42 && rosterOf(fS.shiftDistributionUsed) === '0:21 150:21', 'D79.k2 same run: the N-1 evidence run (N=42) ran on the roster the search tried and rejected (0:21 150:21), not the uniform fallback', `n=${fS?.operationalHC} roster=${rosterOf(fS?.shiftDistributionUsed)}`);
+    assert(nS === 62 && sOn.finalDESResult?.operationalHC === 62 && rosterOf(sOn.finalDESResult?.shiftDistributionUsed) === '0:61 150:1', 'D79.k1 support + answer-time 60, coverage ON: final audit run at N=62 ran on the winning roster 0:61 150:1 (re-pinned from 43 / 0:22 150:21: Item 3 judges every category on its own)', `n=${nS} roster=${rosterOf(sOn.finalDESResult?.shiftDistributionUsed)}`);
+    assert(!!fS && fS.operationalHC === 61 && sumS(fS.shiftDistributionUsed) === 61 && rosterOf(fS.shiftDistributionUsed) === '0:31 150:30', 'D79.k2 same run: the N-1 evidence run (N=61) ran on the roster the search tried and rejected (0:31 150:30; was N=42, 0:21 150:21), not the uniform fallback', `n=${fS?.operationalHC} roster=${rosterOf(fS?.shiftDistributionUsed)}`);
     assert(rosterOf(sOnA.boundaryEvidence?.failedResult?.shiftDistributionUsed) === rosterOf(fS?.shiftDistributionUsed) && rosterOf(sOnA.finalDESResult?.shiftDistributionUsed) === rosterOf(sOn.finalDESResult?.shiftDistributionUsed), 'D79.l2 same run, async twin: audit and N-1 rosters identical to sync', `sync=${rosterOf(fS?.shiftDistributionUsed)} async=${rosterOf(sOnA.boundaryEvidence?.failedResult?.shiftDistributionUsed)}`);
     if (typeof fn === 'function') {
       const ls = fn(sOn.finalDESResult?.shiftDistributionUsed, DEFAULT_CALENDAR);
-      assert(ls?.[0]?.text === '22 agents at 08:00, 21 agents at 10:30', 'D79.m support + answer-time 60: helper prints "22 agents at 08:00, 21 agents at 10:30" (sums to the recommended 43)', JSON.stringify(ls));
+      assert(ls?.[0]?.text === '61 agents at 08:00, 1 agent at 10:30', 'D79.m support + answer-time 60: helper prints "61 agents at 08:00, 1 agent at 10:30" (sums to the recommended 62; was 22 + 21 = 43)', JSON.stringify(ls));
     }
   }
 
@@ -7721,8 +7722,8 @@ console.log('\n--- Suite D81: reliable minimum - a passing headcount also passes
 // Suite D82 - Item 3 (H4 / L30 / P1-10): per-category answer-time (BO ASA) targets with an explicit own-target switch
 // (owner decisions 2026-10-15). A category has an OWN target iff boAsaOwn === true AND boAsaTarget is a finite number > 0.
 // Copies of the global value (CSV load, template apply, defaults, settings files from before the field) are never targets.
-// Own categories are judged one by one (upper CI bound vs the own target); the others share the global target, pooled over
-// the followers only. With no own category the gate is today's pooled code path, byte for byte.
+// OWNER DECISION 2026-10-15 (after review round 1, rework F): EVERY category is judged on its own - its own target if ticked,
+// otherwise the global target (upper CI bound of that category's answer time). No pooled gate, no follower pool. Answer time OFF is unchanged.
 // Fail-first (pre-change): the helper is absent (D82.0 and everything that needs it), D82.b/c/e fail (own target never read).
 // ---------------------------------------------------------------------------
 console.log('\n--- Suite D82: per-category answer-time targets, explicit own-target switch (H4 / L30 / P1-10) ---');
@@ -7773,17 +7774,17 @@ console.log('\n--- Suite D82: per-category answer-time targets, explicit own-tar
     assert(b1.categoryPasses.A === false && b1.categoryPasses.B === true, 'D82.b1b categoryPasses: A false (its own target), B true', JSON.stringify(b1.categoryPasses));
     assert(b1.failingReasons.length === 1 && b1.failingReasons[0].startsWith("BO ASA (category 'A')") && /30/.test(b1.failingReasons[0]) && /own target/.test(b1.failingReasons[0]), 'D82.b1c exactly one reason, "BO ASA (category \'A\') ... own target", naming the target', b1.failingReasons.join(' | '));
     assert(b1.categoryAsa?.A?.own === true && b1.categoryAsa?.A?.passes === false && b1.categoryAsa?.A?.mean === 40 && b1.categoryAsa?.A?.n === 5 && b1.categoryAsa?.A?.target === 30 && b1.categoryAsa?.B?.own === false, 'D82.b1d categoryAsa carries own / target / mean / n / passes for A and own=false for B', JSON.stringify(b1.categoryAsa));
-    assert(b1.followersAsa && JSON.stringify(b1.followersAsa?.categories) === '["B"]' && b1.followersAsa?.passes === true && b1.followersAsa?.mean === 20, 'D82.b1e followersAsa: only B, mean 20, passes', JSON.stringify(b1.followersAsa));
+    assert(b1.categoryAsa?.B?.own === false && b1.categoryAsa?.B?.target === 60 && b1.categoryAsa?.B?.passes === true && b1.followersAsa === undefined, 'D82.b1e B follows the global 60 and is judged on its own (passes at 20); there is no follower pool', JSON.stringify(b1.categoryAsa));
     // the same replications with A left to follow the global (copy, not ticked) pass: pooled 30 <= 60
     const b1f = ev(rs5(() => mkRep({ A: { asa: 40, elig: 10 }, B: { asa: 20, elig: 10 } })), [mkc('A', { boAsaTarget: 30, boAsaUnit: 'minutes' }), fol('B')]);
-    assert(b1f.passesBoAsaCap === true && b1f.passesAllConstraints === true && b1f.categoryAsa === undefined, 'D82.b1f the SAME replications with A holding 30 as a copy (not ticked): follows the global 60 -> passes (today\'s result)', JSON.stringify(b1f.failingReasons));
+    assert(b1f.passesBoAsaCap === true && b1f.passesAllConstraints === true && b1f.categoryAsa?.A?.own === false && b1f.categoryAsa?.A?.target === 60 && b1f.categoryAsa?.A?.passes === true, 'D82.b1f the SAME replications with A holding 30 as a copy (not ticked): A is judged against the global 60 on its own (40 passes)', JSON.stringify(b1f.failingReasons));
 
     // b2: a LOOSER own target lets A through while the rest passes alone; without the tick the pooled mean (65 > 60) fails as today
     const looseReps = rs5(() => mkRep({ A: { asa: 80, elig: 30 }, B: { asa: 20, elig: 10 } }));
     const b2 = ev(looseReps, [own('A', 90), fol('B')]);
     const b2n = ev(looseReps, [mkc('A', { boAsaTarget: 90, boAsaUnit: 'minutes' }), fol('B')]);
-    assert(b2.passesBoAsaCap === true && b2.passesAllConstraints === true && b2.failingReasons.length === 0 && b2.followersAsa?.mean === 20, 'D82.b2a A own 90 (answers in 80) + B alone at 20 <= 60 -> passes', JSON.stringify({ r: b2.failingReasons, f: b2.followersAsa }));
-    assert(b2n.passesBoAsaCap === false && /^BO ASA 95% CI/.test(b2n.failingReasons[0]) && /upper bound > target 60minutes \(60m\)/.test(b2n.failingReasons[0]), 'D82.b2b no tick: pooled 65 > 60 fails with today\'s unchanged wording', b2n.failingReasons.join(' | '));
+    assert(b2.passesBoAsaCap === true && b2.passesAllConstraints === true && b2.failingReasons.length === 0, 'D82.b2a A own 90 (answers in 80) and B follows 60 (answers in 20) -> both met on their own, passes', JSON.stringify({ r: b2.failingReasons }));
+    assert(b2n.passesBoAsaCap === false && b2n.failingReasons.length === 1 && b2n.failingReasons[0].startsWith("BO ASA (category 'A')") && /upper bound > target 60minutes \(60m\)/.test(b2n.failingReasons[0]) && !/own target/.test(b2n.failingReasons[0]), 'D82.b2b no tick: A (80) is judged against the global 60 on its own and fails - even though the pooled mean (65) would be only slightly over and B is fine', b2n.failingReasons.join(' | '));
 
     // b3: the upper CI bound, not the mean, decides an own target
     const b3f = ev(rs5((i) => mkRep({ A: { asa: [29, 29, 29, 29, 31][i], elig: 10 }, B: { asa: 10, elig: 10 } })), [own('A', 30), fol('B')]);
@@ -7793,19 +7794,19 @@ console.log('\n--- Suite D82: per-category answer-time targets, explicit own-tar
 
     // b4: replications that carry no per-category ASA data (D57-style) never produce NaN; the own category is not judged and a note says so
     const b4 = ev(rs5(() => mkRep({ A: {}, B: {} }, 5)), [own('A', 30), fol('B')]);
-    assert(!/NaN/.test(JSON.stringify({ c: b4.categoryAsa, f: b4.followersAsa, n: b4.asaNotes, r: b4.failingReasons }, (_k, v) => (typeof v === 'number' && !Number.isFinite(v) ? 'NaN' : v))) && b4.passesBoAsaCap === true, 'D82.b4a no per-category ASA data: no NaN anywhere, nothing judged, passes', JSON.stringify(b4.categoryAsa));
-    assert(Array.isArray(b4.asaNotes) && b4.asaNotes.length >= 1 && /'A'/.test(b4.asaNotes.join(' ')) && b4.categoryAsa?.A?.judged === false && b4.categoryAsa?.A?.n === 0, 'D82.b4b a note names category A as not checked (no eligible cases), judged=false, n=0', JSON.stringify({ n: b4.asaNotes, a: b4.categoryAsa?.A }));
+    assert(!/NaN/.test(JSON.stringify({ c: b4.categoryAsa, n: b4.asaNotes, r: b4.failingReasons }, (_k, v) => (typeof v === 'number' && !Number.isFinite(v) ? 'NaN' : v))) && b4.passesBoAsaCap === true, 'D82.b4a no per-category ASA data: no NaN anywhere, nothing judged, passes', JSON.stringify(b4.categoryAsa));
+    assert(Array.isArray(b4.asaNotes) && b4.asaNotes.length === 2 && /'A'/.test(b4.asaNotes[0]) && /'B'/.test(b4.asaNotes[1]) && b4.categoryAsa?.A?.judged === false && b4.categoryAsa?.A?.n === 0 && b4.categoryAsa?.B?.judged === false, 'D82.b4b a note per category (A own, B global) says it was not checked (no cases to measure); judged=false, n=0', JSON.stringify({ n: b4.asaNotes, a: b4.categoryAsa }));
 
     // b5: replications with primaryEligible 0 are skipped (n and the t value use the samples that remain)
     const b5 = ev(rs5((i) => mkRep({ A: { asa: [99, 99, 25, 26, 27][i], elig: [0, 0, 10, 10, 10][i] }, B: { asa: 10, elig: 10 } })), [own('A', 30), fol('B')]);
     assert(b5.categoryAsa?.A?.n === 3 && b5.categoryAsa?.A?.mean === 26 && b5.passesBoAsaCap === true, 'D82.b5 two replications with no eligible A case are skipped: n = 3, mean 26 (the 99s are not averaged in), passes', JSON.stringify(b5.categoryAsa?.A));
-    // b5b: the pooled follower mean weights by eligible cases and skips a replication with no follower case
+    // b5b: a replication with no case for the category is skipped (n = 1: the value itself is compared)
     const b5b = ev(rs5((i) => mkRep({ A: { asa: 10, elig: 10 }, B: { asa: [70, 70, 70, 70, 70][i], elig: [0, 0, 0, 0, 5][i] } })), [own('A', 30), fol('B')]);
-    assert(b5b.followersAsa?.n === 1 && b5b.followersAsa?.mean === 70 && b5b.passesBoAsaCap === false, 'D82.b5b followers: only the replication with follower cases counts (n = 1, mean 70 > 60 -> fails by the mean when n = 1)', JSON.stringify(b5b.followersAsa));
+    assert(b5b.categoryAsa?.B?.n === 1 && b5b.categoryAsa?.B?.mean === 70 && b5b.categoryAsa?.B?.passes === false && b5b.passesBoAsaCap === false, 'D82.b5b B follows 60: only the replication with B cases counts (n = 1, value 70 > 60 -> fails by the value itself)', JSON.stringify(b5b.categoryAsa?.B));
 
     // b6: every category own -> there is no pooled gate
     const b6 = ev(rs5(() => mkRep({ A: { asa: 20, elig: 10 }, B: { asa: 40, elig: 10 } }, 999)), [own('A', 30), own('B', 50)]);
-    assert(b6.passesBoAsaCap === true && b6.followersAsa === null, 'D82.b6 all categories own: the (absurd) pooled 999 is not judged; each is held to its own target', JSON.stringify({ c: b6.passesBoAsaCap, f: b6.followersAsa }));
+    assert(b6.passesBoAsaCap === true, 'D82.b6 all categories own: the (absurd) pooled 999 is not judged; each is held to its own target', JSON.stringify({ c: b6.passesBoAsaCap }));
     // b7: ASA gate off -> the flag is ignored
     const b7 = ev(rs5(() => mkRep({ A: { asa: 40, elig: 10 }, B: { asa: 20, elig: 10 } })), [own('A', 30), fol('B')], { ...slaA, boAsaEnabled: false });
     assert(b7.passesBoAsaCap === true && b7.passesAllConstraints === true && b7.failingReasons.length === 0, 'D82.b7 answer-time off: a ticked own target is ignored', JSON.stringify(b7.failingReasons));
@@ -7818,7 +7819,10 @@ console.log('\n--- Suite D82: per-category answer-time targets, explicit own-tar
     assert(b9.failingReasons.length === 2 && b9.failingReasons[0].startsWith("BO ASA (category 'A')") && b9.failingReasons[1].startsWith("BO ASA (category 'B')"), 'D82.b9 two own categories missed: two reasons, category-name order, both start with "BO ASA"', b9.failingReasons.join(' | '));
     // b10: no own category -> exactly today's gate (reason text, no extra fields)
     const b10 = ev(rs5(() => mkRep({ A: { asa: 70, elig: 10 }, B: { asa: 70, elig: 10 } })), [fol('A'), fol('B')]);
-    assert(b10.passesBoAsaCap === false && b10.categoryAsa === undefined && b10.followersAsa === undefined && /^BO ASA 95% CI \[70m, 70m\] upper bound > target 60minutes \(60m\) \(Mean: 70m\)$/.test(b10.failingReasons[0]), 'D82.b10 no own category: today\'s pooled gate and wording, no new fields', JSON.stringify(b10.failingReasons));
+    assert(b10.passesBoAsaCap === false && b10.failingReasons.length === 2 && b10.failingReasons[0] === "BO ASA (category 'A') 95% CI [70m, 70m] upper bound > target 60minutes (60m) (Mean: 70m)" && b10.failingReasons[1].startsWith("BO ASA (category 'B')"), 'D82.b10 nothing ticked, answer time on: every category is judged against the global target on its own (one reason each, names the category)', JSON.stringify(b10.failingReasons));
+    // b11: no averaging: pooled mean is fine (about 19) but category A alone is not
+    const b11 = ev(rs5(() => mkRep({ A: { asa: 90, elig: 1 }, B: { asa: 10, elig: 100 } })), [fol('A'), fol('B')]);
+    assert(b11.passesBoAsaCap === false && b11.categoryAsa?.A?.passes === false && b11.categoryAsa?.B?.passes === true && b11.failingReasons.length === 1, 'D82.b11 no pooled gate: a thin category at 90 fails the global 60 although the all-category mean is about 10', JSON.stringify(b11.failingReasons));
   }
 
   // ---- fixtures for the searches: two categories, flat 5-day business week, answer-time global 240 min (not binding) ----
@@ -7854,7 +7858,8 @@ console.log('\n--- Suite D82: per-category answer-time targets, explicit own-tar
     assert(fastLoose.finalDESResult.passesBOASA === false && fastLoose.infeasibleAdjacentWarning === undefined, 'D82.c6b the single-run pooled flag is false (Fast is slow) but no "fell slightly below target" warning appears: the check uses the resolved targets', `passesBOASA=${fastLoose.finalDESResult.passesBOASA} warn=${fastLoose.infeasibleAdjacentWarning}`);
     const sharedBind: any = searchOptimalHC(fx82(240, { globalT: 1 }));
     const sharedBindA: any = await searchOptimalHCAsync(fx82(240, { globalT: 1 }));
-    assert(sharedBind.bindingConstraintType === 'bo_asa_cap' && /categories without their own target/.test(sharedBind.bindingConstraintDescription) && sharedBind.bindingConstraintDescription === sharedBindA.bindingConstraintDescription, 'D82.c6c Fast ticked own 240, global 1: the categories sharing the global target are what stopped N-1, and the binding-constraint label says so (sync = async)', `${sharedBind.bindingConstraintType}: ${sharedBind.bindingConstraintDescription} | ${sharedBindA.bindingConstraintDescription}`);
+    assert(sharedBind.bindingConstraintType === 'bo_asa_cap' && /category 'Slow' \(global target/.test(sharedBind.bindingConstraintDescription) && sharedBind.bindingConstraintDescription === sharedBindA.bindingConstraintDescription, 'D82.c6c Fast ticked own 240, global 1: Slow (global target) is what stopped N-1, and the binding-constraint label names it (sync = async)', `${sharedBind.bindingConstraintType}: ${sharedBind.bindingConstraintDescription} | ${sharedBindA.bindingConstraintDescription}`);
+    assert(tight82.categoryAsa?.Fast?.own === true && tight82.categoryAsa?.Fast?.judged === true && tight82.categoryAsa?.Fast?.passes === true && base82.categoryAsa?.Fast?.own === false && base82.categoryAsa?.Fast?.target === 240, 'D82.c8 the search result carries the statistical per-category verdict (Results reads it): Fast own and met in the ticked run, global 240 in the unticked run', JSON.stringify([tight82.categoryAsa?.Fast, base82.categoryAsa?.Fast]));
   }
   // c7: an own target that cannot be met within the cap -> infeasible, the message names the category
   {
@@ -7904,7 +7909,7 @@ console.log('\n--- Suite D82: per-category answer-time targets, explicit own-tar
     const ivs = mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
     const ticked = DEFAULT_CATEGORIES.map((c) => (c.name === 'Claims_Life' ? { ...c, boAsaOwn: true } : c));
     const r: any = evaluateCandidateStatistical({ operationalHC: 31, intervals: ivs, openingWIP: [], categories: ticked, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: { ...DEFAULT_SLA, boAsaEnabled: true, boAsaTarget: 60 }, baseSeed: DEFAULT_SIM_PARAMS.seed, replications: 4, queueArchitecture: 'pooled', dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness });
-    assert(r.categoryAsa?.Claims_Life?.own === true && r.categoryAsa?.Claims_Life?.target === 90 && r.categoryAsa?.Claims_Auto?.own === false && r.categoryAsa?.Claims_Auto?.target === 60 && JSON.stringify(r.followersAsa?.categories) === '["Claims_Auto","Claims_Home"]', 'D82.e1 ticking Claims_Life (value 90 from the defaults): it is judged at 90, Claims_Auto / Claims_Home follow the global 60', JSON.stringify({ a: r.categoryAsa, f: r.followersAsa }));
+    assert(r.categoryAsa?.Claims_Life?.own === true && r.categoryAsa?.Claims_Life?.target === 90 && r.categoryAsa?.Claims_Auto?.own === false && r.categoryAsa?.Claims_Auto?.target === 60 && r.categoryAsa?.Claims_Home?.target === 60, 'D82.e1 ticking Claims_Life (value 90 from the defaults): it is judged at 90, Claims_Auto / Claims_Home each at the global 60', JSON.stringify(r.categoryAsa));
   }
 
   // ---- D82.f the polish/"BO ASA" invariant of D77.2b holds with own targets, across a sweep ----
@@ -7927,7 +7932,8 @@ console.log('\n--- Suite D82: per-category answer-time targets, explicit own-tar
     const cfgSrc = readFileSync(resolve(import.meta.dirname, '../src/components/ConfigFlow.tsx'), 'utf8');
     const resSrc = readFileSync(resolve(import.meta.dirname, '../src/components/ResultsFlow.tsx'), 'utf8');
     assert(cfgSrc.includes('Own target') && cfgSrc.includes('follows global') && cfgSrc.includes('boAsaOwn'), 'D82.g1 Config: each category has an "Own target" tick; unticked shows "follows global"', '');
-    assert(cfgSrc.includes('A category with its own answer-time target must meet it on its own; the others share the global target.') && resSrc.includes('A category with its own answer-time target must meet it on its own; the others share the global target.'), 'D82.g2 the rule sentence is shown in Config and in Results', '');
+    assert(cfgSrc.includes('Each category must meet its answer-time target on its own (its own target if ticked, otherwise the global target).') && resSrc.includes('Each category must meet its answer-time target on its own (its own target if ticked, otherwise the global target).'), 'D82.g2 the rule sentence is shown in Config and in Results', '');
+    assert(!/shared pool|categories without their own target|share the global target/.test(cfgSrc + resSrc), 'D82.g4 no text about a shared pool or a shared-pool rule remains in the screens', '');
     assert(/boAsaOwn: false/.test(cfgSrc), 'D82.g3 "Apply Template to All Categories" sets every category back to follow the global target', '');
   }
 }
