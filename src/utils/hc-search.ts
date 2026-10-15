@@ -903,9 +903,13 @@ export function deriveConfirmationBaseSeed(seed: number): number {
 }
 
 /**
- * The confirmation block: R case sets from the derived seed, built ONCE per search (lazily, the first
- * time a rung clears the primary block) and reused for every candidate N and rung, so Common Random
- * Numbers holds inside the block. The single constructor both searches use.
+ * The confirmation block: R case sets from the derived seed, handed out as a LAZY view. Replication r is
+ * generated when the evaluator reads index r and is not kept: it becomes garbage as soon as that
+ * replication's simulation finishes, so the block is never resident as a whole (item 2 rework C1: the
+ * whole block used to stay in memory for the entire search, +1 GB on the largest file). Generation is
+ * deterministic from the derived seed (the same generatePrecomputedReplication the primary block uses),
+ * so every confirmation evaluation, at any N and rung, sees byte-identical sets: Common Random Numbers
+ * holds inside the block. The single constructor both searches use.
  */
 export function createConfirmationBlock(params: {
   intervals: StandardInterval[];
@@ -917,24 +921,30 @@ export function createConfirmationBlock(params: {
   replications: number;
 }): { baseSeed: number; sets: () => PrecomputedCaseSet[] } {
   const baseSeed = deriveConfirmationBaseSeed(params.seed);
-  let built: PrecomputedCaseSet[] | null = null;
-  return {
-    baseSeed,
-    sets: () => {
-      if (!built) {
-        built = generatePrecomputedReplications({
+  const count = Math.max(1, params.replications);
+  const isIndex = (prop: string | symbol): prop is string => typeof prop === 'string' && /^(0|[1-9]\d*)$/.test(prop);
+  const view = new Proxy(new Array<PrecomputedCaseSet>(count), {
+    get(target, prop, receiver) {
+      if (isIndex(prop)) {
+        const index = Number(prop);
+        if (index >= count) return undefined;
+        return generatePrecomputedReplication({
           intervals: params.intervals,
           openingWIP: params.openingWIP,
           categories: params.categories,
           calendar: params.calendar,
           sla: params.sla,
           baseSeed,
-          replications: params.replications,
+          index,
         });
       }
-      return built;
+      return Reflect.get(target, prop, receiver);
     },
-  };
+    has(target, prop) {
+      return isIndex(prop) ? Number(prop) < count : Reflect.has(target, prop);
+    },
+  });
+  return { baseSeed, sets: () => view };
 }
 
 /** Canonical identity of a roster (category keys sorted, slaps sorted by offset, zero blocks dropped). */
@@ -2411,6 +2421,21 @@ export interface PrecomputedCaseSet {
   horizonEnd: Date;
 }
 
+/** One replication's case set: replication `index` of the block that starts at `baseSeed` (the single place the per-replication seed is derived). */
+export function generatePrecomputedReplication(params: {
+  intervals: StandardInterval[];
+  openingWIP: OpeningWIPCase[];
+  categories: CategoryConfig[];
+  calendar: CalendarConfig;
+  sla: SLAPolicyConfig;
+  baseSeed: number;
+  index: number;
+}): PrecomputedCaseSet {
+  const { intervals, openingWIP, categories, calendar, sla, baseSeed, index } = params;
+  const repSeed = (baseSeed + index * 1013 + 7) % 2147483647;
+  return generateCaseEntities({ intervals, openingWIP, categories, calendar, sla, seed: repSeed });
+}
+
 export function generatePrecomputedReplications(params: {
   intervals: StandardInterval[];
   openingWIP: OpeningWIPCase[];
@@ -2420,21 +2445,11 @@ export function generatePrecomputedReplications(params: {
   baseSeed: number;
   replications: number;
 }): PrecomputedCaseSet[] {
-  let { intervals, openingWIP, categories, calendar, sla, baseSeed, replications } = params;
+  const { intervals, openingWIP, categories, calendar, sla, baseSeed, replications } = params;
   const R = Math.max(1, replications);
   const sets: PrecomputedCaseSet[] = [];
   for (let r = 0; r < R; r++) {
-    const repSeed = (baseSeed + r * 1013 + 7) % 2147483647;
-    sets.push(
-      generateCaseEntities({
-        intervals,
-        openingWIP,
-        categories,
-        calendar,
-        sla,
-        seed: repSeed,
-      })
-    );
+    sets.push(generatePrecomputedReplication({ intervals, openingWIP, categories, calendar, sla, baseSeed, index: r }));
   }
   return sets;
 }
@@ -3098,7 +3113,7 @@ export function searchOptimalHC(params: {
   // Which layout produced that roster (A13.1); same shared classifier in the sync and async search.
   const winningLayoutByN = new Map<number, WinningLayout>();
 
-  // Rescue ladder confirmation block (PRD P1-6): built lazily, once per search, shared by every N and rung.
+  // Rescue ladder confirmation block (PRD P1-6): same sets for every N and rung (CRN), generated one replication at a time and never kept (item 2 rework C1).
   const rescueConfirmation = createConfirmationBlock({ intervals, openingWIP, categories, calendar, sla, seed, replications: R });
   const rescueCtx = { sla, categories, replications: R, baseSeed: seed, precomputedCaseSets, confirmation: rescueConfirmation };
   // Coverage-satisfying roster whose failure is reported at an N where nothing passed (repair / spread layout; A4). Not set for passing Ns.
@@ -3241,7 +3256,7 @@ export function searchOptimalHC(params: {
     let confirmationOnlyGate: string | undefined;
     if (!finalRes.passesAllConstraints && confirmationFailure) {
       finalRes = confirmationFailure.res;
-      reportedDist = confirmationFailure.roster;
+      reportedDist = confirmationFailure.roster ?? reportedDist; // a uniform layout (roster undefined) must not erase the coverage-satisfying roster already recorded
       repairReasons = confirmationFailure.res.failingReasons;
       confirmationOnlyGate = confirmationFailure.gate;
     }
@@ -3589,6 +3604,7 @@ export function searchOptimalHC(params: {
       rawOccupancyPct: e.representativeResult.rawOccupancyPct,
       passed: e.passesAllConstraints,
       failingReasons: e.failingReasons,
+      ...(confirmationOnlyGateByN.has(hc) ? { confirmationOnlyFailure: true } : {}),
     });
   }
 
@@ -3889,7 +3905,7 @@ export async function searchOptimalHCAsync(params: {
   // Which layout produced that roster (A13.1); same shared classifier in the sync and async search.
   const winningLayoutByN = new Map<number, WinningLayout>();
 
-  // Rescue ladder confirmation block (PRD P1-6): built lazily, once per search, shared by every N and rung.
+  // Rescue ladder confirmation block (PRD P1-6): same sets for every N and rung (CRN), generated one replication at a time and never kept (item 2 rework C1).
   const rescueConfirmation = createConfirmationBlock({ intervals, openingWIP, categories, calendar, sla, seed, replications: R });
   const rescueCtx = { sla, categories, replications: R, baseSeed: seed, precomputedCaseSets, confirmation: rescueConfirmation };
   // Coverage-satisfying roster whose failure is reported at an N where nothing passed (repair / spread layout; A4). Not set for passing Ns.
@@ -4114,7 +4130,7 @@ export async function searchOptimalHCAsync(params: {
     let confirmationOnlyGate: string | undefined;
     if (!finalRes.passesAllConstraints && confirmationFailure) {
       finalRes = confirmationFailure.res;
-      reportedDist = confirmationFailure.roster;
+      reportedDist = confirmationFailure.roster ?? reportedDist; // a uniform layout (roster undefined) must not erase the coverage-satisfying roster already recorded
       repairReasons = confirmationFailure.res.failingReasons;
       confirmationOnlyGate = confirmationFailure.gate;
     }
@@ -4546,6 +4562,7 @@ export async function searchOptimalHCAsync(params: {
       rawOccupancyPct: e.representativeResult.rawOccupancyPct,
       passed: e.passesAllConstraints,
       failingReasons: e.failingReasons,
+      ...(confirmationOnlyGateByN.has(hc) ? { confirmationOnlyFailure: true } : {}),
     });
   }
 

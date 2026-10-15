@@ -5077,7 +5077,7 @@ console.log('\n--- Suite D64: F2 24x7 park resumes when capacity exists ---');
 console.log('\n--- Suite D65: F3 statistics describe the adopted roster ---');
 {
   // Key-order-insensitive digest: the async search assembles its result object in a different key order than the sync one (same values).
-  const sortKeys = (_k: string, v: any) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().filter((k) => k !== 'winningLayout').map((k) => [k, v[k]])) : v); // winningLayout (Item 1 rework 2, display-only label) is left out so the pinned pre-change digests still prove nothing else moved
+  const sortKeys = (_k: string, v: any) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().filter((k) => k !== 'winningLayout' && k !== 'confirmationOnlyFailure').map((k) => [k, v[k]])) : v); // winningLayout (Item 1 rework 2) and confirmationOnlyFailure (Item 2 rework, C3) are display-only labels, left out so the pinned pre-change digests still prove nothing else moved
   const dg = (x: unknown) => createHash('sha1').update(JSON.stringify(x, sortKeys)).digest('hex').slice(0, 16);
   const cal65: CalendarConfig = { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 20 };
   const laborOff65: LaborConfig = { ...LABOR, dailyProductiveHours: 8 };
@@ -6049,7 +6049,7 @@ console.log('\n--- Suite D71: P2-9 shift end without a start distribution ---');
 console.log('\n--- Suite D72: P1-6 / L23 rescue ladder with a confirmation block ---');
 {
   const M72 = 2147483647;
-  const sortKeys72 = (_k: string, v: any) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().filter((k) => k !== 'winningLayout').map((k) => [k, v[k]])) : v); // winningLayout (Item 1 rework 2, display-only label) is left out so the pinned pre-change digests still prove nothing else moved
+  const sortKeys72 = (_k: string, v: any) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().filter((k) => k !== 'winningLayout' && k !== 'confirmationOnlyFailure').map((k) => [k, v[k]])) : v); // winningLayout (Item 1 rework 2) and confirmationOnlyFailure (Item 2 rework, C3) are display-only labels, left out so the pinned pre-change digests still prove nothing else moved
   // Digest over the WHOLE search result. Dates are written as minutes from the first interval so the pinned digests do not depend on the machine's time zone.
   const dig72 = (x: unknown, base: number): string => {
     const rep = function (this: any, k: string, v: any) {
@@ -7568,6 +7568,26 @@ console.log('\n--- Suite D81: reliable minimum - a passing headcount also passes
     assert(!!ev && ev.failedN === 27 && !!mb && mb[1] === '27' && mb[3] === '28', 'D81.a4 N-1 evidence (27) says it passed on the main days but failed on a second, independent set', ev?.differenceSummary);
     assert(!!mb && !!m27 && mb[2] === m27[2], 'D81.a5 the evidence text and the history row quote the SAME failing gate line', `${mb?.[2]} | ${m27?.[2]}`);
     assert(starts >= 2, 'D81.a6 the N-1 evidence run uses the layout that passed the main days (a multi-start coverage roster), not the uniform one', `starts=${starts}`);
+  }
+  // ---- D81.k rework round 1 (2026-10-15): C2 Results line, C3 history flag/badge, C1 block released between confirmation stages ----
+  {
+    const rdK: any = await import('../src/utils/results-display');
+    const rfK = readFileSync(join(resolve(import.meta.dirname, '..'), 'src', 'components', 'ResultsFlow.tsx'), 'utf-8');
+    assert(rdK.CONFIRMED_TWO_SETS_TEXT === 'Confirmed on two independent sets of simulated days.', 'D81.k1 C2 results-display exports the exact line "Confirmed on two independent sets of simulated days."', String(rdK.CONFIRMED_TWO_SETS_TEXT));
+    assert(/!isInfeasible && searchOutput\.recommendedHC !== null && \([\s\S]{0,200}CONFIRMED_TWO_SETS_TEXT/.test(rfK), 'D81.k2 C2 ResultsFlow renders the line only when a recommendation exists (feasible and recommendedHC set)', '');
+    const flagged = (sup.searchHistory as any[]).filter((h) => h.confirmationOnlyFailure === true);
+    assert(flagged.length >= 1 && flagged.every((h) => h.passed === false && h.failingReasons.length === 1 && !!CONF_RE.exec(h.failingReasons[0])) && row27?.confirmationOnlyFailure === true, 'D81.k3 C3 the engine flags the N=27 row (confirmation-only failure) on the history entry; no string matching in the UI', JSON.stringify(flagged.map((h) => h.hc)));
+    assert((sup.searchHistory as any[]).filter((h) => h.confirmationOnlyFailure !== true).every((h) => !CONF_RE.test(h.failingReasons[0] ?? '')) && (sup.searchHistory as any[]).every((h) => h.passed ? h.confirmationOnlyFailure === undefined : true), 'D81.k4 C3 every other row (passes, plain misses) carries no flag', '');
+    assert(supA.searchHistory.find((h: any) => h.hc === 27)?.confirmationOnlyFailure === true, 'D81.k5 C3 async search flags the same row', '');
+    assert(rdK.HISTORY_SECOND_SET_BADGE === 'Fail – 2nd set' && rdK.historyReasonText('R', { confirmationOnlyFailure: true }) === rdK.HISTORY_SECOND_SET_PREFIX + 'R' && rdK.historyReasonText('R', {}) === 'R' && rdK.historyReasonText('R', { confirmationOnlyFailure: false }) === 'R', 'D81.k6 C3 helper: flagged reason gets the second-set prefix, other reasons unchanged', rdK.HISTORY_SECOND_SET_PREFIX);
+    assert(/item\.confirmationOnlyFailure \? \( <span className="[^"]*text-amber[^"]*"[^>]*> <AlertTriangle[^>]*\/> \{HISTORY_SECOND_SET_BADGE\}/.test(rfK.replace(/\s+/g, ' ')), 'D81.k7 C3 ResultsFlow shows the amber "Fail - 2nd set" badge on the flag (red Fail otherwise); main-days cells keep their colours (historyPrimaryPasses unchanged)', '');
+    // C1: the confirmation block is a lazy view - no replication is kept between reads - and every read regenerates byte-identical sets
+    const cbK = hcNs.createConfirmationBlock({ intervals: ivSup, openingWIP: [], categories: catSup, calendar: DEFAULT_CALENDAR, sla: DEFAULT_SLA, seed: DEFAULT_SIM_PARAMS.seed, replications: 4 });
+    const digK = (x: any) => createHash('sha1').update(JSON.stringify(x.cases.map((c: any) => [c.category, c.arrival.getTime(), c.totalAhtMinutes, c.deadline?.getTime?.()]))).digest('hex').slice(0, 12);
+    const view = cbK.sets(); const eager = hcNs.generatePrecomputedReplications({ intervals: ivSup, openingWIP: [], categories: catSup, calendar: DEFAULT_CALENDAR, sla: DEFAULT_SLA, baseSeed: cbK.baseSeed, replications: 4 });
+    const read1 = view[2]; const read2 = view[2];
+    assert(Array.isArray(view) && view.length === 4 && view[4] === undefined && read1 !== read2 && digK(read1) === digK(read2), 'D81.k8 C1 a read gives a fresh, identical case set each time: the view keeps nothing resident', `len=${view.length}`);
+    assert(view.map(digK).join() === eager.map(digK).join() && cbK.sets() === view && !(Object.keys(view).length > 0), 'D81.k9 C1 the lazy view equals the eagerly generated block (same seeds) and holds no own entries', '');
   }
   // progress + leap probes
   {
