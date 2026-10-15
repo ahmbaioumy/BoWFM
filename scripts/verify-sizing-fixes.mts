@@ -3806,7 +3806,7 @@ console.log('\n--- Suite D50: roster polish at fixed HC ---');
 //
 // Characterisation pins, not a fix: they freeze the default-setting required-HC of the cheapest
 // sample file so any engine change that moves it fails loudly. Values are the "after" baseline in
-// docs/audit/sample-hc-after-2026-09-30.jsonl (the full 4-file x 6-cell diff is `npm run test:audit`).
+// docs/audit/sample-hc-after-2026-09-30.jsonl, unchanged for AJM_Only BA/BN/FOFF/PON in sample-hc-after-2026-10-15.jsonl (the full 4-file x 6-cell diff is `npm run test:audit`).
 // The file is loaded through scripts/sample-files.ts, the same loader as the audit script.
 // =================================================================
 console.log('\n--- Suite D49: sample-file guard (AJM_Only.csv, defaults, pooled) ---');
