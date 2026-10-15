@@ -7581,13 +7581,13 @@ console.log('\n--- Suite D81: reliable minimum - a passing headcount also passes
     assert(supA.searchHistory.find((h: any) => h.hc === 27)?.confirmationOnlyFailure === true, 'D81.k5 C3 async search flags the same row', '');
     assert(rdK.HISTORY_SECOND_SET_BADGE === 'Fail – 2nd set' && rdK.historyReasonText('R', { confirmationOnlyFailure: true }) === rdK.HISTORY_SECOND_SET_PREFIX + 'R' && rdK.historyReasonText('R', {}) === 'R' && rdK.historyReasonText('R', { confirmationOnlyFailure: false }) === 'R', 'D81.k6 C3 helper: flagged reason gets the second-set prefix, other reasons unchanged', rdK.HISTORY_SECOND_SET_PREFIX);
     assert(/item\.confirmationOnlyFailure \? \( <span className="[^"]*text-amber[^"]*"[^>]*> <AlertTriangle[^>]*\/> \{HISTORY_SECOND_SET_BADGE\}/.test(rfK.replace(/\s+/g, ' ')), 'D81.k7 C3 ResultsFlow shows the amber "Fail - 2nd set" badge on the flag (red Fail otherwise); main-days cells keep their colours (historyPrimaryPasses unchanged)', '');
-    // C1: the block is not resident between confirmation stages; regenerated sets are byte-identical
+    // C1: the confirmation block is a lazy view - no replication is kept between reads - and every read regenerates byte-identical sets
     const cbK = hcNs.createConfirmationBlock({ intervals: ivSup, openingWIP: [], categories: catSup, calendar: DEFAULT_CALENDAR, sla: DEFAULT_SLA, seed: DEFAULT_SIM_PARAMS.seed, replications: 4 });
-    const caseDigestK = (sets: any[]) => sets.map((x) => createHash('sha1').update(JSON.stringify(x.cases.map((c: any) => [c.category, c.arrival.getTime(), c.totalAhtMinutes]))).digest('hex').slice(0, 12));
-    const k1 = cbK.sets(); const d1 = JSON.stringify(caseDigestK(k1));
-    cbK.release();
-    const k2 = cbK.sets();
-    assert(typeof cbK.release === 'function' && k2 !== k1 && JSON.stringify(caseDigestK(k2)) === d1 && cbK.sets() === k2, 'D81.k8 C1 release() drops the block (next sets() is a new array) and the regenerated sets are identical; without release() the block is reused', '');
+    const digK = (x: any) => createHash('sha1').update(JSON.stringify(x.cases.map((c: any) => [c.category, c.arrival.getTime(), c.totalAhtMinutes, c.deadline?.getTime?.()]))).digest('hex').slice(0, 12);
+    const view = cbK.sets(); const eager = hcNs.generatePrecomputedReplications({ intervals: ivSup, openingWIP: [], categories: catSup, calendar: DEFAULT_CALENDAR, sla: DEFAULT_SLA, baseSeed: cbK.baseSeed, replications: 4 });
+    const read1 = view[2]; const read2 = view[2];
+    assert(Array.isArray(view) && view.length === 4 && view[4] === undefined && read1 !== read2 && digK(read1) === digK(read2), 'D81.k8 C1 a read gives a fresh, identical case set each time: the view keeps nothing resident', `len=${view.length}`);
+    assert(view.map(digK).join() === eager.map(digK).join() && cbK.sets() === view && !(Object.keys(view).length > 0), 'D81.k9 C1 the lazy view equals the eagerly generated block (same seeds) and holds no own entries', '');
   }
   // progress + leap probes
   {
