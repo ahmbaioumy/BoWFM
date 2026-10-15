@@ -1241,3 +1241,14 @@ Idle machine apart from other sessions' light load, one job at a time, sync sear
 - Fresh-seed proof (suite D81.c, 10 seeds independent of the primary and confirmation blocks): support at 28 passes 10/10; the old answer 27 (its coverage-repair roster) passes 5/10 on the same seeds (probe p1.mts earlier: 8/20).
 - Mutations (D81 on a scratch copy, one confirmation dropped at a time): uniform sync -> 4 failures, repair sync -> 6, placement sync -> 2, uniform async -> 2, repair async -> 4, placement async -> 1; unmutated copy 37/37.
 - Existing pin that moved: D78.e support 27 / 34 -> 28 / 35 (confirmation result: 27 clears the main days at category CI low 80.0 but fails the second set).
+
+# Item 2 review round 1 (2026-10-15) — commit eaa120e
+
+- Tester PASS (free gate 31/40, 28/35, 31/39; B10 row + evidence text agree; fresh seeds N=28 20/20, N=27 6/20; sync = async; cap 27 infeasible / cap 28 → 28; deterministic).
+- Auditor PASS (shared pure state machine, layouts confirmed once, re-pins only up, scope, docs).
+- User-side PASS with 2 majors; challenger FAIL on memory. Accepted for rework round 1:
+  - C1 [major] Confirmation block held for the whole search (`hc-search.ts:918-937` closure `built`), now built on every run → EGS_Only peak 1.4 → 2.4 GB (Node, no browser measurement); browser heap limit ~2 GB on an 8 GB laptop → tab crash risk; Sensitivity 25 cells untested on a large file.
+  - C2 [major] Results never says the answer must pass two independent sets; a 27 → 28 change is unexplained.
+  - C3 [major] Confirmation-failure history row shows green main-days figures + red "Fail"; reason numbers come from the second set without saying so.
+  - Minors fixed in the same round: uniform confirmation failure overwrites reportedDist with undefined (`:3243`, async `:4113-4116`); stale "open item P1-7-a" comment `src/types/wfm.ts:691`; PRD date; PRD §10 lines on walk-down bias (confirmation noise can leave the answer one agent higher) and memory.
+  - Backlog: mixed repair-confirm-fail + spread-primary-fail test; vocabulary "simulated days" vs "simulated arrivals" in the ConfigFlow blurb; progress bar restart cue.
