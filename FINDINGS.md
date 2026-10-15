@@ -1252,3 +1252,30 @@ Idle machine apart from other sessions' light load, one job at a time, sync sear
   - C3 [major] Confirmation-failure history row shows green main-days figures + red "Fail"; reason numbers come from the second set without saying so.
   - Minors fixed in the same round: uniform confirmation failure overwrites reportedDist with undefined (`:3243`, async `:4113-4116`); stale "open item P1-7-a" comment `src/types/wfm.ts:691`; PRD date; PRD §10 lines on walk-down bias (confirmation noise can leave the answer one agent higher) and memory.
   - Backlog: mixed repair-confirm-fail + spread-primary-fail test; vocabulary "simulated days" vs "simulated arrivals" in the ConfigFlow blurb; progress bar restart cue.
+
+# Item 2 rework round 1 — build (2026-10-15)
+
+- First attempt (release the resident block after every confirm stage): no memory gain (primary + confirmation sets are both alive during a confirm), AJM_Simu 491 s (2.12x of 4dc1c8c), discarded. Final design: lazy view, replication generated on read and dropped (`createConfirmationBlock`, `generatePrecomputedReplication`). Owner chose it and waived the 2.0x flag.
+- Result identity vs eaa120e (`searchOptimalHC` full JSON, `confirmationOnlyFailure` stripped): claims 5,088,244 B, support 6,615,279 B, healthcare 9,151,188 B, AJM_Only 12,192,681 B all byte-identical (sha256 equal, `cmp` equal). `npm test` with no digest re-pinned (D65/D72 digest helpers now skip the display-only `confirmationOnlyFailure` key, as for `winningLayout`).
+- Node, back-to-back, one job at a time (4dc1c8c / eaa120e / new), wall s and peak RSS MB:
+
+| Case | 4dc1c8c | eaa120e | new | new / 4dc |
+|---|---|---|---|---|
+| support | 18.9 s, 143 | 21.8 s, 169 | 15.1 s, 208 | 0.80 |
+| healthcare | 16.8 s, 155 | 22.8 s, 192 | 28.2 s, 259 | 1.68 |
+| AJM_Only | 16.0 s, 173 | 22.6 s, 221 | 20.7 s, 264 | 1.30 |
+| AJM_Simu | 292 s, 1,733 | 405 s, 2,588 | 668 s, 1,821 | **2.28** |
+| EGS_Only | 568 s, 1,504 | 799 s, 2,529 | 1,022 s, 1,553 | **1.80** |
+
+- Earlier same-day runs (machine noise 30-50%): EGS_Only 533 / 865 / 1,112 s (2.09x), AJM_Simu 232 / 351 / 420 s (1.81x). Cost source: each confirmation run regenerates 30 sets (8.5 s on EGS_Only) x ~30 runs.
+- Browser (headless Chrome, `BoWFM.html` of each commit, EGS_Only.csv uploaded through the file input, normal Run flow, `Runtime.getHeapUsage` every second): 
+
+| Run (headless Chrome, JS heap via `Runtime.getHeapUsage`) | Result | Peak used / total heap | Run time |
+|---|---|---|---|
+| EGS_Only, 1.24.x (4dc1c8c) | 100 / 125, no crash | 492 / 535 MB | 751 s |
+| EGS_Only, 1.25.0 (eaa120e) | 100 / 125, no crash | 1,032 / 1,078 MB | 1,383 s |
+| EGS_Only, new | 100 / 125, no crash, "Confirmed on two independent sets..." shown | 679 / 720 MB | 1,424 s |
+| Sensitivity 5x5 on AJM_Only, new | 25 cells complete, no crash, centre 16 | 205 / 245 MB | 734 s |
+
+- Browser heap is 38% above 1.24.x (679 vs 492 MB) but 34% below 1.25.0; Node RSS is within 3% of 1.24.x. Browser run times were taken while the test suite ran in parallel, so they are not comparable with the Node timings.
+- Tests: first full `npm test` run had one failure, D72.10 (support digest) because the new display flag entered the digest; fixed by skipping the key in the digest helpers (no pinned value changed); D81.k1-k9 passed.
