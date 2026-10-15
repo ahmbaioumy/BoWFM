@@ -2004,3 +2004,9 @@ Order reason: items 3–5 change the gate / simulation itself, so they go before
 - **F7:** `operationalHCWithOff = floor(operationalHC × openDays / coverageDays)` (`hc-search.ts:2145-2147`) — the TEAM total, before gross-up; documented and approved earlier (project_context §5 `:579`, §6.7 `:785`; D40.1/2b). Example: HC 10, open 5 days, team works 4 → floor(12.5) = 12 → Gross 15; carrying 12.5 → 15.625 → 16. Only when the team works fewer days than the calendar is open. Size S.
 - **G7 display:** `pooledCategoryFilter` already exists (`agent-analytics.ts:552`), note text `:698-702`; dash needed in table (`AgentAnalyticsPanel.tsx:424-427`), team row (`:446-449`), chart (`:102-140`), insight (`agent-analytics.ts:627-632`), export (`:736-739`). Size S-M, no HC effect.
 - **P1-11** import validation (`App.tsx:466-522`), error boundary (`main.tsx`), leave-page warning, Sensitivity matrix kept (`SensitivityFlow.tsx:45-49`) — M. **P1-12** calendar guards (`CalendarConfigPanel.tsx:35-80`) — S. **P2-13** outdated note on exports (`ResultsFlow.tsx:481-507`, `AgentAnalyticsPanel.tsx:284`, `DataTable.tsx:125`) — S. None affect HC.
+
+## OWNER DECISIONS 2026-10-15 (items 3, 4, 5, F7)
+- **Item 3:** own target only where set — a category is judged alone only when its own value differs from the global target; all other categories stay on today's shared (pooled) check; values equal to the global target count as "not set". With no own values, results identical to today.
+- **Item 4:** drain end = later of (horizon end + 14 days) and the last case deadline.
+- **Item 5:** fix the manual backlog form default only (blank remaining = full handling time, with a hint); explicitly entered remaining < AHT keeps priority. No engine change. Tier drops to 2 (form + docs); headcount changes only through user input.
+- **F7:** keep rounding the team total down (approved floor); document it clearly in PRD §10 L14. No code change.
