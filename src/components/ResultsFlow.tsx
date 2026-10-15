@@ -24,7 +24,7 @@ import { AgentAnalyticsPanel } from './AgentAnalyticsPanel';
 import { formatDateTime24, getCalendarWorkingDaysInHorizon, getDailyWindowLengthHours } from '../utils/calendar';
 import { resolveClockStartPolicy, verifyAgentTimelineInvariants } from '../utils/des-engine';
 import { buildBreachExportRows, buildCaseExportRows, buildSliceExportRows } from '../utils/export-rows';
-import { clampConfidenceLevelPct, effectivePrimaryTarget } from '../utils/hc-search';
+import { clampConfidenceLevelPct, effectivePrimaryTarget, resolveCategoryAsaTargets } from '../utils/hc-search';
 import { CONFIRMED_TWO_SETS_TEXT, HISTORY_SECOND_SET_BADGE, historyPrimaryPasses, historyReasonText, representativeTone, startTimeSplitLines, startTimeSplitNotes } from '../utils/results-display';
 import {
   Users,
@@ -248,6 +248,9 @@ function ResultsFlowBody({
   const primarySizingFloor = effectivePrimaryTarget(sla.primaryPct, sla);
   const headlineTone = representativeTone(des.primaryAchievedPct, primarySizingFloor, !!searchOutput.infeasibleAdjacentWarning);
   const slackOn = sla.slaAcceptanceSlackEnabled === true;
+  // Item 3: the answer-time target each category is held to (own = ticked in Config; others share the global target).
+  const asaTargets = sla.boAsaEnabled ? resolveCategoryAsaTargets(categories, sla, calendar) : {};
+  const anyOwnAsa = Object.values(asaTargets).some((t) => t.own);
   const primaryTargetLabel = slackOn
     ? `sizing floor ${primarySizingFloor}% (policy ${sla.primaryPct}%)`
     : `${sla.primaryPct}%`;
@@ -1105,9 +1108,16 @@ function ResultsFlowBody({
                   {des.boAsaMeanMinutes}m
                 </span>
                 <span className="text-xs text-slate-500">
-                  {sla.boAsaEnabled ? `target ≤ ${sla.boAsaTarget} ${sla.boAsaUnit}` : 'no ASA target enforced'}
+                  {sla.boAsaEnabled ? `${anyOwnAsa ? 'global ' : ''}target ≤ ${sla.boAsaTarget} ${sla.boAsaUnit}` : 'no ASA target enforced'}
                 </span>
               </div>
+              {sla.boAsaEnabled && (
+                <span className="text-[10px] text-purple-700 block mt-1" data-testid="asa-own-rule">
+                  {anyOwnAsa
+                    ? 'The global target applies to categories without their own target. A category with its own answer-time target must meet it on its own; the others share the global target.'
+                    : 'A category with its own answer-time target must meet it on its own; the others share the global target.'}
+                </span>
+              )}
               <span className="text-[10px] text-slate-400 block mt-1">
                 {(sla.asaClockBasis || 'business_window') === 'business_window'
                   ? 'Mean wait time during open business hours'
@@ -1228,6 +1238,22 @@ function ResultsFlowBody({
                         </td>
                         <td className="py-2.5 px-3 text-right font-sans font-mono text-purple-700 font-semibold">
                           {catStats?.asaMeanMinutes !== undefined ? `${catStats.asaMeanMinutes}m` : '0m'}
+                          {sla.boAsaEnabled && asaTargets[cat.category] && (() => {
+                            const t = asaTargets[cat.category];
+                            if (!t.own) {
+                              return <span className="text-[10px] text-slate-400 font-normal ml-1" data-testid={`asa-target-${cat.category}`}>(global {sla.boAsaTarget} {sla.boAsaUnit}, shared)</span>;
+                            }
+                            const eligible = (catStats?.primaryEligible ?? 0) > 0;
+                            const ok = (catStats?.asaMeanMinutes ?? 0) <= t.targetMinutes;
+                            return (
+                              <span
+                                className={`text-[10px] font-normal ml-1 ${!eligible ? 'text-slate-400' : ok ? 'text-emerald-600' : 'text-rose-600'}`}
+                                data-testid={`asa-target-${cat.category}`}
+                              >
+                                (own {t.targetValue} {t.targetUnit}: {!eligible ? 'no cases to measure, not checked' : ok ? 'met' : 'missed'})
+                              </span>
+                            );
+                          })()}
                         </td>
                       </tr>
                     );

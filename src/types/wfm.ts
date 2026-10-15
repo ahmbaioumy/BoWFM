@@ -22,6 +22,12 @@ export interface CategoryConfig {
   primaryWindowMinutes?: number; // In minutes for simulation calculations
   boAsaTarget?: number; // e.g. 60
   boAsaUnit?: TimeUnit; // 'minutes' | 'hours' | 'days'
+  /**
+   * Item 3 (H4 / L30): the category has its OWN answer-time target iff this is exactly `true` and `boAsaTarget` is a
+   * finite number > 0. Absent / false = the category follows the global target (CSV load, template apply, defaults
+   * and settings files from before this field all copy the global value into `boAsaTarget`; the copy is never a target).
+   */
+  boAsaOwn?: boolean;
 }
 
 export interface ShiftWindow {

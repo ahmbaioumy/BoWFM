@@ -22,6 +22,7 @@ import {
   SLAPolicyConfig,
   StaffingRequirement,
   StandardInterval,
+  TimeUnit,
 } from '../types/wfm';
 import type { DispatchFairnessConfig, WinningLayout } from '../types/wfm';
 import {
@@ -2454,6 +2455,220 @@ export function generatePrecomputedReplications(params: {
   return sets;
 }
 
+/** One category's answer-time (BO ASA) target as the gate resolves it (Item 3). */
+export interface CategoryAsaTarget {
+  /** true iff `boAsaOwn === true` and `boAsaTarget` is a finite number > 0; everything else follows the global target. */
+  own: boolean;
+  targetValue: number;
+  targetUnit: TimeUnit;
+  /** On the same basis as the global target (asaClockBasis; "days" = business window or 24 h). */
+  targetMinutes: number;
+}
+
+/** Statistics for one category (own: its own target; follower: informational, `passes` is the shared verdict of the followers). */
+export interface CategoryAsaVerdict {
+  own: boolean;
+  /** Target in minutes the category is held to. */
+  target: number;
+  targetValue: number;
+  targetUnit: TimeUnit;
+  /** Mean of the per-replication category means (replications with eligible cases only), 0.1 min. */
+  mean: number;
+  ciLow: number;
+  ciHigh: number;
+  /** Replications used (primaryEligible > 0). */
+  n: number;
+  /** false when no replication had an eligible case (nothing to judge; see `asaNotes`). */
+  judged: boolean;
+  passes: boolean;
+}
+
+/** The shared check over the categories that follow the global target (only present when at least one category is own). */
+export interface FollowersAsaVerdict {
+  categories: string[];
+  target: number;
+  mean: number;
+  ciLow: number;
+  ciHigh: number;
+  n: number;
+  judged: boolean;
+  passes: boolean;
+}
+
+/** Item 3 additions to a statistical evaluation; absent when no category has an own answer-time target. */
+export interface AsaStatisticalExtras {
+  categoryAsa?: Record<string, CategoryAsaVerdict>;
+  followersAsa?: FollowersAsaVerdict | null;
+  asaNotes?: string[];
+}
+
+const ASA_UNITS: readonly string[] = ['minutes', 'hours', 'days'];
+
+/**
+ * Item 3 (H4 / L30 / P1-10). The answer-time target each category is held to. A category has an OWN target only when the
+ * planner ticked it (`boAsaOwn === true`) and gave a finite value > 0. Copies of the global value (CSV load, template apply,
+ * defaults, settings files from before the switch) are never targets and always follow the global target and unit.
+ */
+export function resolveCategoryAsaTargets(
+  categories: CategoryConfig[],
+  sla: SLAPolicyConfig,
+  calendar: CalendarConfig
+): Record<string, CategoryAsaTarget> {
+  const basis = sla.asaClockBasis === 'clock_hours' ? 'wall_clock' : 'business_time';
+  const out: Record<string, CategoryAsaTarget> = {};
+  for (const c of categories) {
+    const v = c.boAsaTarget;
+    const own = c.boAsaOwn === true && typeof v === 'number' && Number.isFinite(v) && v > 0;
+    const value = own ? (v as number) : sla.boAsaTarget;
+    const unit: TimeUnit = own && c.boAsaUnit && ASA_UNITS.includes(c.boAsaUnit) ? c.boAsaUnit : sla.boAsaUnit;
+    out[c.name] = { own, targetValue: value, targetUnit: unit, targetMinutes: convertSlaDurationToMinutes(value, unit, basis, calendar) };
+  }
+  return out;
+}
+
+function round1(v: number): number {
+  return Math.round(v * 10) / 10;
+}
+
+/** Mean and two-sided CI of per-replication samples; t value for n - 1 degrees of freedom, n = samples used. */
+function asaSampleStats(samples: number[], ciLevel: number): { n: number; mean: number; ciLow: number; ciHigh: number } {
+  const n = samples.length;
+  if (n === 0) return { n: 0, mean: 0, ciLow: 0, ciHigh: 0 };
+  const mean = samples.reduce((a, v) => a + v, 0) / n;
+  const variance = n > 1 ? samples.reduce((a, v) => a + (v - mean) * (v - mean), 0) / (n - 1) : 0;
+  const se = n > 1 ? Math.sqrt(variance) / Math.sqrt(n) : 0;
+  const t = getTCrit(n - 1, ciLevel);
+  return { n, mean: round1(mean), ciLow: Math.max(0, round1(mean - t * se)), ciHigh: round1(mean + t * se) };
+}
+
+/** Sorted names of every category the replications report, plus the configured ones. */
+function asaCategoryNames(repResults: DESResult[], categories: CategoryConfig[]): string[] {
+  const names = new Set<string>(categories.map((c) => c.name));
+  for (const r of repResults) for (const k of Object.keys(r.categoryStats || {})) names.add(k);
+  return Array.from(names).sort();
+}
+
+/**
+ * Item 3 gate (only called when answer-time is ON and at least one category is own; otherwise the pooled code path in
+ * computeStatisticalEvaluation is untouched). Own categories: per category, upper CI bound of the per-replication category
+ * means vs the own target. Followers: pooled mean per replication weighted by eligible cases over the follower categories
+ * only, vs the global target. A replication counts only if the category (followers: any follower) had eligible cases.
+ */
+function evaluateCategoryAsaTargets(
+  repResults: DESResult[],
+  categories: CategoryConfig[],
+  sla: SLAPolicyConfig,
+  calendar: CalendarConfig,
+  resolved: Record<string, CategoryAsaTarget>,
+  ciLevel: number
+): { categoryAsa: Record<string, CategoryAsaVerdict>; followersAsa: FollowersAsaVerdict | null; asaNotes: string[]; reasons: string[]; failingOwn: string[]; passes: boolean } {
+  const names = asaCategoryNames(repResults, categories);
+  const globalMinutes = convertSlaDurationToMinutes(sla.boAsaTarget, sla.boAsaUnit, sla.asaClockBasis === 'clock_hours' ? 'wall_clock' : 'business_time', calendar);
+  const isOwn = (n: string) => resolved[n]?.own === true;
+  const eligibleOf = (r: DESResult, n: string): { asa: number; elig: number } | null => {
+    const s = r.categoryStats?.[n];
+    return s && s.primaryEligible > 0 && Number.isFinite(s.asaMeanMinutes) ? { asa: s.asaMeanMinutes, elig: s.primaryEligible } : null;
+  };
+  const decide = (st: { n: number; mean: number; ciHigh: number }, target: number) => st.n === 0 || (st.n > 1 ? st.ciHigh <= target : st.mean <= target);
+  const categoryAsa: Record<string, CategoryAsaVerdict> = {};
+  const asaNotes: string[] = [];
+  const reasons: string[] = [];
+  const failingOwn: string[] = [];
+  let passes = true;
+  const followerNames: string[] = [];
+  for (const name of names) {
+    const t = resolved[name] ?? { own: false, targetValue: sla.boAsaTarget, targetUnit: sla.boAsaUnit, targetMinutes: globalMinutes };
+    const samples: number[] = [];
+    for (const r of repResults) {
+      const e = eligibleOf(r, name);
+      if (e) samples.push(e.asa);
+    }
+    const st = asaSampleStats(samples, ciLevel);
+    const own = isOwn(name);
+    if (!own) followerNames.push(name);
+    const pass = own ? decide(st, t.targetMinutes) : true;
+    categoryAsa[name] = { own, target: t.targetMinutes, targetValue: t.targetValue, targetUnit: t.targetUnit, mean: st.mean, ciLow: st.ciLow, ciHigh: st.ciHigh, n: st.n, judged: st.n > 0, passes: pass };
+    if (!own) continue;
+    if (st.n === 0) {
+      asaNotes.push(`Category '${name}': its own answer-time target (${t.targetValue} ${t.targetUnit}) was not checked because it had no cases to measure in the simulated days.`);
+    } else if (!pass) {
+      passes = false;
+      failingOwn.push(name);
+      reasons.push(`BO ASA (category '${name}') ${ciLevel}% CI [${st.ciLow}m, ${st.ciHigh}m] upper bound > own target ${t.targetValue}${t.targetUnit} (${t.targetMinutes}m) (Mean: ${st.mean}m)`);
+    }
+  }
+  let followersAsa: FollowersAsaVerdict | null = null;
+  if (followerNames.length > 0) {
+    const samples: number[] = [];
+    for (const r of repResults) {
+      let w = 0;
+      let s = 0;
+      for (const name of followerNames) {
+        const e = eligibleOf(r, name);
+        if (e) { w += e.elig; s += e.asa * e.elig; }
+      }
+      if (w > 0) samples.push(s / w);
+    }
+    const st = asaSampleStats(samples, ciLevel);
+    const pass = decide(st, globalMinutes);
+    followersAsa = { categories: followerNames, target: globalMinutes, mean: st.mean, ciLow: st.ciLow, ciHigh: st.ciHigh, n: st.n, judged: st.n > 0, passes: pass };
+    for (const name of followerNames) categoryAsa[name].passes = pass;
+    if (st.n === 0) {
+      asaNotes.push('The categories that share the global answer-time target had no cases to measure in the simulated days, so the shared target was not checked.');
+    } else if (!pass) {
+      passes = false;
+      reasons.push(`BO ASA ${ciLevel}% CI [${st.ciLow}m, ${st.ciHigh}m] upper bound > target ${sla.boAsaTarget}${sla.boAsaUnit} (${globalMinutes}m) (Mean: ${st.mean}m) for the categories without their own target`);
+    }
+  }
+  return { categoryAsa, followersAsa, asaNotes, reasons, failingOwn, passes };
+}
+
+/**
+ * Item 3: the single representative run's answer-time verdict on the same resolved targets as the statistical gate
+ * (own categories vs their own target, followers pooled and weighted vs the global). With no own category this is exactly
+ * the engine's own flag, so nothing changes for existing setups. Used by the "fell slightly below target" warning and the label.
+ */
+export function singleRunAsaPasses(res: DESResult, categories: CategoryConfig[], sla: SLAPolicyConfig, calendar: CalendarConfig): boolean {
+  if (!sla.boAsaEnabled) return res.passesBOASA;
+  const resolved = resolveCategoryAsaTargets(categories, sla, calendar);
+  if (!Object.values(resolved).some((t) => t.own)) return res.passesBOASA;
+  const globalMinutes = convertSlaDurationToMinutes(sla.boAsaTarget, sla.boAsaUnit, sla.asaClockBasis === 'clock_hours' ? 'wall_clock' : 'business_time', calendar);
+  let w = 0;
+  let s = 0;
+  for (const name of Object.keys(res.categoryStats || {}).sort()) {
+    const st = res.categoryStats[name];
+    if (!st || !(st.primaryEligible > 0) || !Number.isFinite(st.asaMeanMinutes)) continue;
+    const t = resolved[name];
+    if (t?.own) {
+      if (st.asaMeanMinutes > t.targetMinutes) return false;
+    } else {
+      w += st.primaryEligible;
+      s += st.asaMeanMinutes * st.primaryEligible;
+    }
+  }
+  return w === 0 || s / w <= globalMinutes;
+}
+
+/**
+ * Item 3 label: what kept a candidate (the N-1 evaluation) from passing on answer time, when Primary SLA was not the reason and at
+ * least one category has its own target: the own-target category, else the categories sharing the global target. Null otherwise
+ * (no own category -> no detail on the evaluation -> the existing label rules decide, unchanged).
+ */
+export function describeOwnAsaBinding(
+  ev: ({ passesPrimaryCI: boolean; passesCategorySLA: boolean } & AsaStatisticalExtras) | undefined | null,
+  sla: SLAPolicyConfig
+): string | null {
+  if (!ev || !ev.categoryAsa || !ev.passesPrimaryCI || !ev.passesCategorySLA) return null;
+  for (const name of Object.keys(ev.categoryAsa).sort()) {
+    const a = ev.categoryAsa[name];
+    if (a.own && a.judged && !a.passes) return `Backoffice ASA Target for category '${name}' (own target ≤ ${a.targetValue} ${a.targetUnit})`;
+  }
+  if (ev.followersAsa && ev.followersAsa.judged && !ev.followersAsa.passes) {
+    return `Backoffice ASA Target (≤ ${sla.boAsaTarget} ${sla.boAsaUnit}) for the categories without their own target`;
+  }
+  return null;
+}
+
 export function computeStatisticalEvaluation(
   operationalHC: number,
   repResults: DESResult[],
@@ -2544,8 +2759,15 @@ export function computeStatisticalEvaluation(
     asaBasis,
     calendar
   );
-  const passesBOASA =
+  const passesBOASAPooled =
     !sla.boAsaEnabled || (R > 1 ? asaCi95High <= targetAsaMinutes : asaMean <= targetAsaMinutes);
+  // Item 3: with at least one category on its OWN target the pooled check above is replaced by the per-category gate
+  // (own categories one by one, the rest pooled over themselves). With none, the pooled check stands untouched.
+  const asaResolved = sla.boAsaEnabled ? resolveCategoryAsaTargets(categories, sla, calendar) : {};
+  const asaOwnDetail = Object.values(asaResolved).some((t) => t.own)
+    ? evaluateCategoryAsaTargets(repResults, categories, sla, calendar, asaResolved, ciLevel)
+    : null;
+  const passesBOASA = asaOwnDetail ? asaOwnDetail.passes : passesBOASAPooled;
 
   // Representative result is the replication closest to median primary SLA (BUG-P2-O)
   let bestRepIdx = 0;
@@ -2580,7 +2802,7 @@ export function computeStatisticalEvaluation(
     const cLow = Math.max(0, Math.round((cMean - tVal * cSE) * 10) / 10);
     const cHigh = Math.min(100, Math.round((cMean + tVal * cSE) * 10) / 10);
     const catPass = R > 1 ? cLow >= catTarget : cMean >= catTarget;
-    categoryPasses[catName] = catPass;
+    categoryPasses[catName] = catPass && !(asaOwnDetail?.failingOwn.includes(catName) ?? false);
 
     if (!catPass) {
       passesCategorySLA = false;
@@ -2601,9 +2823,13 @@ export function computeStatisticalEvaluation(
   }
   const boAsaCapBroken = sla.boAsaEnabled && !passesBOASA;
   if (boAsaCapBroken) {
-    failingReasons.push(
-      `BO ASA ${ciLevel}% CI [${asaCi95Low}m, ${asaCi95High}m] upper bound > target ${sla.boAsaTarget}${sla.boAsaUnit} (${targetAsaMinutes}m) (Mean: ${Math.round(asaMean * 10) / 10}m)`
-    );
+    if (asaOwnDetail) {
+      failingReasons.push(...asaOwnDetail.reasons);
+    } else {
+      failingReasons.push(
+        `BO ASA ${ciLevel}% CI [${asaCi95Low}m, ${asaCi95High}m] upper bound > target ${sla.boAsaTarget}${sla.boAsaUnit} (${targetAsaMinutes}m) (Mean: ${Math.round(asaMean * 10) / 10}m)`
+      );
+    }
   }
   if (!passesOccupancyCap) {
     failingReasons.push(
@@ -2652,6 +2878,8 @@ export function computeStatisticalEvaluation(
     passesOrgGates: passesPrimaryCI && passesBOASA && passesOccupancyCap && passesCoverage,
     passesAllConstraints,
     failingReasons,
+    // Item 3: per-category answer-time detail; only present when a category has its own target.
+    ...(asaOwnDetail ? { categoryAsa: asaOwnDetail.categoryAsa, followersAsa: asaOwnDetail.followersAsa, asaNotes: asaOwnDetail.asaNotes } : {}),
   };
 }
 
@@ -2679,12 +2907,16 @@ export function evaluateCandidateStatistical(params: {
   representativeRepIndex: number;
   passesPrimaryCI: boolean;
   passesCategorySLA: boolean;
-  /** Per-category verdict (same keys the category SLA gate walks); every value true iff passesCategorySLA. */
+  /** Per-category verdict (same keys the category SLA gate walks); true iff the category meets its Primary SLA (and, with an own answer-time target, that target). */
   categoryPasses: Record<string, boolean>;
   /** The org-wide gates: overall Primary SLA CI, BO ASA, occupancy cap, coverage floor. */
   passesOrgGates: boolean;
   passesAllConstraints: boolean;
   failingReasons: string[];
+  /** Item 3: per-category answer-time detail (present only when a category has its own target). */
+  categoryAsa?: Record<string, CategoryAsaVerdict>;
+  followersAsa?: FollowersAsaVerdict | null;
+  asaNotes?: string[];
 } {
   const {
     operationalHC,
@@ -2765,12 +2997,16 @@ async function evaluateCandidateStatisticalAsync(params: {
   representativeRepIndex: number;
   passesPrimaryCI: boolean;
   passesCategorySLA: boolean;
-  /** Per-category verdict (same keys the category SLA gate walks); every value true iff passesCategorySLA. */
+  /** Per-category verdict (same keys the category SLA gate walks); true iff the category meets its Primary SLA (and, with an own answer-time target, that target). */
   categoryPasses: Record<string, boolean>;
   /** The org-wide gates: overall Primary SLA CI, BO ASA, occupancy cap, coverage floor. */
   passesOrgGates: boolean;
   passesAllConstraints: boolean;
   failingReasons: string[];
+  /** Item 3: per-category answer-time detail (present only when a category has its own target). */
+  categoryAsa?: Record<string, CategoryAsaVerdict>;
+  followersAsa?: FollowersAsaVerdict | null;
+  asaNotes?: string[];
 }> {
   const {
     operationalHC,
@@ -3524,7 +3760,7 @@ export function searchOptimalHC(params: {
   const primaryFloorSync = effectivePrimaryTarget(sla.primaryPct, sla);
   const repPrimaryMissesFloorSync = finalDESResult.primaryAchievedPct < primaryFloorSync;
   const repOtherConstraintsFailSync =
-    (sla.boAsaEnabled && !finalDESResult.passesBOASA) || !finalDESResult.passesOccupancyCap;
+    (sla.boAsaEnabled && !singleRunAsaPasses(finalDESResult, categories, sla, calendar)) || !finalDESResult.passesOccupancyCap;
   if (!isInfeasible && (repPrimaryMissesFloorSync || repOtherConstraintsFailSync)) {
     isInfeasibleAdjacent = true;
     infeasibleAdjacentWarning = `Representative DES run at recommended N=${evalN} fell slightly below target: Primary SLA ${finalDESResult.primaryAchievedPct}% (${formatPrimaryTargetLabel(sla.primaryPct, sla)}). Statistical ${clampConfidenceLevelPct(sla.confidenceLevelPct)}% CI across replications remains satisfied.`;
@@ -3581,7 +3817,11 @@ export function searchOptimalHC(params: {
     const cb = resolveCoverageBinding(evalCache.get(recommendedHC - 1), coverageRepairReasonsByN.get(recommendedHC - 1), sla, recommendedHC)!;
     bindingConstraintType = cb.type;
     bindingConstraintDescription = cb.description;
-  } else if (sla.boAsaEnabled && primaryPassedResult && !primaryPassedResult.representativeResult.passesBOASA) {
+  } else if (recommendedHC !== null && describeOwnAsaBinding(evalCache.get(recommendedHC - 1), sla)) {
+    // Item 3: the candidate one below failed on a category's own answer-time target.
+    bindingConstraintType = 'bo_asa_cap';
+    bindingConstraintDescription = describeOwnAsaBinding(evalCache.get(recommendedHC - 1), sla)!;
+  } else if (sla.boAsaEnabled && primaryPassedResult && !singleRunAsaPasses(primaryPassedResult.representativeResult, categories, sla, calendar)) {
     bindingConstraintType = 'bo_asa_cap';
     bindingConstraintDescription = `Backoffice ASA Target (≤ ${sla.boAsaTarget} ${sla.boAsaUnit})`;
   } else if (primaryPassedResult && !primaryPassedResult.representativeResult.passesOccupancyCap) {
@@ -4483,7 +4723,7 @@ export async function searchOptimalHCAsync(params: {
   const primaryFloorAsync = effectivePrimaryTarget(sla.primaryPct, sla);
   const repPrimaryMissesFloorAsync = finalDESResult.primaryAchievedPct < primaryFloorAsync;
   const repOtherConstraintsFailAsync =
-    (sla.boAsaEnabled && !finalDESResult.passesBOASA) || !finalDESResult.passesOccupancyCap;
+    (sla.boAsaEnabled && !singleRunAsaPasses(finalDESResult, categories, sla, calendar)) || !finalDESResult.passesOccupancyCap;
   if (!isInfeasible && (repPrimaryMissesFloorAsync || repOtherConstraintsFailAsync)) {
     isInfeasibleAdjacent = true;
     infeasibleAdjacentWarning = `Representative DES run at recommended N=${evalN} fell slightly below target: Primary SLA ${finalDESResult.primaryAchievedPct}% (${formatPrimaryTargetLabel(sla.primaryPct, sla)}). Statistical ${clampConfidenceLevelPct(sla.confidenceLevelPct)}% CI across replications remains satisfied.`;
@@ -4539,7 +4779,11 @@ export async function searchOptimalHCAsync(params: {
     const cb = resolveCoverageBinding(evalCache.get(recommendedHC - 1), coverageRepairReasonsByN.get(recommendedHC - 1), sla, recommendedHC)!;
     bindingConstraintType = cb.type;
     bindingConstraintDescription = cb.description;
-  } else if (sla.boAsaEnabled && primaryPassedResult && !primaryPassedResult.representativeResult.passesBOASA) {
+  } else if (recommendedHC !== null && describeOwnAsaBinding(evalCache.get(recommendedHC - 1), sla)) {
+    // Item 3: the candidate one below failed on a category's own answer-time target.
+    bindingConstraintType = 'bo_asa_cap';
+    bindingConstraintDescription = describeOwnAsaBinding(evalCache.get(recommendedHC - 1), sla)!;
+  } else if (sla.boAsaEnabled && primaryPassedResult && !singleRunAsaPasses(primaryPassedResult.representativeResult, categories, sla, calendar)) {
     bindingConstraintType = 'bo_asa_cap';
     bindingConstraintDescription = `Backoffice ASA Target (≤ ${sla.boAsaTarget} ${sla.boAsaUnit})`;
   } else if (primaryPassedResult && !primaryPassedResult.representativeResult.passesOccupancyCap) {

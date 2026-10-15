@@ -637,6 +637,7 @@ export function ConfigFlow({
                         primaryWindowMinutes: primaryWinMin,
                         boAsaTarget: sla.boAsaTarget,
                         boAsaUnit: sla.boAsaUnit,
+                        boAsaOwn: false,
                       }))
                     );
                   }}
@@ -733,6 +734,11 @@ export function ConfigFlow({
                   <p className="text-[11px] text-slate-500">
                     Each identified category has its own distinct Primary % target, Primary window, Absolute 100% window{sla.boAsaEnabled ? ', and BO ASA target' : ''}.
                   </p>
+                  {sla.boAsaEnabled && (
+                    <p className="text-[11px] text-purple-700" data-testid="asa-own-rule">
+                      A category with its own answer-time target must meet it on its own; the others share the global target.
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -757,6 +763,7 @@ export function ConfigFlow({
                         const targetPct = c.primaryPct !== undefined ? c.primaryPct : sla.primaryPct;
                         const priWinVal = c.primaryWindow !== undefined ? c.primaryWindow : (c.primaryWindowMinutes ? c.primaryWindowMinutes / 60 : sla.primaryWindow);
                         const priUnit = c.primaryUnit || 'hours';
+                        const asaOwn = c.boAsaOwn === true;
                         const asaTargetVal = c.boAsaTarget !== undefined ? c.boAsaTarget : sla.boAsaTarget;
                         const asaUnit = c.boAsaUnit || sla.boAsaUnit;
 
@@ -832,6 +839,31 @@ export function ConfigFlow({
                             {/* BO ASA Target (Conditional) */}
                             {sla.boAsaEnabled && (
                               <td className="py-2.5 px-3">
+                                <label className="mb-1 inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-700 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={asaOwn}
+                                    data-testid={`asa-own-${c.id}`}
+                                    onChange={(e) => {
+                                      const on = e.target.checked;
+                                      onUpdateCategories(
+                                        categories.map((cat) =>
+                                          cat.id === c.id
+                                            ? { ...cat, boAsaOwn: on, boAsaTarget: sla.boAsaTarget, boAsaUnit: sla.boAsaUnit }
+                                            : cat
+                                        )
+                                      );
+                                    }}
+                                  />
+                                  Own target
+                                </label>
+                                {!asaOwn && (
+                                  <div className="flex items-center gap-1.5 text-[11px] font-mono text-slate-400" data-testid={`asa-follows-${c.id}`}>
+                                    <span>≤ {sla.boAsaTarget} {sla.boAsaUnit}</span>
+                                    <span className="font-sans italic">follows global</span>
+                                  </div>
+                                )}
+                                {asaOwn && (
                                 <div className="flex items-center gap-1.5">
                                   <span className="text-slate-400">≤</span>
                                   <NumberField
@@ -868,6 +900,7 @@ export function ConfigFlow({
                                     <option value="days">Days</option>
                                   </select>
                                 </div>
+                                )}
                               </td>
                             )}
 
@@ -1195,8 +1228,8 @@ export function ConfigFlow({
                       const targetPct = c.primaryPct !== undefined ? c.primaryPct : sla.primaryPct;
                       const priWinVal = c.primaryWindow !== undefined ? c.primaryWindow : (c.primaryWindowMinutes ? c.primaryWindowMinutes / 60 : sla.primaryWindow);
                       const priUnit = c.primaryUnit || sla.primaryUnit || 'hours';
-                      const asaTargetVal = c.boAsaTarget !== undefined ? c.boAsaTarget : sla.boAsaTarget;
-                      const asaUnit = c.boAsaUnit || sla.boAsaUnit || 'minutes';
+                      const asaTargetVal = c.boAsaOwn === true && c.boAsaTarget !== undefined ? c.boAsaTarget : sla.boAsaTarget;
+                      const asaUnit = c.boAsaOwn === true ? (c.boAsaUnit || sla.boAsaUnit || 'minutes') : (sla.boAsaUnit || 'minutes');
 
                       return (
                         <tr key={c.id} className="hover:bg-slate-50/80 transition">
@@ -1265,7 +1298,7 @@ export function ConfigFlow({
                               <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-purple-50/70 border border-purple-200/80 rounded-md text-purple-800" title="Centrally managed in SLA Policy tab">
                                 <Lock className="w-3 h-3 text-purple-400 shrink-0" />
                                 <span className="font-mono text-xs font-semibold">
-                                  ≤ {asaTargetVal} {asaUnit}
+                                  ≤ {asaTargetVal} {asaUnit}{c.boAsaOwn === true ? ' (own)' : ''}
                                 </span>
                               </div>
                             </td>

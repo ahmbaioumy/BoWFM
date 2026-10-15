@@ -1286,3 +1286,32 @@ Idle machine apart from other sessions' light load, one job at a time, sync sear
 - Challenger PASS: memory major resolved by code reading (lazy view, no retained references, one read per replication); seed formula identical; async same shape.
 - Backlog (minor): mixed case (uniform fails confirmation, repair fails main days) — `reportedDist = confirmationFailure.roster ?? reportedDist` can pair uniform figures with the repair roster in the N−1 evidence / final audit runs (display only, untested; `hc-search.ts:3259`, `:4133`); infeasible run's "RECOMMENDED HC" card shows N = cap; browser heap +38 % vs 4dc1c8c (likely uncollected garbage); runtime 1.8–2.3x on large files (owner waived; speed item for the backlog).
 - Supervisor verdict: ready for owner approval.
+
+# Item 3 build — measurements (2026-10-15)
+
+Built per PLAN.md "BUILD PLAN — Item 3" + amendments E1-E8 (explicit `boAsaOwn` switch). Base commit 24c21f2. Node, `searchOptimalHC` pooled, default calendar / labor / R = 30 / seed 12345. "Before" = a copy of the tree at 24c21f2 run from a scratch directory; "after" = the worktree. Machine shared with another job, so times vary 10-30%.
+
+Nothing ticked (must be identical):
+
+| Case | Before: HC / gross / ASA mean | After | sha256 of the full result | Time before / after |
+|---|---|---|---|---|
+| claims (default categories, Claims_Life holds 90), ASA off | 31 / 40 / 32.3 | same | equal (5,088,244 B) | 15.7 s / 14.9 s |
+| claims, ASA on 60 | 31 / 40 / 32.3 | same | equal (5,088,245 B) | 19.7 s / 18.4 s |
+| support, ASA on 60 | 43 / 54 / 59.5 | same | equal (7,026,784 B) | 156 s / 127 s |
+| healthcare, ASA on 60 | 42 / 53 / 59.3 | same | equal (9,752,898 B) | 180 s / 169 s |
+| AJM_Only, ASA on 60 | 28 / 35 / 58.1 | same | equal (13,332,165 B) | 265 s / 297 s |
+| healthcare ASA off, support ASA off, AJM_Only ASA off | 31 / 39, 28 / 35, 16 / 20 | same | (HC / gross / ASA compared, no hash) | |
+
+Ticked (after only; before the tick is ignored, so the before answer is the unticked row above):
+
+| Case | HC / gross | Binding label | Note |
+|---|---|---|---|
+| claims, Claims_Life ticked own 90 (global 60) | 31 / 40 | analytical baseline (floor) | unchanged: the floor binds, Life is looser than the global |
+| claims, Claims_Life ticked own 30 | 32 / 41 | "Backoffice ASA Target for category 'Claims_Life' (own target ≤ 30 minutes)" | N-1 row: "BO ASA (category 'Claims_Life') 95% CI [31.2m, 32.4m] upper bound > own target 30minutes (30m)" |
+| support, ASA 60, Billing_Support ticked own 30 | **62 / 78** (from 43 / 54) | "Backoffice ASA Target (≤ 60 minutes) for the categories without their own target" (after the label extension; the measured run predates it and read the Primary SLA label) | N-1 = 61 fails on the followers: Technical_Escalations alone 62.4 min > 60. Billing_Support left the pool, whose mean (59.5 at 43) was held down by it |
+
+Findings worth the owner's eye:
+- A tick on a fast category can RAISE the headcount a lot (support 43 -> 62) because the remaining categories lose the averaging benefit; a tick looser than the global can only keep or lower it. Written into PRD §6 and L30.
+- The existing binding label never named the answer-time gate on N-1 (AJM_Only + 60: N-1 = 27 fails BO ASA, label still "Primary SLA"). Left as is when nothing is ticked (identical output); with a tick the label now names the own category or the sharing categories.
+
+Tests: new suite D82 (52 checks) fails 33 of 51 on the unchanged engine (fail-first run of D82 alone, 18 passed = the "nothing ticked is identical" controls), 52 / 52 after. Mutations (D82 alone, scratch copies): copies treated as own (flag ignored) 16 fail (D82.a1, a1b, a4, b1d-f, b2a/b, b5b, b10, d3, d4, d6 claims / support / healthcare ASA on, e1); own loop skipped 13 fail (b1a-d, b3a, b8, b9, c1, c3, c4, c7a/b, f); followers pooled over all categories 9 fail (b1d/e, b2a, b5b, b6, c4, c6a/b, e1). Full results: see the test totals in the commit message / report.
