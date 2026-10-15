@@ -2017,3 +2017,57 @@ Order reason: items 3–5 change the gate / simulation itself, so they go before
 - C3 History row for a confirmation-only failure: badge "Fail – 2nd set" (amber, not red) and the reason prefixed so the quoted numbers are labelled as the second set's; main-days cells keep their colours. Detect via the existing confirmation flag/text, not string matching if a flag is available (add an optional field to the history entry if needed).
 - Minors per FINDINGS "Item 2 review round 1".
 - Scope: `src/utils/hc-search.ts`, `src/types/wfm.ts` (optional field + stale comment), `src/components/ResultsFlow.tsx`, `src/utils/results-display.ts`, `scripts/verify-sizing-fixes.mts` (D81 additions), `PRD.md` (1.25.1), `project_context.md`, `FINDINGS.md`, `BoWFM.html`.
+
+---
+
+# BUILD PLAN — Item 3: per-category answer-time (BO ASA) targets (H4, L30 / P1-10), 2026-10-15
+
+**Task:** when Answer-time (BO ASA) is on, a category whose own target differs from the global target must meet its own target; every other category stays on today's shared check.
+**End user:** WFM planner. **Tier 3** (gate change). Reviewers: `tester` + `auditor` + `user-side` + final `challenger`.
+**Skills:** `wfm-sizing-simulation`, `wfm-engine-testing`, `browser-automation`.
+**Owner decision 2026-10-15:** own target only where set; values equal to the global target count as "not set"; with no own values results identical to today.
+
+## Facts (investigator 2026-10-15; see "Facts for items 3–6")
+- Stored `cat.boAsaTarget` / `boAsaUnit` (`types/wfm.ts:23-24`); editable column in ConfigFlow when ASA on (`:751, :833-872`); never read by the engine.
+- Global gate: `computeStatisticalEvaluation` (`hc-search.ts:~2442`, shared by sync/async and by the confirmation block): mean of per-replication `boAsaMeanMinutes` (all categories pooled), pass when upper 95 % CI ≤ target (mean when R = 1); reason "BO ASA …"; `passesBoAsaCap`.
+- DES already gives per-category ASA per replication: `categoryStats[cat].asaMeanMinutes` and eligible count `primaryEligible` (`des-engine.ts:2057, 2138-2139`).
+- Global value is copied into categories at CSV load (`csv-parser.ts:1022-1023`), template apply (`ConfigFlow.tsx:638-639`) and defaults (`default-config.ts:67-94`, Claims_Life 90 vs global 60).
+
+## Design
+1. **"Own target" rule** (pure helper, e.g. `resolveCategoryAsaTargets(categories, sla, calendar)` in hc-search or a small utils file): a category has an own target iff `boAsaTarget` is a finite number > 0 AND its value converted to minutes (`convertSlaDurationToMinutes`, same basis as the global) differs from the global target in minutes by more than 1e-9. Everything else = "inherits".
+2. **Gate** (only when `sla.boAsaEnabled`):
+   - Categories with an own target: per category, samples `categoryStats[cat].asaMeanMinutes` over replications (skip undefined), mean, SE, upper CI with the same t value; pass iff upper CI ≤ own target (mean when R = 1). Failure reason "BO ASA (category '<name>') 95% CI [..] upper bound > <target> min (own target)". Fold into `categoryPasses[cat]` and into `passesBoAsaCap` / `passesOrgGates`.
+   - Inheriting categories: the existing pooled gate, but computed over the inheriting categories only — weighted mean per replication `Σ(asaMean × primaryEligible) / Σ primaryEligible` over inheriting categories. When NO category has an own target this must reproduce today's `boAsaMeanMinutes` exactly → keep today's code path unchanged in that case (byte-identical guarantee) and use the weighted subset only when at least one own target exists. If all categories have own targets, no pooled gate.
+   - Reason texts all start with "BO ASA" (D77.2b invariant).
+3. **Defaults / copies:** no data migration; rule 1 makes copies equal to the global target count as "not set". `default-config.ts` Claims_Life 90 vs global 60 → becomes an own target when ASA is enabled on the default sample: builder measures the default sample with ASA on before/after and REPORTS it (owner to see); do not change defaults silently.
+4. **Labels / flags:** binding-constraint label (`hc-search.ts:~3569` sync, `~4526` async) names the failing category's own target when the binding gate is a category ASA; single-seed "slightly below target" flags (`~3512`, `~4470`, `des-engine.ts:2175`) — keep global-only, document.
+5. **UI text:** ConfigFlow help (`:734`) and Results (`ResultsFlow.tsx:1098`) state the rule: "A category with its own answer-time target must meet it on its own; the others share the global target."
+6. Sync, async and confirmation all go through `computeStatisticalEvaluation` — no other copy.
+
+## Steps (sonnet-executor, fail-first)
+1. Checkpoint. Suite **D82** before the RESULTS block of `scripts/verify-sizing-fixes.mts`:
+   a. helper: copies equal to global (incl. unit conversion, e.g. 1 h vs 60 min) → inherit; 0/NaN/undefined → inherit; different → own.
+   b. gate unit test with hand-built replications: own-target category failing its tighter target fails the run with the "BO ASA (category …)" reason and `passesBoAsaCap` false; looser own target can pass while pooled-of-rest passes; D57-style replications without per-category ASA don't produce NaN.
+   c. fixture: one category tighter target → recommended HC higher than without; sync == async.
+   d. no own targets (all equal to global, or unset) → full result identical to today on the three samples with ASA on (digest or JSON compare) and with ASA off.
+   e. D77.2b invariant holds.
+2. Implement design 1–6 (`hc-search.ts`, UI text in `ConfigFlow.tsx`, `ResultsFlow.tsx`).
+3. `npm run lint`, full `npm test` once. Existing pins may not change (rule: no own targets in existing fixtures → identical). Any change → stop and report.
+4. Measure: default sample with ASA on (60 min) before/after (Claims_Life own 90 → looser — HC same or lower?), support + ASA 60 before/after, AJM_Only + 60. Runtime.
+5. Mutation: skip the own-target loop → D82.c fails; treat copies as own → D82.d fails.
+6. Docs: PRD (H4/L30/P1-10 resolved, rule text, version 1.26.0), project_context §5/§11/counts, docs/wfm/07. Rebuild, `npm test` incl. check:artifact.
+
+## Scope lock
+`src/utils/hc-search.ts`, `src/components/ConfigFlow.tsx` (help text only), `src/components/ResultsFlow.tsx` (rule text / label only), `src/types/wfm.ts` (optional field only if unavoidable), `scripts/verify-sizing-fixes.mts` (D82), `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`, `FINDINGS.md`, `BoWFM.html`. No `des-engine.ts`, no `csv-parser.ts`, no `default-config.ts`.
+
+## Acceptance
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | Own tighter target obeyed | D82.c HC rises; browser: set one category 30 min, global 60 → HC rises, reason names the category |
+| 2 | No own targets → identical | D82.d; existing pins unchanged |
+| 3 | Copies are not targets | D82.a; browser: CSV upload (copies) → same HC as before |
+| 4 | Sync = async = confirmation | D82.c |
+| 5 | Planner told the rule | browser: help + Results text visible |
+| 6 | No regression | lint; npm test green |
+| 7 | Mutation | step 5 |
+| 8 | Docs + artifact | check:artifact passes |
