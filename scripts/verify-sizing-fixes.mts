@@ -5077,7 +5077,7 @@ console.log('\n--- Suite D64: F2 24x7 park resumes when capacity exists ---');
 console.log('\n--- Suite D65: F3 statistics describe the adopted roster ---');
 {
   // Key-order-insensitive digest: the async search assembles its result object in a different key order than the sync one (same values).
-  const sortKeys = (_k: string, v: any) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().filter((k) => k !== 'winningLayout').map((k) => [k, v[k]])) : v); // winningLayout (Item 1 rework 2, display-only label) is left out so the pinned pre-change digests still prove nothing else moved
+  const sortKeys = (_k: string, v: any) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().filter((k) => k !== 'winningLayout' && k !== 'confirmationOnlyFailure').map((k) => [k, v[k]])) : v); // winningLayout (Item 1 rework 2) and confirmationOnlyFailure (Item 2 rework, C3) are display-only labels, left out so the pinned pre-change digests still prove nothing else moved
   const dg = (x: unknown) => createHash('sha1').update(JSON.stringify(x, sortKeys)).digest('hex').slice(0, 16);
   const cal65: CalendarConfig = { ...BIZ_CAL, dailyOpenHour: 8, dailyCloseHour: 20 };
   const laborOff65: LaborConfig = { ...LABOR, dailyProductiveHours: 8 };
@@ -6049,7 +6049,7 @@ console.log('\n--- Suite D71: P2-9 shift end without a start distribution ---');
 console.log('\n--- Suite D72: P1-6 / L23 rescue ladder with a confirmation block ---');
 {
   const M72 = 2147483647;
-  const sortKeys72 = (_k: string, v: any) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().filter((k) => k !== 'winningLayout').map((k) => [k, v[k]])) : v); // winningLayout (Item 1 rework 2, display-only label) is left out so the pinned pre-change digests still prove nothing else moved
+  const sortKeys72 = (_k: string, v: any) => (v && typeof v === 'object' && !Array.isArray(v) ? Object.fromEntries(Object.keys(v).sort().filter((k) => k !== 'winningLayout' && k !== 'confirmationOnlyFailure').map((k) => [k, v[k]])) : v); // winningLayout (Item 1 rework 2) and confirmationOnlyFailure (Item 2 rework, C3) are display-only labels, left out so the pinned pre-change digests still prove nothing else moved
   // Digest over the WHOLE search result. Dates are written as minutes from the first interval so the pinned digests do not depend on the machine's time zone.
   const dig72 = (x: unknown, base: number): string => {
     const rep = function (this: any, k: string, v: any) {
