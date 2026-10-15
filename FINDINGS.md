@@ -1279,3 +1279,10 @@ Idle machine apart from other sessions' light load, one job at a time, sync sear
 
 - Browser heap is 38% above 1.24.x (679 vs 492 MB) but 34% below 1.25.0; Node RSS is within 3% of 1.24.x. Browser run times were taken while the test suite ran in parallel, so they are not comparable with the Node timings.
 - Tests: first full `npm test` run had one failure, D72.10 (support digest) because the new display flag entered the digest; fixed by skipping the key in the digest helpers (no pinned value changed); D81.k1-k9 passed.
+
+# Item 2 review round 2 (2026-10-15) — rework commit c2b6013
+
+- Tester PASS: free gate 31/40, 28/35, 31/39, 0 errors; confirmed line shown on feasible runs, absent when infeasible; N=27 row amber "Fail – 2nd set" with the second-set prefix, N=21 red Fail; results identical to eaa120e (support, healthcare, siloed, cap 27).
+- Challenger PASS: memory major resolved by code reading (lazy view, no retained references, one read per replication); seed formula identical; async same shape.
+- Backlog (minor): mixed case (uniform fails confirmation, repair fails main days) — `reportedDist = confirmationFailure.roster ?? reportedDist` can pair uniform figures with the repair roster in the N−1 evidence / final audit runs (display only, untested; `hc-search.ts:3259`, `:4133`); infeasible run's "RECOMMENDED HC" card shows N = cap; browser heap +38 % vs 4dc1c8c (likely uncollected garbage); runtime 1.8–2.3x on large files (owner waived; speed item for the backlog).
+- Supervisor verdict: ready for owner approval.
