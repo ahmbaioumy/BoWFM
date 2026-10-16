@@ -2264,3 +2264,39 @@ J3. **D85.a fixture must go red first:** builder finds concrete inputs (category
 J4. D85.b: N_min example 123.75 h with 7.5 h × 15 days × 0.55 adherence × cap 100 % → 2 (red before: 1). D85.d boundary: 12.5 − 5e-10 → 13; 12.5 − 1e-7 → 12; 12.49 → 12. N_min boundary analog (1.9999999999 → 2; 1.9999 → 1).
 J5. Expected movement: any fixture with a true tie may move (e.g. 12 → 13); listed in FINDINGS as intended, not a regression. Full `npm test` reports any moved check; no silent re-pins. Add a tie scenario to trusted-source-validation.json only if cheap (scope add, optional).
 J6. Docs: "nearest whole HC; an exact half rounds up" wording in PRD/project_context/docs 07; note per-category Gross shown to 2 decimals may not sum to the total at a tie (pre-existing). Late-starter split `Math.round(share*seats)` (~:1011) untouched; mention in report.
+
+---
+
+# BUILD PLAN — F7 (docs) + G7 (pooled category filter display, UI-2, L29), 2026-10-16
+
+**Task:** (F7) document the approved rule that, when the team works fewer days than the calendar is open, the team total is rounded down before gross-up; (G7) on a POOLED run, when the agent table/chart is filtered by category, per-agent occupancy and available time show a dash with a short note, because pooled agents' idle time cannot be split by category (owner principle: occupancy is per agent; per queue only for dedicated queues).
+**End user:** WFM planner. **Tier 2** (display + docs; no headcount change). Reviewers: `tester` + `auditor` + `user-side`; final `challenger`.
+
+## Facts (investigator 2026-10-15)
+- F7: `operationalHCWithOff = floor(operationalHC × openDays / coverageDays)` (`hc-search.ts`, text anchor `Math.floor((operationalHC * openDaysPerWeek) / coverageDays)`), team total before gross-up; approved earlier (project_context §5, §6.7; D40.1/2b). Example: HC 10, open 5 days, team works 4 → floor(12.5) = 12 → Gross 15 (carrying 12.5 would give 16).
+- G7: `pooledCategoryFilter` exists (`agent-analytics.ts:~552`), note text `:~698-702`; dash needed in table (`AgentAnalyticsPanel.tsx:~424-427`), team row (`:~446-449`), chart (`:~102-140`), insight (`agent-analytics.ts:~627-632`), export (`:~736-739`). Siloed (dedicated) runs keep per-queue figures; unfiltered pooled view unchanged.
+
+## Design
+1. F7: PRD §10 L14 states the rule, the example, and that it is an accepted owner decision (2026-10-15). project_context §6.7 cross-reference. No code.
+2. G7: when `pooledCategoryFilter` is true: occupancy % and available/idle minutes per agent and in the team row show "—"; busy (handling) minutes for the filtered category stay (they are real); chart hides/greys the occupancy series with the note; insight text does not quote a split occupancy; CSV export writes an empty value (not 0) for those columns plus the note in the header/notes row. One shared predicate drives all sites.
+3. Siloed runs and the unfiltered pooled view: byte-identical figures.
+
+## Steps (builder `sonnet-executor`)
+1. Tests first in `scripts/verify-agent-analytics.mts` (new AA checks): pooled + category filter → occupancy/available null-or-dash in the analytics model, export empty, note present; siloed + filter → numbers unchanged; pooled unfiltered → unchanged.
+2. Implement in `src/utils/agent-analytics.ts`, `src/components/AgentAnalyticsPanel.tsx`.
+3. lint, build:standalone, fast suites; full `npm test` once.
+4. Browser: pooled sample, filter a category → dashes + note in table, team row, chart, export; siloed sample filter → numbers; 0 console errors.
+5. Docs: PRD (L29 resolved, F7 L14 text, version 1.27.4), project_context, docs/wfm if agent analytics described; rebuild; check:artifact.
+
+## Scope lock
+`src/utils/agent-analytics.ts`, `src/components/AgentAnalyticsPanel.tsx`, `scripts/verify-agent-analytics.mts`, `PRD.md`, `project_context.md`, `docs/wfm/*` (analytics/F7 text only), `FINDINGS.md`, `BoWFM.html`. No engine files.
+
+## Acceptance criteria
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | Pooled + filter shows dash + note everywhere (table, team row, chart, insight, export) | AA tests; browser |
+| 2 | Siloed and unfiltered views unchanged | AA tests; browser numbers |
+| 3 | No headcount change | samples 31/40, 28/35, 31/39 |
+| 4 | F7 documented | PRD L14 text |
+| 5 | No regression | lint; npm test green |
+| 6 | Docs + artifact | check:artifact |
