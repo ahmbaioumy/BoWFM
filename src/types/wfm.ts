@@ -493,6 +493,13 @@ export interface DESResult {
   fixedShifts?: boolean;
 
   /**
+   * True when a case deadline lay beyond horizon end + 366 days and the drain was cut at that cap (Item 4).
+   * Absent / false in every normal run. The run still proceeds; cases not finished by the cap are counted
+   * unfinished as before.
+   */
+  drainCapped?: boolean;
+
+  /**
    * Assignments made to an agent that was still processing another case. Must always be 0 — an
    * agent works one case at a time. Tracked in every mode, gated replications included.
    */
