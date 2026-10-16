@@ -46,3 +46,21 @@ export function effectiveRemainingMinutes(w: OpeningWIPCase, categories: Readonl
 export function totalPendingWorkMinutes(wip: ReadonlyArray<OpeningWIPCase>, categories: ReadonlyArray<CategoryConfig>): number {
   return wip.reduce((acc, w) => acc + effectiveRemainingMinutes(w, categories), 0);
 }
+
+/**
+ * Raw typed text -> stored value. Strict decimal only (comma accepted as decimal separator).
+ * Blank -> not set (not invalid). 0, negative, text, exponent, multiple dots -> not set AND invalid.
+ */
+export function parseRemainingText(text: string): { value: number | undefined; invalid: boolean } {
+  if (text.trim() === '') return { value: undefined, invalid: false };
+  if (!/^\s*\d+([.,]\d+)?\s*$/.test(text)) return { value: undefined, invalid: true };
+  const n = Number(text.trim().replace(',', '.'));
+  return Number.isFinite(n) && n > 0 ? { value: n, invalid: false } : { value: undefined, invalid: true };
+}
+
+/** Table label: "full (35m)" when blank, "10m (in progress)" when below the category handling time, else "Nm". */
+export function remainingWorkLabel(w: OpeningWIPCase, categories: ReadonlyArray<CategoryConfig>): string {
+  const aht = effectiveRemainingMinutes({ ...w, remainingWorkMinutes: undefined }, categories);
+  if (w.remainingWorkMinutes === undefined || w.remainingWorkMinutes === null) return `full (${aht}m)`;
+  return w.remainingWorkMinutes < aht ? `${w.remainingWorkMinutes}m (in progress)` : `${w.remainingWorkMinutes}m`;
+}

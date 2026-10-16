@@ -1430,3 +1430,9 @@ Through the real form path (`buildManualWipCase`; 30 rows, category handling tim
 Headcount effect (expected, documented in PRD L37): blank rows now count the full handling time, so N_min and the recommendation can rise where handling time is above 30. Browser (headless, file://): Financial Claims sample, blank row shows "full (35m)", typed 10 shows "10m", second category blank shows "full (45m)", Total Pending Work 35 -> 45 -> 90 min; typed 0 clears back to blank; sizing run completed (N = 31) with 0 console errors, 0 failed requests.
 Tests: suite D84 (9 checks), fail-first 8 of 9 failed against the old-behaviour stub, 9/9 after.
 
+
+### Item 5 rework round 1 (2026-10-16)
+- K1: the Remaining Work box no longer strips characters ("-5" became 5, "12.5" became 125, "1e2" became 12). It keeps the raw text; `parseRemainingText` (wip-row.ts) reads a plain decimal (comma accepted: "12,5" = 12.5). Blank = not started, not an error. 0, negative, text, "1e2", "12.5.3" show an amber message "Not a valid number of minutes - this row will use the full handling time." and the row is added as blank. Draft cleared after Add.
+- K2: hint now says to enter minutes only for part-worked cases, handled before new work. Both tables use `remainingWorkLabel`: "10m (in progress)" below the category handling time, "full (45m)" blank, plain "Nm" at or above.
+- K3: typed 0 goes through K1 (message), no silent clearing.
+- Tests: D84 now 14 checks (5 added: e1-e4 parsing, f1 label); trimmed run 14/14; D54 trimmed run 23/23 (D54.7 type="number" rule passes). Suite totals 1785 = 174 + 1350 + 97 + 164.

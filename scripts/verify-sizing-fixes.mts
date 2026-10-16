@@ -52,7 +52,7 @@ import * as hcNs from '../src/utils/hc-search';
 import * as calNs from '../src/utils/calendar';
 import * as desNs from '../src/utils/des-engine';
 import { discoverAndSyncCategories, mapRawRecordsToIntervals, missingRequiredMappings, validateDataQuality } from '../src/utils/csv-parser';
-import { buildManualWipCase, normalizeRemainingInput, totalPendingWorkMinutes } from '../src/utils/wip-row';
+import { buildManualWipCase, normalizeRemainingInput, parseRemainingText, remainingWorkLabel, totalPendingWorkMinutes } from '../src/utils/wip-row';
 import { buildSampleDataset } from '../src/utils/sample-data';
 import { loadSampleFile } from './sample-files';
 import { DEFAULT_CALENDAR, DEFAULT_CATEGORIES, DEFAULT_LABOR, DEFAULT_SIM_PARAMS, DEFAULT_SLA } from '../src/utils/default-config';
@@ -8120,6 +8120,16 @@ console.log('\n--- Suite D84: manual backlog row, blank remaining = full handlin
   const total = totalPendingWorkMinutes([blank, ten, { ...blank, id: 'WIP-0002', category: 'Nope' }], cats84);
   assert(total === 45 + 10 + 30, 'D84.d1 total pending: blank = category AHT (45), typed 10, unknown-category blank = 30 fallback (same as the data-quality workload check)', `total ${total}`);
   assert(totalPendingWorkMinutes([blank], cats84b) === 20, 'D84.d2 total pending follows the current AHT (20) for a blank row', '');
+
+  // e: strict text parsing (K1/K3) - no silent digit-stripping; invalid input is flagged and stored as blank
+  const pr = (t: string) => parseRemainingText(t);
+  assert(pr('').value === undefined && !pr('').invalid && pr('  ').value === undefined && !pr('  ').invalid, 'D84.e1 "" and "  " -> blank, not invalid', '');
+  assert(pr('10').value === 10 && !pr('10').invalid && pr('12.5').value === 12.5 && !pr('12.5').invalid, 'D84.e2 "10" -> 10, "12.5" -> 12.5 (decimals kept)', '');
+  assert(pr('12,5').value === 12.5 && !pr('12,5').invalid, 'D84.e3 comma decimal "12,5" is supported -> 12.5', '');
+  assert(['0', '-5', 'abc', '1e2', '12.5.3', '0.0'].every((t) => pr(t).value === undefined && pr(t).invalid), 'D84.e4 "0" / "-5" / "abc" / "1e2" / "12.5.3" / "0.0" -> undefined AND invalid', '');
+  // f: table label (in progress only when below the category handling time)
+  const lbl = (rem: number | undefined) => remainingWorkLabel({ ...blank, remainingWorkMinutes: rem }, cats84);
+  assert(lbl(undefined) === 'full (45m)' && lbl(10) === '10m (in progress)' && lbl(12.5) === '12.5m (in progress)' && lbl(45) === '45m' && lbl(60) === '60m', 'D84.f1 label: blank "full (45m)", below AHT "(in progress)", equal/above AHT plain', `${lbl(undefined)} | ${lbl(10)} | ${lbl(45)} | ${lbl(60)}`);
 }
 
 console.log('\n==================================================');

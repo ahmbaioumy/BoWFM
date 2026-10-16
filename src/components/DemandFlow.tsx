@@ -15,7 +15,7 @@ import {
 } from '../types/wfm';
 import { categoryKey, generateNextWIPId, missingRequiredMappings, parseCSVRaw, parseFlexibleDate } from '../utils/csv-parser';
 import { parseWipRows } from '../utils/wip-import';
-import { buildManualWipCase, effectiveRemainingMinutes, normalizeRemainingInput, totalPendingWorkMinutes } from '../utils/wip-row';
+import { buildManualWipCase, parseRemainingText, remainingWorkLabel, totalPendingWorkMinutes } from '../utils/wip-row';
 import { formatDateTime24 } from '../utils/calendar';
 import { CalendarConfigPanel } from './CalendarConfigPanel';
 import { NumberField } from './NumberField';
@@ -104,7 +104,8 @@ export function DemandFlow({
   const [wipError, setWipError] = useState<string | null>(null);
   const [wipWarnings, setWipWarnings] = useState<string[]>([]);
   const [newWipCategory, setNewWipCategory] = useState('');
-  const [newWipRemAht, setNewWipRemAht] = useState<number | undefined>(undefined);
+  const [newWipRemText, setNewWipRemText] = useState('');
+  const newWipRem = parseRemainingText(newWipRemText);
   const [newWipArrival, setNewWipArrival] = useState('');
 
   // WIP CSV Import State
@@ -293,11 +294,12 @@ export function DemandFlow({
       id: nextId,
       categoryName: typedCatName,
       categories,
-      remainingMinutes: newWipRemAht,
+      remainingMinutes: newWipRem.value,
       arrival: arrivalDate,
     });
 
     onUpdateOpeningWIP([...openingWIP, newCase]);
+    setNewWipRemText('');
   }
 
   function handleRemoveWipCase(id: string) {
@@ -804,17 +806,19 @@ export function DemandFlow({
                       type="text"
                       inputMode="numeric"
                       placeholder="Blank = full"
-                      value={newWipRemAht === undefined ? '' : newWipRemAht}
-                      onChange={(e) => {
-                        const digits = e.target.value.replace(/[^0-9]/g, '');
-                        setNewWipRemAht(digits === '' ? undefined : normalizeRemainingInput(Number(digits)));
-                      }}
+                      value={newWipRemText}
+                      onChange={(e) => setNewWipRemText(e.target.value)}
                       aria-describedby="wip-remaining-hint"
                       className="w-full text-xs bg-white border border-slate-300 rounded px-2.5 py-1.5 font-mono"
                     />
                     <p id="wip-remaining-hint" className="text-[10px] text-slate-500 leading-snug">
-                      Blank = not started (full handling time of the category).
+                      Blank = not started (full handling time of the category). Enter minutes only for cases already partly worked — those are handled before new work.
                     </p>
+                    {newWipRem.invalid && (
+                      <p role="alert" className="text-[10px] text-amber-700 leading-snug">
+                        Not a valid number of minutes — this row will use the full handling time.
+                      </p>
+                    )}
                   </div>
 
                   <div className="space-y-1">
@@ -1172,7 +1176,7 @@ export function DemandFlow({
                                     <td className="py-1.5 px-3 font-semibold text-slate-900">{c.id}</td>
                                     <td className="py-1.5 px-3 text-slate-700">{c.category}</td>
                                     <td className="py-1.5 px-3 text-slate-700">{c.priority}</td>
-                                    <td className="py-1.5 px-3 text-slate-700">{c.remainingWorkMinutes !== undefined ? `${c.remainingWorkMinutes}m` : `full (${effectiveRemainingMinutes(c, categories)}m)`}</td>
+                                    <td className="py-1.5 px-3 text-slate-700">{remainingWorkLabel(c, categories)}</td>
                                     <td className="py-1.5 px-3 text-slate-700">{formatDateTime24(c.arrival)}</td>
                                   </tr>
                                 ))}
@@ -1263,7 +1267,7 @@ export function DemandFlow({
                           <td className="py-2 px-3 font-semibold text-slate-900">{w.id}</td>
                           <td className="py-2 px-3">{w.category}</td>
                           <td className="py-2 px-3">{w.priority}</td>
-                          <td className="py-2 px-3">{w.remainingWorkMinutes !== undefined ? `${w.remainingWorkMinutes}m` : `full (${effectiveRemainingMinutes(w, categories)}m)`}</td>
+                          <td className="py-2 px-3">{remainingWorkLabel(w, categories)}</td>
                           <td className="py-2 px-3">{formatDateTime24(w.arrival)}</td>
                           <td className="py-2 px-3 text-right">
                             <button
