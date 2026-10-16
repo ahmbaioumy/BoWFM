@@ -2202,3 +2202,14 @@ G9. **Mutation proof (criterion 9)** adds: max applied to the scheduling loop (`
 | 5 | No regression | lint; `npm test` green |
 | 6 | Docs + artifact | PRD / project_context; `check:artifact` passes |
 | 7 | Scope | diff stat only scope files |
+
+## Item 5 — amendments after the plan challenge (2026-10-16). These OVERRIDE the item 5 text above.
+Challenger: fail (4 majors, 4 minors) — all accepted.
+H1. **Representation = undefined.** `OpeningWIPCase.remainingWorkMinutes` becomes optional (`wfm.ts:258`, `?: number`). Engine already tolerates undefined (`des-engine.ts:566`, `hc-search.ts:2131/3183/3950`, `csv-parser.ts:1563`): blank inherits the CURRENT category AHT (also the sensitivity-reduced AHT), so editing the AHT later never turns the row part-worked. File import (`wip-import.ts:159-171`, numeric AHT copy) unchanged.
+H2. **Input:** replace the `NumberField` for "Remaining Work" (`DemandFlow.tsx:808-813`) with a plain blank-capable number input (local to DemandFlow; do not change shared `NumberField.tsx`). Placeholder/hint: "Blank = not started (full handling time of the category)". State `useState<number | undefined>(undefined)` (`:106`).
+H3. **Validation:** blank → undefined; typed value > 0 → kept; typed 0, negative or non-numeric → treated as blank (undefined) with no error, hint stays. Unknown category: undefined is still stored (engine uses its AHT path); the `|| 30` fallback is removed.
+H4. **Whole row builder extracted** to a pure helper (e.g. `src/utils/wip-row.ts`: `buildManualWipCase(input)`), called by `handleAddWipCase` (`:276`). D84 tests the helper and runs `generateCaseEntities` on a blank row: `remainingWorkMinutes === totalAhtMinutes`, not parked/in-progress; typed 10 keeps priority; typed 0/-5/NaN → undefined; edit category AHT after adding blank row → still not started; Total Pending Work uses category AHT for blank rows.
+H5. **Display:** row list `:1262` shows "full (<AHT>m)" when undefined; import preview `:1171` unchanged unless it can receive undefined; Total Pending Work `:1232-1236` falls back to category AHT (extract the total into the helper file so D84 can test it). Check `run-inputs.ts:66` fingerprint and `App.tsx:162/227/264` remap keep undefined.
+H6. Scenario export does not include openingWIP (`App.tsx:426-435`) — no saved-scenario migration needed.
+H7. Docs say plainly: manual backlog rows left blank are now sized at full handling time, so headcount (and N_min / baseline) can rise versus the old 30-minute default where AHT > 30.
+H8. Scope lock adds: `src/types/wfm.ts` (that one field), `src/utils/wip-row.ts` (new), `src/utils/run-inputs.ts` and `src/App.tsx` only if undefined is not preserved (report). D84.d samples check dropped (trivial); instead a probe-like before/after measurement (r3/q_p4.mts: 51.7 % vs 91.7 %) reported in FINDINGS.
