@@ -8057,6 +8057,17 @@ console.log('\n--- Suite D83: the drain runs until the last deadline (Item 4 / G
     assert(slow.drainCapped === true && slow.completedCases < 10 && slow.unfinishedCases === 10 - slow.completedCases, 'D83.i3 undersized run to a far-future deadline: stops at the cap, unfinished cases counted as before', `completed ${slow.completedCases}, unfinished ${slow.unfinishedCases}`);
   }
 
+  // ---- D83.k the cap flag reaches the search output (sync and async), so Results can show the note (rework 1, R2) ----
+  {
+    const slaFar: SLAPolicyConfig = { ...sla83, primaryWindow: 300, primaryUnit: 'days' } as SLAPolicyConfig;
+    const catsFar = discoverAndSyncCategories(iv83, [{ ...DEFAULT_CATEGORIES[0], id: 'a', name: 'A', ahtMinutes: 33, primaryWindow: 300, primaryUnit: 'days' } as CategoryConfig], slaFar);
+    const pFar = { ...p83(false), categories: catsFar, sla: slaFar };
+    const farS: any = searchOptimalHC(pFar);
+    const farA: any = await searchOptimalHCAsync(pFar);
+    assert(farS.finalDESResult?.drainCapped === true && farA.finalDESResult?.drainCapped === true, 'D83.k2 a 300-working-day answer window: searchOutput.finalDESResult.drainCapped is true for sync and async', `sync ${farS.finalDESResult?.drainCapped}, async ${farA.finalDESResult?.drainCapped}`);
+    assert(noHol.finalDESResult?.drainCapped !== true, 'D83.k1 the ordinary holiday-free repro leaves drainCapped unset in the search output', `capped ${noHol.finalDESResult?.drainCapped}`);
+  }
+
   // ---- D83.j undersized long-window run: the agent timeline extends to the longer drain and the invariants hold ----
   {
     const cases = mkCases83(10, 1100, at83(9, 30, 17));

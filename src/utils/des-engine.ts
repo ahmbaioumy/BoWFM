@@ -885,8 +885,9 @@ export function runBackofficeDES(params: {
   // Business-open/close event scheduling (step 2) happens further below, after the
   // siloed-architecture agent setup — staggered shift placement needs to know each
   // agent's category (agentCategoryMap) before it can assign slap start offsets, and
-  // the day-open events it schedules depend on that assignment. drainHorizonEnd is
-  // still declared here since it is also needed for SimulationEnd immediately below.
+  // the day-open events it schedules depend on that assignment. The drain end (computeDrainEnd, from the
+  // case list) is declared here because SimulationEnd needs it immediately below, and the day-open/close
+  // scheduling reuses the same value.
   // The one drain end (Item 4): later of horizon end + 14 days and the last deadline, capped - see computeDrainEnd.
   const { drainEnd: drainHorizonEnd, capped: drainCapped } = computeDrainEnd(horizonEnd, allCases);
   scheduleEvent(drainHorizonEnd, 'SimulationEnd', 'SYS_END');

@@ -113,6 +113,13 @@ turn into large backlogs, and quality and attrition degrade. An occupancy cap al
 TAT target is what stops a sizing model recommending a headcount that hits service only by
 running people into the ground.
 
+### Drain window
+The stretch of simulated time after the planning horizon during which agents keep working
+off cases still open. In this engine it ends at the later of horizon end + 14 calendar days
+and the last case deadline, never past horizon end + 366 days (`computeDrainEnd`). A case
+still open when it ends is "not finished by end of simulation" and counts as a miss. The
+occupancy denominator does not include the drain window (planned horizon only).
+
 ### Utilisation / Productivity
 - **Utilisation** — productive time ÷ paid time. A cost metric, broader than occupancy.
 - **Adherence** — % of scheduled time the agent was where the schedule said, doing what it

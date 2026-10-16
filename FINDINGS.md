@@ -1389,7 +1389,7 @@ Multi-week answer window (support sample, primary window on every category and t
 
 ## Tests
 
-`npm test`: 174 + 1,343 + 97 + 164 (trusted-source) = 1,778 checks, 0 failed, artifact fresh (was 1,756; +22 = D83). Lint clean. Only D59.1-3 changed (redesign, below); no other existing test moved; every hand-built `precomputedCases` test passed unchanged (9 in verify-sizing-fixes.mts, 2 in verify-fixes.mts, none in verify-agent-analytics.mts).
+`npm test`: 174 + 1,343 + 97 + 164 (trusted-source) = 1,780 checks, 0 failed, artifact fresh (was 1,756; +24 = D83; rework 1 added D83.k1-k2: the cap flag reaches the search output, sync and async). Lint clean. Only D59.1-3 changed (redesign, below); no other existing test moved; every hand-built `precomputedCases` test passed unchanged (9 in verify-sizing-fixes.mts, 2 in verify-fixes.mts, none in verify-agent-analytics.mts).
 
 | Test | Old | New | Reason |
 |---|---|---|---|
