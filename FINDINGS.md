@@ -1441,3 +1441,20 @@ Tests: suite D84 (9 checks), fail-first 8 of 9 failed against the old-behaviour 
 - Round 1: auditor pass; tester fail + user-side fail (digits-only input turned "-5" into 5 and "12.5" into 125 silently; no on-screen explanation of in-progress priority; typed 0 cleared silently) → fixed in rework 1 (80168d2: strict decimal parse, amber invalid message, hint explains priority, "(in progress)" row label).
 - Round 2: tester pass 9/9 (labels, totals recomputed incl. decimals, samples 31/40, 28/35, 31/39, 0 console errors), user-side pass, final challenger pass.
 - Backlog (minor): "1,000" read as 1.0 minute (comma = decimal); no upper cap in the form (import caps at 100000); inputMode="numeric" may hide the decimal key on mobile → use "decimal"; hint is small grey text; value ≥ AHT shown plain with no note; backlog fingerprint shows "undefined" for blank rows (stale warning still fires via categories); project_context §9 line ~953 sizing count 1343 stale.
+
+## Item 6 build — rounding ties (HC-1 + HC-5), 2026-10-16, branch `item6-rounding`
+Change (`src/utils/hc-search.ts`): `HEADCOUNT_TIE_EPSILON = 1e-9` added in exactly two places, `Math.round(sumGrossHC + eps)` (Stage 4 Gross) and `Math.floor(ratio + eps)` (`computeAnalyticalNMin`). Per J2, no change to the OFF-adjusted floor (integer division) or the N_occ ceil.
+
+Fixture (J3, red first): 10 seats, five categories with workloads 10:20:30:40:50 (equal handling time), 20 % shrinkage, real `calculateStaffingRequirement`. Sum is 12.5 exactly. Before the fix: gross 12 in 64 of the 120 category orders, 13 in 56. 50 seats (62.5): 62 in 28 orders, 63 in 92. Also `[7,13,11,17,19]` and `[120,80,50,30,20]` split by order. Equal workloads never split (identical addends).
+Red run (before code change): D85.a10, a50, b1, b2, b4, d1 failed; b3, d2, d3, f, e passed (controls). Green after: all 13 D85 checks pass.
+Mutation proof: removing the Gross tolerance fails D85.a10, a50, d1; removing the N_min tolerance fails D85.b1, b2, b4.
+
+| Fixture | N_min | Recommended HC | Gross before | Gross after |
+|---|---|---|---|---|
+| sample claims | 30 | 31 | 40 | 40 |
+| sample support | 20 | 28 | 35 | 35 |
+| sample healthcare | 18 | 31 | 39 | 39 |
+| AJM_Only | 9 | 16 | 20 | 20 |
+| EGS_Only | 53 | 100 | 125 (sum 124.99999999999999) | 125 |
+
+All numbers identical before and after (before = checkpoint 2f50a89 source). AJM_Simu and EGS With Reduction were not re-measured (not requested; the AJM_Simu search was still running after 30 minutes). Moved checks in the full suite: none (D10, D11, D12, D60 unchanged). No true-tie fixture exists in the shipped files, so J5 "intended movement" is limited to the D85 fixture. Per-category Gross is shown to two decimals, so at a tie the rows may not add to the total (pre-existing display). Not touched: late-starter split `Math.round(share*seats)` (hc-search.ts ~:1011).
