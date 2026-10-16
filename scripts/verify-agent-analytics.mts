@@ -24,6 +24,8 @@ import {
   buildAgentAnalyticsNotes,
   buildAgentInsights,
   computeAgentAnalytics,
+  maskedCell,
+  POOLED_FILTER_NOTE,
   sortRowsByCases,
   utilisationReadsLowByDesign,
 } from '../src/utils/agent-analytics';
@@ -293,10 +295,16 @@ console.log('\n--- Suite AA: agent analytics ---');
   assert(noteOf(nStag, 'Utilisation % vs Occupancy %') === noteOf(nUni, 'Utilisation % vs Occupancy %') && !(noteOf(nUni, 'Utilisation % vs Occupancy %') ?? '').includes('not an error') && (noteOf(nUni, 'Utilisation % vs Occupancy %') ?? '').startsWith('Normally the same number') && noteOf(nStag, 'On-Shift Days') !== undefined, 'AA.44b utilisation note is the same fixed-shift note for the uniform and shift-placement runs (no "not an error" caveat); On-Shift Days note present');
   const drainNote = noteOf(nStag, 'Part-day after the data ends');
   assert(!!drainNote && la.drainDates.every((d) => drainNote.includes(d)) && noteOf(nFilt, 'Part-day after the data ends') === undefined && (noteOf(nUni, 'Part-day after the data ends') !== undefined) === (a.drainDates.length > 0), 'AA.44c part-day note only when drainDates is non-empty, and it names the date(s)', drainNote ?? '');
-  assert(noteOf(nGold, 'Category filter') !== undefined && noteOf(nStag, 'Category filter') === undefined && noteOf(buildAgentAnalyticsNotes(cf, lab, true), 'Category filter') === undefined && !(noteOf(nGold, 'Category filter') ?? '').includes('whole time on shift'), 'AA.44d category note only when pooledCategoryFilter; does not claim Available is the whole time on shift');
+  // Rewritten 2026-10-16 (G7): was 'does not claim Available is the whole time on shift' (old note: Available smaller, Occupancy reads lower).
+  // Reason: the pooled+filter note is replaced by the M5 text (figures are masked, not explained), so the old negative claim no longer applies;
+  // the check now pins the exact new text and that it only appears for pooledCategoryFilter.
+  assert(noteOf(nGold, 'Category filter') === POOLED_FILTER_NOTE && POOLED_FILTER_NOTE.includes('cannot be split by category') && noteOf(nStag, 'Category filter') === undefined && noteOf(buildAgentAnalyticsNotes(cf, lab, true), 'Category filter') === undefined, 'AA.44d category note (exact M5 text) only when pooledCategoryFilter');
   const fullByAgent = new Map(la.rows.map((r) => [r.agentId, r]));
   const goldRows = goldPooled.rows.filter((r) => fullByAgent.has(r.agentId));
-  assert(goldRows.length > 0 && goldRows.every((r) => { const f = fullByAgent.get(r.agentId)!; return r.availableMin < f.availableMin - 1e-6 && Math.abs(r.idleMin - f.idleMin) < 1e-6; }), 'AA.44f category filter on a pooled run: availableMin strictly below unfiltered, idleMin equal (pins the Category filter note)', goldRows.map((r) => `${r.agentId}: ${r.availableMin.toFixed(1)} vs ${fullByAgent.get(r.agentId)!.availableMin.toFixed(1)}, idle ${r.idleMin.toFixed(1)} vs ${fullByAgent.get(r.agentId)!.idleMin.toFixed(1)}`).join(' | '));
+  // Rewritten 2026-10-16 (G7): was 'pins the Category filter note' (Available smaller / reads lower). Reason: that claim is no longer shown to the
+  // user. The model still keeps the RAW values (M3: masking happens in the views and the export), so the numeric facts stay pinned as 'raw model values kept';
+  // the old claim is pinned absent from the note.
+  assert(goldRows.length > 0 && goldRows.every((r) => { const f = fullByAgent.get(r.agentId)!; return r.availableMin < f.availableMin - 1e-6 && Math.abs(r.idleMin - f.idleMin) < 1e-6; }) && !/smaller|reads lower/i.test(noteOf(nGold, 'Category filter') ?? ''), 'AA.44f category filter on a pooled run: model keeps raw availableMin (below unfiltered) and idleMin (equal); the note no longer claims Available is smaller / occupancy reads lower', goldRows.map((r) => `${r.agentId}: ${r.availableMin.toFixed(1)} vs ${fullByAgent.get(r.agentId)!.availableMin.toFixed(1)}`).join(' | '));
   assert(![...nStag, ...nUni, ...nGold].some((r) => /budget|staggered|in queue|drain|horizon/i.test(r.Note)), 'AA.44e notes avoid internal jargon (budget, staggered, in queue, drain, horizon)');
 
   // ---- 24x7 fixture without a start distribution (added 2026-10-08, P2-9): the one run that still has NO fixed shift end ----
@@ -343,6 +351,26 @@ console.log('\n--- Suite AA: agent analytics ---');
   assert(exL8.length === l8all.rows.length && exL8.every((er, i) => er['Scheduled (min)'] === Math.round(l8all.rows[i].scheduledMin * 10) / 10), 'AA.45c export Scheduled (min) equals the row value rounded to 1 decimal');
   const l8drain = computeAgentAnalytics({ des: ld8, calendar: LBIZ, labor: mkLab(0.8), filter: { fromDate: expectedDrain[0], toDate: expectedDrain[0] } });
   assert(l8drain.dates.length >= 1 && l8drain.rows.some((r) => r.onShiftDays === 1) && l8drain.rows.every((r) => r.scheduledMin <= 540 + 1e-6), 'AA.45d on a part-day after the data ends, no agent is scheduled above the daily productive hours (540 min)', l8drain.rows.map((r) => r.scheduledMin.toFixed(1)).join(' '));
+
+  // ---- G7 (2026-10-16): pooled run + category filter masks Available / Scheduled / Occupancy / Utilisation; Busy and Idle stay ----
+  const goldPooledAll = computeAgentAnalytics({ des: ld, calendar: LBIZ, labor: mkLab(1.0), filter: { category: 'Pooled' } });
+  const mk1 = (cats1: CategoryConfig[]) => runBackofficeDES({ operationalHC: 4, intervals: iv247, openingWIP: [], categories: cats1, calendar: CAL247, labor: LAB247, sla: SLA247, seed: 7, queueArchitecture: 'pooled' });
+  const singleCat = computeAgentAnalytics({ des: mk1([{ ...cat[0], ahtMinutes: 30 }]), calendar: CAL247, labor: LAB247, filter: { category: 'General' } });
+  assert(goldPooled.maskedForPooledFilter === true && goldPooledAll.maskedForPooledFilter === true && singleCat.maskedForPooledFilter === true && ap.maskedForPooledFilter === false && la.maskedForPooledFilter === false && cf.maskedForPooledFilter === false && a.maskedForPooledFilter === false, 'AA.48 maskedForPooledFilter: true for pooled + category, also the Pooled option and a single-category pooled run filtered on its only category; false for pooled unfiltered, siloed + filter, siloed unfiltered', JSON.stringify([goldPooled.maskedForPooledFilter, goldPooledAll.maskedForPooledFilter, singleCat.maskedForPooledFilter, ap.maskedForPooledFilter, la.maskedForPooledFilter, cf.maskedForPooledFilter, a.maskedForPooledFilter]));
+  assert(maskedCell(goldPooled, '12.3%') === '—' && maskedCell(goldPooledAll, '5') === '—' && maskedCell(ap, '12.3%') === '12.3%' && maskedCell(cf, '12.3%') === '12.3%', 'AA.48b UI helper maskedCell: dash when masked, text otherwise');
+  const exG = buildAgentAnalyticsExport(goldPooled, mkLab(1.0), true);
+  const exGs = exG.sections[0].rows;
+  assert(exGs.length === goldPooled.rows.length && exGs.every((r, i) => r['Available On-Shift (min)'] === '' && r['Scheduled (min)'] === '' && r['Occupancy %'] === '' && r['Utilisation %'] === '' && r['Busy (min)'] === Math.round(goldPooled.rows[i].busyMin * 10) / 10 && r['Idle (min)'] === Math.round(goldPooled.rows[i].idleMin * 10) / 10), 'AA.49 pooled + filter export: Available / Scheduled / Occupancy % / Utilisation % are empty strings (not 0); Busy and Idle keep their numbers');
+  assert(exG.sections[2].rows.some((r) => r.Item === 'Category filter' && r.Note === POOLED_FILTER_NOTE), 'AA.49b pooled + filter export Notes section carries the new note');
+  const exU = buildAgentAnalyticsExport(ap, mkLab(1.0), true).sections[0].rows;
+  const exS = buildAgentAnalyticsExport(cf, lab, true).sections[0].rows;
+  assert(exU.every((r, i) => r['Occupancy %'] === Math.round(ap.rows[i].occupancyPct * 10) / 10 && r['Available On-Shift (min)'] === Math.round(ap.rows[i].availableMin * 10) / 10 && r['Scheduled (min)'] === Math.round(ap.rows[i].scheduledMin * 10) / 10) && exS.every((r, i) => r['Occupancy %'] === Math.round(cf.rows[i].occupancyPct * 10) / 10 && r['Available On-Shift (min)'] === Math.round(cf.rows[i].availableMin * 10) / 10 && r['Scheduled (min)'] === Math.round(cf.rows[i].scheduledMin * 10) / 10), 'AA.49c pooled unfiltered and siloed + filter exports keep their numbers (unchanged)');
+  const insG = buildAgentInsights(goldPooled, {}, true);
+  const insGd = buildAgentInsights(goldPooled);
+  const insU = buildAgentInsights(la, {}, true);
+  assert(!insG.some((t) => t.startsWith('Occupancy ranges')) && !insG.some((t) => /Their utilisation is/.test(t)) && insG.some((t) => t.startsWith('Fairness') && t.includes('utilisation CV —') && t.includes("Jain's index —")) && !insGd.some((t) => t.startsWith('Occupancy ranges')) && insGd.some((t) => t.startsWith('Fairness') && t.includes('cases CV')) && insG.some((t) => t.includes('late-coverage')), 'AA.50 pooled + filter insights: no occupancy ranking, no utilisation comparison, utilisation fairness metrics shown as a dash; late-coverage and cases fairness still present');
+  assert(insU.some((t) => t.startsWith('Occupancy ranges')) && insU.some((t) => /Their utilisation is [\d.]+%/.test(t)) && buildAgentInsights(cf).some((t) => t.startsWith('Occupancy ranges')), 'AA.50b pooled unfiltered (shift-placement fixture) and siloed + filter insights unchanged (occupancy ranking and utilisation comparison present)');
+  assert(JSON.stringify(goldPooled.rows.map((r) => [r.busyMin, r.availableMin, r.scheduledMin, r.occupancyPct])) === JSON.stringify(computeAgentAnalytics({ des: ld, calendar: LBIZ, labor: mkLab(1.0), filter: { category: 'Gold' } }).rows.map((r) => [r.busyMin, r.availableMin, r.scheduledMin, r.occupancyPct])) && goldPooled.team.occupancyPct > 0, 'AA.51 model keeps raw values under the mask and is deterministic');
 }
 
 // ------------------------------------------------------------------------------------------
