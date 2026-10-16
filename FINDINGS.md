@@ -1411,3 +1411,33 @@ Mutations (temporary edit of `des-engine.ts`, D59 + D83 only, source restored wi
 - Round 1: tester pass (11/11; samples 31/40, 28/35, 31/39; repro 12→8; drain formula recomputed 10/10), auditor pass, user-side pass with 2 majors (stale "Unfinished by horizon end" label; silent 366-day cap) → fixed in rework 1 (652be8d).
 - Final challenger: pass. Major (owner info): long answer windows run slower than short ones (claims: default 6.1 s, 60-day window 39.6 s, 300-day 171 s) — the run now simulates until the last deadline; before the change those runs stopped at 14 days and wrongly failed cases. Builder's before/after on support 15/30-day windows was not slower (18.2→13.8 s, 31.0→21.6 s).
 - Backlog (minor): case-row "(deadline missed)" wording is wrong for rows cut by the 366-day cap; export CSV / hc-search reason strings still "Unfinished by horizon end" (export-rows.ts:49, hc-search.ts:3799/:4762); ASA censoring mixes horizon-end and real waits (documented); stale +14 comment fixed; drainCapped sync/async check added (D83.k2).
+
+## Item 5 measurements (2026-10-16) - manual backlog form default (G10 / DES-7)
+Probe `r3/q_p4.mts` (VOL=1, 30 backlog cases, N=1, new-case SLA; engine untouched so the numbers match the 2026-10-15 investigation):
+
+| Case | New-case SLA |
+|---|---|
+| Part-worked (old: every manual row counted as in-progress) | 51.7 % (31/60) |
+| Full handling time (new: blank row) | 91.7 % (55/60) |
+
+Through the real form path (`buildManualWipCase`; 30 rows, category handling time 45, new-case handling time 10, 1 agent):
+
+| Stored remaining | New-case SLA | Backlog workload counted |
+|---|---|---|
+| 30 typed (old form default) | 0.0 % (0/60) | 900 min |
+| blank (undefined, new default) | 85.0 % (51/60) | 1350 min (30 x 45) |
+
+Headcount effect (expected, documented in PRD L37): blank rows now count the full handling time, so N_min and the recommendation can rise where handling time is above 30. Browser (headless, file://): Financial Claims sample, blank row shows "full (35m)", typed 10 shows "10m", second category blank shows "full (45m)", Total Pending Work 35 -> 45 -> 90 min; typed 0 clears back to blank; sizing run completed (N = 31) with 0 console errors, 0 failed requests.
+Tests: suite D84 (9 checks), fail-first 8 of 9 failed against the old-behaviour stub, 9/9 after.
+
+
+### Item 5 rework round 1 (2026-10-16)
+- K1: the Remaining Work box no longer strips characters ("-5" became 5, "12.5" became 125, "1e2" became 12). It keeps the raw text; `parseRemainingText` (wip-row.ts) reads a plain decimal (comma accepted: "12,5" = 12.5). Blank = not started, not an error. 0, negative, text, "1e2", "12.5.3" show an amber message "Not a valid number of minutes - this row will use the full handling time." and the row is added as blank. Draft cleared after Add.
+- K2: hint now says to enter minutes only for part-worked cases, handled before new work. Both tables use `remainingWorkLabel`: "10m (in progress)" below the category handling time, "full (45m)" blank, plain "Nm" at or above.
+- K3: typed 0 goes through K1 (message), no silent clearing.
+- Tests: D84 now 14 checks (5 added: e1-e4 parsing, f1 label); trimmed run 14/14; D54 trimmed run 23/23 (D54.7 type="number" rule passes). Suite totals 1785 = 174 + 1350 + 97 + 164.
+
+## Item 5 review (2026-10-16) — supervisor verdicts
+- Round 1: auditor pass; tester fail + user-side fail (digits-only input turned "-5" into 5 and "12.5" into 125 silently; no on-screen explanation of in-progress priority; typed 0 cleared silently) → fixed in rework 1 (80168d2: strict decimal parse, amber invalid message, hint explains priority, "(in progress)" row label).
+- Round 2: tester pass 9/9 (labels, totals recomputed incl. decimals, samples 31/40, 28/35, 31/39, 0 console errors), user-side pass, final challenger pass.
+- Backlog (minor): "1,000" read as 1.0 minute (comma = decimal); no upper cap in the form (import caps at 100000); inputMode="numeric" may hide the decimal key on mobile → use "decimal"; hint is small grey text; value ≥ AHT shown plain with no note; backlog fingerprint shows "undefined" for blank rows (stale warning still fires via categories); project_context §9 line ~953 sizing count 1343 stale.

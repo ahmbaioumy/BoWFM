@@ -27,7 +27,9 @@ Workload_hours = Σ (Volume_c × AHT_c) / 60  +  Σ openingWIP remaining minutes
 Per category, because AHT differs by category and a mix shift changes workload without
 changing volume. **Opening WIP belongs here**: deferred work carries backlog across
 periods, and a model that ignores carry-in undersizes from day one. Use *remaining* work on
-partially-handled cases, not full AHT.
+partially-handled cases, not full AHT. In the manual backlog form a blank remaining time means
+not started and is counted at the category's full handling time (the form no longer defaults to
+30 minutes), so headcount can be higher than with the old default where AHT > 30.
 
 ## Stage 2 — Capacity baseline (`N_min` / Workload HC)
 
