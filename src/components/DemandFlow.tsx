@@ -15,6 +15,7 @@ import {
 } from '../types/wfm';
 import { categoryKey, generateNextWIPId, missingRequiredMappings, parseCSVRaw, parseFlexibleDate } from '../utils/csv-parser';
 import { parseWipRows } from '../utils/wip-import';
+import { buildManualWipCase, effectiveRemainingMinutes, normalizeRemainingInput, totalPendingWorkMinutes } from '../utils/wip-row';
 import { formatDateTime24 } from '../utils/calendar';
 import { CalendarConfigPanel } from './CalendarConfigPanel';
 import { NumberField } from './NumberField';
@@ -103,7 +104,7 @@ export function DemandFlow({
   const [wipError, setWipError] = useState<string | null>(null);
   const [wipWarnings, setWipWarnings] = useState<string[]>([]);
   const [newWipCategory, setNewWipCategory] = useState('');
-  const [newWipRemAht, setNewWipRemAht] = useState(30);
+  const [newWipRemAht, setNewWipRemAht] = useState<number | undefined>(undefined);
   const [newWipArrival, setNewWipArrival] = useState('');
 
   // WIP CSV Import State
@@ -271,10 +272,6 @@ export function DemandFlow({
 
   function handleAddWipCase() {
     const typedCatName = newWipCategory || (categories.length > 0 ? categories[0].name : 'General');
-    const selectedCat = categories.find((c) => categoryKey(c.name) === categoryKey(typedCatName));
-    const catName = selectedCat ? selectedCat.name : typedCatName;
-    const aht = newWipRemAht > 0 ? newWipRemAht : selectedCat?.ahtMinutes || 30;
-
     let arrivalDate: Date;
     if (newWipArrival) {
       const parsed = parseFlexibleDate(newWipArrival);
@@ -292,14 +289,13 @@ export function DemandFlow({
     }
 
     const nextId = generateNextWIPId(openingWIP);
-    const newCase: OpeningWIPCase = {
+    const newCase = buildManualWipCase({
       id: nextId,
-      category: catName,
-      priority: selectedCat?.priority || 1,
+      categoryName: typedCatName,
+      categories,
+      remainingMinutes: newWipRemAht,
       arrival: arrivalDate,
-      clockStart: arrivalDate,
-      remainingWorkMinutes: aht,
-    };
+    });
 
     onUpdateOpeningWIP([...openingWIP, newCase]);
   }
@@ -804,13 +800,21 @@ export function DemandFlow({
                     <label className="text-[11px] text-slate-600 font-semibold block">
                       Remaining Work (min)
                     </label>
-                    <NumberField
-                      min={1}
-                      integer
-                      value={newWipRemAht}
-                      onCommit={(val) => setNewWipRemAht(val)}
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="Blank = full"
+                      value={newWipRemAht === undefined ? '' : newWipRemAht}
+                      onChange={(e) => {
+                        const digits = e.target.value.replace(/[^0-9]/g, '');
+                        setNewWipRemAht(digits === '' ? undefined : normalizeRemainingInput(Number(digits)));
+                      }}
+                      aria-describedby="wip-remaining-hint"
                       className="w-full text-xs bg-white border border-slate-300 rounded px-2.5 py-1.5 font-mono"
                     />
+                    <p id="wip-remaining-hint" className="text-[10px] text-slate-500 leading-snug">
+                      Blank = not started (full handling time of the category).
+                    </p>
                   </div>
 
                   <div className="space-y-1">
@@ -1168,7 +1172,7 @@ export function DemandFlow({
                                     <td className="py-1.5 px-3 font-semibold text-slate-900">{c.id}</td>
                                     <td className="py-1.5 px-3 text-slate-700">{c.category}</td>
                                     <td className="py-1.5 px-3 text-slate-700">{c.priority}</td>
-                                    <td className="py-1.5 px-3 text-slate-700">{c.remainingWorkMinutes}m</td>
+                                    <td className="py-1.5 px-3 text-slate-700">{c.remainingWorkMinutes !== undefined ? `${c.remainingWorkMinutes}m` : `full (${effectiveRemainingMinutes(c, categories)}m)`}</td>
                                     <td className="py-1.5 px-3 text-slate-700">{formatDateTime24(c.arrival)}</td>
                                   </tr>
                                 ))}
@@ -1229,11 +1233,11 @@ export function DemandFlow({
                   <span className="text-[11px] text-slate-500 font-mono">
                     Total Pending Work:{' '}
                     <strong className="text-slate-800">
-                      {openingWIP.reduce((acc, w) => acc + (w.remainingWorkMinutes || 0), 0).toLocaleString()} mins
+                      {totalPendingWorkMinutes(openingWIP, categories).toLocaleString()} mins
                     </strong>{' '}
                     (
                     {(
-                      openingWIP.reduce((acc, w) => acc + (w.remainingWorkMinutes || 0), 0) / 60
+                      totalPendingWorkMinutes(openingWIP, categories) / 60
                     ).toFixed(1)}{' '}
                     hrs)
                   </span>
@@ -1259,7 +1263,7 @@ export function DemandFlow({
                           <td className="py-2 px-3 font-semibold text-slate-900">{w.id}</td>
                           <td className="py-2 px-3">{w.category}</td>
                           <td className="py-2 px-3">{w.priority}</td>
-                          <td className="py-2 px-3">{w.remainingWorkMinutes}m</td>
+                          <td className="py-2 px-3">{w.remainingWorkMinutes !== undefined ? `${w.remainingWorkMinutes}m` : `full (${effectiveRemainingMinutes(w, categories)}m)`}</td>
                           <td className="py-2 px-3">{formatDateTime24(w.arrival)}</td>
                           <td className="py-2 px-3 text-right">
                             <button

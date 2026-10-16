@@ -255,7 +255,7 @@ export interface OpeningWIPCase {
   priority: number;
   arrival: Date;
   clockStart: Date;
-  remainingWorkMinutes: number;
+  remainingWorkMinutes?: number;
 }
 
 export interface DQIssue {

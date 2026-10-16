@@ -1411,3 +1411,22 @@ Mutations (temporary edit of `des-engine.ts`, D59 + D83 only, source restored wi
 - Round 1: tester pass (11/11; samples 31/40, 28/35, 31/39; repro 12→8; drain formula recomputed 10/10), auditor pass, user-side pass with 2 majors (stale "Unfinished by horizon end" label; silent 366-day cap) → fixed in rework 1 (652be8d).
 - Final challenger: pass. Major (owner info): long answer windows run slower than short ones (claims: default 6.1 s, 60-day window 39.6 s, 300-day 171 s) — the run now simulates until the last deadline; before the change those runs stopped at 14 days and wrongly failed cases. Builder's before/after on support 15/30-day windows was not slower (18.2→13.8 s, 31.0→21.6 s).
 - Backlog (minor): case-row "(deadline missed)" wording is wrong for rows cut by the 366-day cap; export CSV / hc-search reason strings still "Unfinished by horizon end" (export-rows.ts:49, hc-search.ts:3799/:4762); ASA censoring mixes horizon-end and real waits (documented); stale +14 comment fixed; drainCapped sync/async check added (D83.k2).
+
+## Item 5 measurements (2026-10-16) - manual backlog form default (G10 / DES-7)
+Probe `r3/q_p4.mts` (VOL=1, 30 backlog cases, N=1, new-case SLA; engine untouched so the numbers match the 2026-10-15 investigation):
+
+| Case | New-case SLA |
+|---|---|
+| Part-worked (old: every manual row counted as in-progress) | 51.7 % (31/60) |
+| Full handling time (new: blank row) | 91.7 % (55/60) |
+
+Through the real form path (`buildManualWipCase`; 30 rows, category handling time 45, new-case handling time 10, 1 agent):
+
+| Stored remaining | New-case SLA | Backlog workload counted |
+|---|---|---|
+| 30 typed (old form default) | 0.0 % (0/60) | 900 min |
+| blank (undefined, new default) | 85.0 % (51/60) | 1350 min (30 x 45) |
+
+Headcount effect (expected, documented in PRD L37): blank rows now count the full handling time, so N_min and the recommendation can rise where handling time is above 30. Browser (headless, file://): Financial Claims sample, blank row shows "full (35m)", typed 10 shows "10m", second category blank shows "full (45m)", Total Pending Work 35 -> 45 -> 90 min; typed 0 clears back to blank; sizing run completed (N = 31) with 0 console errors, 0 failed requests.
+Tests: suite D84 (9 checks), fail-first 8 of 9 failed against the old-behaviour stub, 9/9 after.
+

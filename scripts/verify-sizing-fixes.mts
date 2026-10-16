@@ -52,6 +52,7 @@ import * as hcNs from '../src/utils/hc-search';
 import * as calNs from '../src/utils/calendar';
 import * as desNs from '../src/utils/des-engine';
 import { discoverAndSyncCategories, mapRawRecordsToIntervals, missingRequiredMappings, validateDataQuality } from '../src/utils/csv-parser';
+import { buildManualWipCase, normalizeRemainingInput, totalPendingWorkMinutes } from '../src/utils/wip-row';
 import { buildSampleDataset } from '../src/utils/sample-data';
 import { loadSampleFile } from './sample-files';
 import { DEFAULT_CALENDAR, DEFAULT_CATEGORIES, DEFAULT_LABOR, DEFAULT_SIM_PARAMS, DEFAULT_SLA } from '../src/utils/default-config';
@@ -8078,6 +8079,47 @@ console.log('\n--- Suite D83: the drain runs until the last deadline (Item 4 / G
     assert(lastBusy > at83(9, 26, 17).getTime() && lastBusy <= at83(9, 30, 17).getTime(), 'D83.j2 the agent keeps working past the old drain end (busy slices to Fri 30 Oct)', new Date(lastBusy).toISOString());
     assert(r.totalAvailableProductiveMinutes === 480, 'D83.j3 occupancy denominator is still the planned horizon (1 agent x 1 working day x 480 min) - frozen decision 3; the longer drain does not widen it', `available ${r.totalAvailableProductiveMinutes}, raw occupancy ${r.rawOccupancyPct}`);
   }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Suite D84 - Item 5 (G10 / DES-7): a blank "remaining work" in the manual backlog form means the full handling time
+// (owner decision 2026-10-15; amendments H1-H8 2026-10-16). Pure helper src/utils/wip-row.ts; engine unchanged.
+// ---------------------------------------------------------------------------------------------------------------------
+console.log('\n--- Suite D84: manual backlog row, blank remaining = full handling time (Item 5 / G10 / DES-7) ---');
+{
+  const cats84: CategoryConfig[] = [{ id: 'a', name: 'Alpha', ahtMinutes: 45, shrinkagePct: 0.2, priority: 2, primaryWindow: 2, primaryUnit: 'days' } as CategoryConfig];
+  const arr84 = new Date(2026, 9, 12, 9, 0);
+  const iv84: StandardInterval[] = [{ intervalIndex: 0, start: new Date(2026, 9, 12, 9, 0), end: new Date(2026, 9, 12, 9, 30), volume: 1, category: 'Alpha' } as StandardInterval];
+  const sla84: SLAPolicyConfig = { ...DEFAULT_SLA, primaryWindow: 2, primaryUnit: 'days', clockBasis: 'business_time', clockStartPolicy: 'next_open' } as SLAPolicyConfig;
+  const gen84 = (wip: OpeningWIPCase[], cats: CategoryConfig[] = cats84): CaseEntity[] =>
+    generateCaseEntities({ intervals: iv84, openingWIP: wip, categories: cats, calendar: BIZ_CAL, sla: sla84, seed: 42 }).cases.filter((c: CaseEntity) => c.isOpeningWip);
+  const mk84 = (rem: unknown, name: string = 'Alpha') => buildManualWipCase({ id: 'WIP-0001', categoryName: name, categories: cats84, remainingMinutes: rem, arrival: arr84 });
+
+  // a: the blank form builds a row with no remaining value (undefined), category/priority resolved
+  const blank = mk84(undefined);
+  assert(blank.remainingWorkMinutes === undefined && blank.category === 'Alpha' && blank.priority === 2 && blank.arrival.getTime() === arr84.getTime(), 'D84.a1 blank remaining -> row has remainingWorkMinutes undefined (not 30)', `rem ${blank.remainingWorkMinutes}`);
+  const unknown = mk84(undefined, 'Nope');
+  assert(unknown.remainingWorkMinutes === undefined && unknown.category === 'Nope' && unknown.priority === 1, 'D84.a2 unknown category: still undefined (no 30 fallback), category as typed, priority 1', `rem ${unknown.remainingWorkMinutes}`);
+
+  // b: the engine treats the blank row as full handling time, not part-worked
+  const eb = gen84([blank]);
+  assert(eb.length === 1 && eb[0].remainingWorkMinutes === 45 && eb[0].totalAhtMinutes === 45 && eb[0].parkCount === 0, 'D84.b1 engine: blank row -> remaining == full AHT (45), no in-progress priority', `rem ${eb[0]?.remainingWorkMinutes}/${eb[0]?.totalAhtMinutes}`);
+  // editing the category AHT afterwards: a blank row follows the new AHT and never becomes part-worked
+  const cats84b: CategoryConfig[] = [{ ...cats84[0], ahtMinutes: 20 } as CategoryConfig];
+  const eb2 = gen84([blank], cats84b);
+  assert(eb2[0].remainingWorkMinutes === 20 && eb2[0].totalAhtMinutes === 20, 'D84.b2 blank row follows a later AHT edit (45 -> 20): still full, not part-worked', `rem ${eb2[0]?.remainingWorkMinutes}/${eb2[0]?.totalAhtMinutes}`);
+
+  // c: explicit 10 < AHT keeps in-progress priority
+  const ten = mk84(10);
+  const ec = gen84([ten]);
+  assert(ten.remainingWorkMinutes === 10 && ec[0].remainingWorkMinutes === 10 && ec[0].remainingWorkMinutes < ec[0].totalAhtMinutes, 'D84.c1 typed 10 is kept and reaches the engine as part-worked (10 < 45)', `rem ${ec[0]?.remainingWorkMinutes}`);
+  assert(mk84(0).remainingWorkMinutes === undefined && mk84(-5).remainingWorkMinutes === undefined && mk84(NaN).remainingWorkMinutes === undefined && mk84('abc').remainingWorkMinutes === undefined && mk84(null).remainingWorkMinutes === undefined, 'D84.c2 typed 0 / -5 / NaN / text / null -> undefined (treated as blank)', '');
+  assert(normalizeRemainingInput(60) === 60 && normalizeRemainingInput(Infinity) === undefined, 'D84.c3 value >= AHT (60) kept as typed; Infinity -> blank', '');
+
+  // d: Total Pending Work uses the category AHT for blank rows
+  const total = totalPendingWorkMinutes([blank, ten, { ...blank, id: 'WIP-0002', category: 'Nope' }], cats84);
+  assert(total === 45 + 10 + 30, 'D84.d1 total pending: blank = category AHT (45), typed 10, unknown-category blank = 30 fallback (same as the data-quality workload check)', `total ${total}`);
+  assert(totalPendingWorkMinutes([blank], cats84b) === 20, 'D84.d2 total pending follows the current AHT (20) for a blank row', '');
 }
 
 console.log('\n==================================================');
