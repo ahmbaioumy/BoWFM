@@ -2310,3 +2310,44 @@ M4. **Tests to rewrite (with reason):** AA.44d (note text), AA.44f (note claim "
 M5. **New note text:** "Pooled team: agents serve every category, so their available time and occupancy cannot be split by category. Busy shows only the selected category's handling; Idle is each agent's full idle time. Clear the filter to see occupancy."
 M6. **F7 is already documented** (PRD §6 Stage 4 :1144/:1159-1161/:1172, :1733; project_context :552/:567/:579). Only add, in the Stage 4 area (not L14), one worked example with stated shrinkage: HC 10, open 5 days, team works 4 days, 20 % shrinkage → floor(12.5) = 12 → Gross 15 (carrying 12.5 would give 16); mark F7 "decided: keep floor (owner 2026-10-15)" in the backlog/decisions list.
 M7. Browser: name the samples used for pooled (check sample config) and for siloed (switch staffing model to siloed on one sample); check both.
+
+---
+
+# BUILD PLAN — Item 7: opt-in volume variability (Poisson arrival counts), 2026-10-17
+
+**Owner confirmed 2026-10-17** ("yes consider for 7"); parallel lane B (worktree `wt-item7`, branch `item7-poisson`), alongside lane A (G7 → P2-13). Lanes never edit the same source file; docs reconciled at merge; `BoWFM.html` rebuilt only after merge to main.
+**Task:** an opt-in switch (default OFF) makes each interval's case count random around the forecast (Poisson, mean = forecast volume) so the planner can see the extra staff needed when volumes vary.
+**End user:** WFM planner. **Tier 3** (headcount when ON). Reviewers: `tester` + `auditor` + `user-side` + final `challenger`.
+**Skills:** `wfm-sizing-simulation`, `wfm-engine-testing`, `browser-automation`.
+
+## Design (from roadmap line, to be verified by the challenger)
+1. Flag on SLA config (e.g. `sla.volumeVariability === true`), default OFF; OFF = byte-identical results (regression test on samples and audit fixtures).
+2. ConfigFlow toggle next to "Workload Floor", with a one-line explanation.
+3. Per interval, count ~ Poisson(mean = interval volume) from a SEPARATE seeded stream keyed by (replication seed, interval index) so Common Random Numbers hold across candidate N (same counts for every N in a replication) and the existing arrival-time/AHT streams are not shifted. Normal approximation (rounded, clamped ≥ 0) above ~30 expected; exact Poisson (e.g. Knuth / inversion) below. Deterministic, seeded `createPrng` only.
+4. Opening WIP (backlog) fixed. Replications R unchanged (wider CI may raise HC — intended).
+5. Confirmation block (item 2) uses its own seeds the same way.
+6. N_min / N_occ / Gross stay on forecast volume (analytical stages unchanged) — or state otherwise with reason.
+7. Results badge + note: "Volume variability on: not comparable with replay runs." Run inputs fingerprint includes the flag (stale-results warning). Sensitivity grid honours the flag.
+
+## Steps (builder `sonnet-executor`, fail-first)
+1. Suite D86 in `scripts/verify-sizing-fixes.mts`: (a) OFF byte-identical (samples HC/gross + digest); (b) ON deterministic (two runs identical); (c) ON counts: mean over many intervals ≈ volume, variance ≈ mean (Poisson), small and large volumes; (d) CRN: same counts at N and N+1 within a replication; (e) sync == async ON; (f) ON HC ≥ OFF HC on samples (report values); (g) toggle in fingerprint.
+2. Implement (engine case generation in `des-engine.ts` / wherever precomputed case sets are built; types; ConfigFlow; ResultsFlow badge).
+3. lint, build:standalone (inside worktree only; artifact not committed from lane — or committed and re-built at merge), fast suites, full `npm test` once — scheduled when lane A is not running its full test (supervisor coordinates).
+4. Measure OFF vs ON (idle machine): three samples, AJM_Only, EGS_Only — HC, gross, SLA %, runtime.
+5. Docs: PRD (new FR + limitation, version bump at merge), project_context §5/§11, docs/wfm/06 (arrivals).
+
+## Scope lock (lane B)
+`src/utils/des-engine.ts`, `src/utils/hc-search.ts` (only if case-set generation lives there), `src/types/wfm.ts`, `src/components/ConfigFlow.tsx`, `src/components/ResultsFlow.tsx`, `src/utils/run-inputs.ts`, `src/utils/default-config.ts` (default OFF), `src/components/SensitivityFlow.tsx` (only if needed to pass the flag), `scripts/verify-sizing-fixes.mts` (D86), `PRD.md`, `project_context.md`, `docs/wfm/06-simulation-des.md`, `FINDINGS.md`. NOT: `agent-analytics.ts`, `AgentAnalyticsPanel.tsx`, `verify-agent-analytics.mts` (lane A).
+
+## Acceptance criteria
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | OFF identical to today | D86.a; samples 31/40, 28/35, 31/39 |
+| 2 | ON is Poisson and deterministic | D86.b/c |
+| 3 | CRN preserved, sync = async | D86.d/e |
+| 4 | Planner sees it is on | browser: toggle, badge, note |
+| 5 | Headcount effect measured | FINDINGS table OFF vs ON |
+| 6 | Runtime acceptable | ON vs OFF, idle machine; flag > 1.5x |
+| 7 | No regression | lint; npm test green |
+| 8 | Mutation proof | share the arrival stream with case stream → D86.d fails; ignore flag in async → D86.e fails |
+| 9 | Docs + artifact | at merge: rebuild, check:artifact |
