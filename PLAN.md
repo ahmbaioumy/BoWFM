@@ -2213,3 +2213,45 @@ H5. **Display:** row list `:1262` shows "full (<AHT>m)" when undefined; import p
 H6. Scenario export does not include openingWIP (`App.tsx:426-435`) — no saved-scenario migration needed.
 H7. Docs say plainly: manual backlog rows left blank are now sized at full handling time, so headcount (and N_min / baseline) can rise versus the old 30-minute default where AHT > 30.
 H8. Scope lock adds: `src/types/wfm.ts` (that one field), `src/utils/wip-row.ts` (new), `src/utils/run-inputs.ts` and `src/App.tsx` only if undefined is not preserved (report). D84.d samples check dropped (trivial); instead a probe-like before/after measurement (r3/q_p4.mts: 51.7 % vs 91.7 %) reported in FINDINGS.
+
+---
+
+# BUILD PLAN — Item 6: rounding ties (F4, HC-1 + HC-5), 2026-10-16
+
+**Task:** tiny floating-point errors must never change a headcount: an exact .5 Gross HC always rounds up whatever the category order, and an exact whole-number workload ratio gives the intended N_min.
+**End user:** WFM planner. **Tier 3** (headcount numbers). Reviewers: `tester` + `auditor` + `user-side` + final `challenger`.
+**Owner decision:** exact .5 always rounds UP; result independent of category order. Frozen decision 7 (per-category gross-up, sum, single `round`) otherwise unchanged.
+
+## Facts (investigator 2026-10-15)
+- Gross: `Math.round(sumGrossHC)` (`hc-search.ts:~2213`). 10 agents, 5 categories at 20 % shrinkage → 12 or 13 depending on category order (sum 12.499999…).
+- N_min: FLOOR-based (`:132`). 123.75 h case → 1 because the ratio is 1.9999… → expected 2.
+- N_occ: ceiling (`:158`); an exact whole ratio computed as x.0000001 would round up one too many.
+- Tests pinning these: D10, D11, D12, D60 (re-check; re-pin only with reason).
+
+## Design
+1. One small shared helper (e.g. `snap(x)` = round x to 9 decimal places, or the tolerance form `round(x + 1e-9)`, `floor(x + 1e-9)`, `ceil(x − 1e-9)`), used at those three sites only — the builder confirms every other `Math.round/floor/ceil` that produces a headcount (grep hc-search.ts, des-engine.ts allocation, ResultsFlow display, sensitivity, F7 `operationalHCWithOff` floor `:2145-2147`) and reports which ones also need it; F7 floor gets the same tolerance (owner kept floor, not the epsilon question).
+2. Tolerance relative enough for large headcounts (e.g. 1e-9 × max(1, |x|)) — builder justifies.
+3. Sync and async share the code (no duplication).
+
+## Steps (builder `sonnet-executor`, fail-first)
+1. Suite **D85** first: (a) 10 agents, 5 categories at 20 % → 13 in every category order (all 120 permutations); (b) 123.75 h case → N_min 2; (c) N_occ exact whole ratio not bumped; (d) genuine 12.4999 (not a float artefact, e.g. 12.49) still rounds to 12; (e) three samples unchanged (31/40, 28/35, 31/39); (f) F7 example unchanged (HC 10, 5 open days, 4 worked → 12 → Gross 15).
+2. Implement.
+3. Re-run D10/D11/D12/D60; report any change with reason.
+4. lint, build:standalone, full `npm test` once.
+5. Measure audit fixtures/samples before/after: HC, gross — table into FINDINGS.
+6. Docs: PRD (F4 resolved, rounding rule text, version 1.27.3 → owner-visible behaviour), project_context §5/§6.7 note on tolerance, docs/wfm/07 entry; rebuild; check:artifact.
+
+## Scope lock
+`src/utils/hc-search.ts`, `scripts/verify-sizing-fixes.mts` (D85 + listed re-pins), `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`, `FINDINGS.md`, `BoWFM.html`. Others (des-engine.ts, results-display.ts) only if step-1 grep finds a headcount rounding site needing the same fix — report before editing.
+
+## Acceptance criteria
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | Order-independent .5 → up | D85.a all permutations |
+| 2 | N_min exact ratio | D85.b |
+| 3 | Genuine values untouched | D85.c/d |
+| 4 | Samples unchanged | D85.e; browser |
+| 5 | No regression | lint; npm test green |
+| 6 | Mutation proof | remove tolerance → D85.a/b fail |
+| 7 | Docs + artifact | PRD / project_context / docs 07; check:artifact |
+| 8 | Scope | diff stat |
