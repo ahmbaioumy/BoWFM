@@ -88,7 +88,7 @@ Not covered: `UAT_BO.xlsx`, `test_breaks.xlsx` (no cheap loader).
 |---|---|---|---|---|
 | HC-3 | **major — owner decision** (tests currently assert the floor as intended: D40.2b, `verify-sizing-fixes.mts:449`, `:2501`, `:2508`) | Extra-OFF uplift is floored **before** the shrinkage gross-up. HC 10, calendar open 5 days, team works 4, shrinkage 20%: floor(12.5) = 12 → Gross HC 15; unfloored 12.5 / 0.8 = 15.625 → 16. 12 heads × 4 days = 48 seat-days against 50 needed. | **Yes — Gross HC up to ~1 seat low** whenever the team works fewer days than the calendar is open. Reachable from normal UI (`ConfigFlow.tsx:180`). Related to L14 but L14 does not mention the floor. | `hc-search.ts:1585-1587` |
 | HC-4 | **major** (import path only) | Imported config is loaded without per-field checks (`App.tsx:450`), bypassing the UI's 0–99 clamp. Shrinkage 1.0 → clamped to 0.99 → Gross HC ×100 (10 → 1000). Shrinkage NaN/missing → shrinkage silently dropped (Gross HC 10), row shows NaN while effective shows 0. | **Yes**, for a bad/hand-edited config file: over- or under-staff with no warning. Not reachable by typing in the UI. Full check belongs to phase 3. | `hc-search.ts:1626-1632`; `ConfigFlow.tsx:1236-1239` |
-| HC-5 | minor (same family as HC-1 — fix together) | `computeAnalyticalNMin` loses a seat to float noise when workload ÷ capacity is an exact integer (7.5 h, adherence 0.55, 15 days, 123.75 h → 1, expected 2). 236 of 4,800 grid cases. `computeOccupancyFloor` (ceil): 0 mismatches. | Rarely: `N_min` 1 low; matters mainly with Workload Floor OFF. | `hc-search.ts:130-131` |
+| HC-5 | minor (same family as HC-1 — fix together) | `computeAnalyticalNMin` loses a seat to float noise when workload ÷ capacity is an exact integer (7.5 h, adherence 0.55, 15 days, 123.75 h → 1, expected 2). 236 of 4,800 grid cases. `computeOccupancyFloor` (ceil): 0 mismatches on a single workload figure; later found to mis-ceil workloads summed from category parts (see Item 6 rework 1). | Rarely: `N_min` 1 low; matters mainly with Workload Floor OFF. | `hc-search.ts:130-131` |
 | HC-6 | minor (import only) | Duplicate category names double-count workload share (A,A → Gross HC 25, expected 13). No UI path to create duplicates. | Only via imported config. | `hc-search.ts:1605`, `:1618-1620` |
 | HC-7 | minor | `calculateStaffingRequirement` does not clamp negative opening-WIP minutes; the search path (`:2456`) and parser (`csv-parser.ts:1017`) do. Two paths differ. | Not from UI. | `hc-search.ts:1559-1563` |
 | HC-8 | minor | Empty demand: workload silently replaced by 1 h; Gross HC 0 while operational HC shows 10. | Edge case only. | `hc-search.ts:1568` |
@@ -1441,3 +1441,25 @@ Tests: suite D84 (9 checks), fail-first 8 of 9 failed against the old-behaviour 
 - Round 1: auditor pass; tester fail + user-side fail (digits-only input turned "-5" into 5 and "12.5" into 125 silently; no on-screen explanation of in-progress priority; typed 0 cleared silently) → fixed in rework 1 (80168d2: strict decimal parse, amber invalid message, hint explains priority, "(in progress)" row label).
 - Round 2: tester pass 9/9 (labels, totals recomputed incl. decimals, samples 31/40, 28/35, 31/39, 0 console errors), user-side pass, final challenger pass.
 - Backlog (minor): "1,000" read as 1.0 minute (comma = decimal); no upper cap in the form (import caps at 100000); inputMode="numeric" may hide the decimal key on mobile → use "decimal"; hint is small grey text; value ≥ AHT shown plain with no note; backlog fingerprint shows "undefined" for blank rows (stale warning still fires via categories); project_context §9 line ~953 sizing count 1343 stale.
+
+## Item 6 build — rounding ties (HC-1 + HC-5), 2026-10-16, branch `item6-rounding`
+Change (`src/utils/hc-search.ts`): `HEADCOUNT_TIE_EPSILON = 1e-9` added in exactly two places, `Math.round(sumGrossHC + eps)` (Stage 4 Gross) and `Math.floor(ratio + eps)` (`computeAnalyticalNMin`). Per J2, no change to the OFF-adjusted floor (integer division). The N_occ ceil was first left bare (superseded by rework 1 below: now `Math.ceil(ratio - eps)`, three sites in total).
+
+Fixture (J3, red first): 10 seats, five categories with workloads 10:20:30:40:50 (equal handling time), 20 % shrinkage, real `calculateStaffingRequirement`. Sum is 12.5 exactly. Before the fix: gross 12 in 64 of the 120 category orders, 13 in 56. 50 seats (62.5): 62 in 28 orders, 63 in 92. Also `[7,13,11,17,19]` and `[120,80,50,30,20]` split by order. Equal workloads never split (identical addends).
+Red run (before code change): D85.a10, a50, b1, b2, b4, d1 failed; b3, d2, d3, f, e passed (controls). Green after: all 13 D85 checks pass.
+Mutation proof: removing the Gross tolerance fails D85.a10, a50, d1; removing the N_min tolerance fails D85.b1, b2, b4.
+
+| Fixture | N_min | Recommended HC | Gross before | Gross after |
+|---|---|---|---|---|
+| sample claims | 30 | 31 | 40 | 40 |
+| sample support | 20 | 28 | 35 | 35 |
+| sample healthcare | 18 | 31 | 39 | 39 |
+| AJM_Only | 9 | 16 | 20 | 20 |
+| EGS_Only | 53 | 100 | 125 (sum 124.99999999999999) | 125 |
+
+All numbers identical before and after (before = checkpoint 2f50a89 source). AJM_Simu and EGS With Reduction were not re-measured (not requested; the AJM_Simu search was still running after 30 minutes). Moved checks in the full suite: none (D10, D11, D12, D60 unchanged). No true-tie fixture exists in the shipped files, so J5 "intended movement" is limited to the D85 fixture. Per-category Gross is shown to two decimals, so at a tie the rows may not add to the total (pre-existing display). Not touched: late-starter split `Math.round(share*seats)` (hc-search.ts ~:1011).
+
+### Item 6 rework 1 — N_occ ceiling tolerance (final challenger), 2026-10-16
+Finding: "0 mismatches" for `computeOccupancyFloor` was measured on single workload figures. A workload summed from category parts can be 1 ulp above an exact whole ratio (7 h x 0.55 x 15 days, 0.1+0.2+0.3+0.4 of 2 seats = 2.0000000000000004), and bare `Math.ceil` gave 3. Challenger probe: 2,290 of 2,999 whole-ratio cases one seat too high.
+Change (`src/utils/hc-search.ts`, `computeOccupancyFloor`): `Math.ceil(ratio - HEADCOUNT_TIE_EPSILON)` (same 1e-9). All three headcount boundaries (N_min floor, N_occ ceil, Gross round) now use it.
+Tests (suite D85.g1-g5): summed parts ratio 2.0000000000000004 -> 2; same for k = 1 and 7.5 h x 22 days k = 19; 2.0001 -> 3; 2 + 5e-10 -> 2; 2 + 1e-7 -> 3. Red before the change: g1, g2, g4 failed (g3, g5 controls passed). Mutation (epsilon removed again): g1, g2, g4 fail; restored: all 18 D85 checks pass.

@@ -112,6 +112,12 @@ export function resolveAgentHoursForNMin(
   };
 }
 
+/**
+ * Absolute tolerance added before a headcount floor/round so floating-point noise never moves a whole seat.
+ * Double error is about 2e-16 x |value|; any real difference is >= 0.01, so 1e-9 separates them cleanly.
+ */
+const HEADCOUNT_TIE_EPSILON = 1e-9;
+
 /** Stage 2 analytical floor: floor(Workload / (OccCap × agentHours × Adherence)). */
 export function computeAnalyticalNMin(params: {
   totalWorkloadHours: number;
@@ -130,7 +136,10 @@ export function computeAnalyticalNMin(params: {
   const effectiveAdherence = resolveEffectiveAdherence(labor);
   const { agentHours } = resolveAgentHoursForNMin(labor, workingDaysInHorizon);
   const denominator = oMax * agentHours * effectiveAdherence;
-  return denominator > 0 ? Math.max(1, Math.floor(effectiveWorkloadHours / denominator)) : 1;
+  // + HEADCOUNT_TIE_EPSILON: an exact whole ratio can arrive as 1.9999999999999998 (123.75 / 61.875);
+  // without it floor() drops a whole seat. 1e-9 is far above double noise (~2e-16 x value) and far
+  // below any real shortfall (D85.b).
+  return denominator > 0 ? Math.max(1, Math.floor(effectiveWorkloadHours / denominator + HEADCOUNT_TIE_EPSILON)) : 1;
 }
 
 /**
@@ -156,7 +165,9 @@ export function computeOccupancyFloor(params: {
   const capacityHoursPerAgent = labor.dailyProductiveHours * effectiveAdherence * days;
   const occCap = resolveOccupancyCapPct({ occupancyCapEnabled, occupancyCapPct }) / 100;
   const denominator = capacityHoursPerAgent * occCap;
-  return denominator > 0 ? Math.max(1, Math.ceil(totalWorkloadHours / denominator)) : 1;
+  // - HEADCOUNT_TIE_EPSILON: a workload summed from category parts can sit one ulp above an exact whole
+  // ratio (2.0000000000000004) and a bare ceil would add a seat.
+  return denominator > 0 ? Math.max(1, Math.ceil(totalWorkloadHours / denominator - HEADCOUNT_TIE_EPSILON)) : 1;
 }
 
 /**
@@ -2221,7 +2232,9 @@ export function calculateStaffingRequirement(params: {
   }
 
   // Pooled Gross HC (M2): round(sum_c gross_hc_c)
-  const grossHCTotal = Math.round(sumGrossHC);
+  // + HEADCOUNT_TIE_EPSILON: an exact .5 total must round up whatever order the categories were added
+  // in (12.499999999999998 vs 12.5 changed the headcount by one; D85.a). Owner decision: exact half rounds up.
+  const grossHCTotal = Math.round(sumGrossHC + HEADCOUNT_TIE_EPSILON);
 
   // Harmonic Effective Shrinkage (M3): 1 - 1 / sum_c (share_c / (1 - shr_c))
   // OFF is not folded into shrinkage — shares × category shrinkagePct only.

@@ -8132,6 +8132,86 @@ console.log('\n--- Suite D84: manual backlog row, blank remaining = full handlin
   assert(lbl(undefined) === 'full (45m)' && lbl(10) === '10m (in progress)' && lbl(12.5) === '12.5m (in progress)' && lbl(45) === '45m' && lbl(60) === '60m', 'D84.f1 label: blank "full (45m)", below AHT "(in progress)", equal/above AHT plain', `${lbl(undefined)} | ${lbl(10)} | ${lbl(45)} | ${lbl(60)}`);
 }
 
+// ---------------------------------------------------------------
+// Suite D85 — rounding ties (Item 6, F4 / HC-1 + HC-5; PRD 1.27.3)
+// A tiny floating-point error must never change a headcount. (1) Gross HC: an exact .5 total rounds UP
+// whatever order the categories are listed in (the per-category gross-ups were added in list order, so
+// 10 seats over unequal workloads at 20 % shrinkage summed to 12.4999999... in some orders -> 12, 12.5 in
+// others -> 13). (2) N_min: an exact whole-number workload/capacity ratio floors to that whole number
+// (123.75 h / 61.875 h = 1.9999999999999998 floored to 1). Tolerance is an absolute 1e-9 (double error is
+// about 2e-16 x value, so 1e-9 is far above float noise and far below any real 0.01-scale difference).
+// Frozen decision 7 (per-category gross-up, sum, one round) is unchanged.
+// ---------------------------------------------------------------
+console.log('\n--- Suite D85: rounding ties (Gross HC .5 and N_min exact ratio) ---');
+{
+  const permute85 = <T,>(a: T[]): T[][] => (a.length < 2 ? [a] : a.flatMap((x, i) => permute85([...a.slice(0, i), ...a.slice(i + 1)]).map((p) => [x, ...p])));
+  const hs85 = new Date(2026, 9, 5, 9, 0);
+  const he85 = new Date(2026, 9, 9, 17, 0);
+  const grossOf85 = (hc: number, vols: Array<[string, number]>, shr = 0.2, labor: LaborConfig = LABOR) =>
+    calculateStaffingRequirement({
+      operationalHC: hc,
+      categories: vols.map(([n], i) => ({ id: `c${i}`, name: n, ahtMinutes: 30, shrinkagePct: shr, priority: 1 })),
+      intervals: vols.map(([n, v], i) => ({ intervalIndex: i, start: new Date(2026, 9, 5, 9, 0), end: new Date(2026, 9, 5, 9, 30), category: n, volume: v })),
+      openingWIP: [],
+      calendar: BIZ_CAL,
+      labor,
+      horizonStart: hs85,
+      horizonEnd: he85,
+      bindingConstraint: 'test',
+    });
+
+  // ---- a: order independence, all 120 category orders ----
+  // Workloads 10:20:30:40:50 (volumes at equal handling time), 20 % shrinkage: 10 seats -> 12.5 exactly -> 13; 50 seats -> 62.5 -> 63.
+  const base85: Array<[string, number]> = [['Billing', 10], ['Claims', 20], ['Refunds', 30], ['Disputes', 40], ['Transfers', 50]];
+  for (const [hc, want] of [[10, 13], [50, 63]] as Array<[number, number]>) {
+    const seen = new Map<number, number>();
+    for (const order of permute85(base85)) {
+      const g = grossOf85(hc, order).grossHCTotal;
+      seen.set(g, (seen.get(g) ?? 0) + 1);
+    }
+    assert(seen.size === 1 && seen.has(want), `D85.a${hc} ${hc} seats, 5 categories (10:20:30:40:50) at 20 % shrinkage: gross ${want} in all 120 category orders`, `distribution gross->orders: ${JSON.stringify([...seen])}`);
+  }
+
+  // ---- b: N_min exact ratio ----
+  const labor85 = { dailyProductiveHours: 7.5, adherencePct: 0.55, contractualHoursSource: 'derived' as const };
+  const nMin85 = (w: number) => computeAnalyticalNMin({ totalWorkloadHours: w, labor: labor85, workingDaysInHorizon: 15, occupancyCapEnabled: false, occupancyCapPct: 100 });
+  assert(nMin85(123.75) === 2, 'D85.b1 123.75 h / (7.5 h x 15 days x 0.55 adherence x cap 100 %) = exactly 2 -> N_min 2', `got ${nMin85(123.75)}`);
+  assert(nMin85(61.875 * 1.9999999999) === 2, 'D85.b2 ratio 1.9999999999 (inside the 1e-9 tolerance) -> 2', `got ${nMin85(61.875 * 1.9999999999)}`);
+  assert(nMin85(61.875 * 1.9999) === 1, 'D85.b3 ratio 1.9999 (a real shortfall) still floors to 1', `got ${nMin85(61.875 * 1.9999)}`);
+  assert(nMin85(61.875 * 2.5) === 2 && nMin85(61.875 * 3) === 3, 'D85.b4 ratio 2.5 -> 2 (floor), ratio 3 -> 3', `got ${nMin85(61.875 * 2.5)}, ${nMin85(61.875 * 3)}`);
+
+  // ---- g: N_occ (computeOccupancyFloor) ceiling, same tolerance ----
+  // A workload summed from category parts can land one ulp above an exact whole ratio
+  // (7 h x 0.55 x 15 days = 57.75 h per seat; 0.1+0.2+0.3+0.4 of 2 seats' work = 2.0000000000000004 seats) -> bare ceil gave 3.
+  const nOcc85 = (w: number, dph = 7, days = 15) => computeOccupancyFloor({ totalWorkloadHours: w, labor: { dailyProductiveHours: dph, adherencePct: 0.55 }, workingDaysInHorizon: days, occupancyCapEnabled: false, occupancyCapPct: 100 });
+  const seat85 = 7 * 0.55 * 15;
+  const parts85 = (k: number, dph = 7, days = 15) => [0.1, 0.2, 0.3, 0.4].reduce((a, x) => a + k * dph * 0.55 * days * x, 0);
+  assert(parts85(2) / seat85 > 2 && nOcc85(parts85(2)) === 2, 'D85.g1 workload summed from 4 category parts (ratio 2.0000000000000004) -> N_occ exactly 2', `ratio ${parts85(2) / seat85}, got ${nOcc85(parts85(2))}`);
+  assert(parts85(1) / seat85 > 1 && nOcc85(parts85(1)) === 1 && parts85(19, 7.5, 22) / (7.5 * 0.55 * 22) > 19 && nOcc85(parts85(19, 7.5, 22), 7.5, 22) === 19, 'D85.g2 same on k = 1 and on 7.5 h x 22 days k = 19', `got ${nOcc85(parts85(1))}, ${nOcc85(parts85(19, 7.5, 22), 7.5, 22)}`);
+  assert(nOcc85(seat85 * 2.0001) === 3, 'D85.g3 ratio 2.0001 (a real excess) -> 3', `got ${nOcc85(seat85 * 2.0001)}`);
+  assert(nOcc85(seat85 * (2 + 5e-10)) === 2, 'D85.g4 ratio 2 + 5e-10 (inside the tolerance) -> 2', `got ${nOcc85(seat85 * (2 + 5e-10))}`);
+  assert(nOcc85(seat85 * (2 + 1e-7)) === 3, 'D85.g5 ratio 2 + 1e-7 (a real excess) -> 3', `got ${nOcc85(seat85 * (2 + 1e-7))}`);
+
+  // ---- d: Gross boundaries (one category, share 1, so the sum is exactly 10 / (1 - shr)) ----
+  const grossAt85 = (target: number) => grossOf85(10, [['Only', 10]], 1 - 10 / target).grossHCTotal;
+  assert(grossAt85(12.5 - 5e-10) === 13, 'D85.d1 12.5 - 5e-10 (float noise) -> 13', `got ${grossAt85(12.5 - 5e-10)}`);
+  assert(grossAt85(12.5 - 1e-7) === 12, 'D85.d2 12.5 - 1e-7 (a real shortfall) -> 12', `got ${grossAt85(12.5 - 1e-7)}`);
+  assert(grossAt85(12.49) === 12 && grossAt85(12.5) === 13 && grossAt85(12.51) === 13, 'D85.d3 12.49 -> 12, exactly 12.5 -> 13, 12.51 -> 13', `got ${grossAt85(12.49)}, ${grossAt85(12.5)}, ${grossAt85(12.51)}`);
+
+  // ---- f: the OFF-adjusted example is unchanged: 10 seats, 5 open days, 4 worked -> 12 seats -> gross 15 ----
+  const f85 = grossOf85(10, [['Only', 10]], 0.2, { ...LABOR, workingDaysPerWeek: 4, offDaysPerWeek: 3 });
+  assert(f85.operationalHCWithOff === 12 && f85.grossHCTotal === 15, 'D85.f 10 seats, 5 open days, 4 worked -> 12 seats -> gross 15 (unchanged)', `got ${f85.operationalHCWithOff}/${f85.grossHCTotal}`);
+
+  // ---- e: the three built-in samples at defaults are unchanged ----
+  for (const [type, hc, gross] of [['claims', 31, 40], ['support', 28, 35], ['healthcare', 31, 39]] as Array<['claims' | 'support' | 'healthcare', number, number]>) {
+    const { rows } = buildSampleDataset(type, new Date(2026, 9, 5, 8, 0, 0, 0));
+    const ivs = mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+    const cats = discoverAndSyncCategories(ivs, DEFAULT_CATEGORIES, DEFAULT_SLA);
+    const r = searchOptimalHC({ intervals: ivs, openingWIP: [], categories: cats, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, seed: DEFAULT_SIM_PARAMS.seed, userMaxHC: DEFAULT_SIM_PARAMS.maxHCSearch, replications: DEFAULT_SIM_PARAMS.replications, queueArchitecture: 'pooled', dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness });
+    assert(r.recommendedHC === hc && r.staffing.grossHCTotal === gross, `D85.e sample ${type}: HC ${hc} / gross ${gross} unchanged`, `got ${r.recommendedHC}/${r.staffing.grossHCTotal}`);
+  }
+}
+
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');
