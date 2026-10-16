@@ -1013,6 +1013,11 @@ function ResultsFlowBody({
                       Req HC {searchOutput.recommendedHC} is below the workload floor (N_min {searchOutput.nMinAnalytical}, N_occ {searchOutput.occupancyFeasibleFloor ?? 'n/a'}). This team only clears the SLA by draining backlog after the planning horizon — treat as optimistic.
                     </div>
                   )}
+                  {sla.volumeVariability === true && (
+                    <div data-testid="volume-variability-note" className="text-[11px] text-indigo-800 bg-indigo-50 border border-indigo-200 rounded-lg px-2.5 py-2 leading-relaxed">
+                      <strong>Volume variability on:</strong> each interval's case count is drawn at random around the forecast (day-to-day noise, not forecast error). Not comparable with replay runs. N_min, N_occ and Gross HC still use the forecast volume.
+                    </div>
+                  )}
                   {sla.nMinFloorEnabled !== false &&
                     Number.isFinite(searchOutput.nMinAnalytical) &&
                     primaryHC === searchOutput.nMinAnalytical && (
@@ -2518,6 +2523,7 @@ function ResultsFlowBody({
                 <div>confidence_level_pct: {sla.confidenceLevelPct ?? 95}%</div>
                 <div>n_min_floor_enabled: {sla.nMinFloorEnabled !== false ? 'true' : 'false'}</div>
                 <div>below_workload_floor: {searchOutput.belowWorkloadFloor ? 'true' : 'false'}</div>
+                <div>volume_variability: {sla.volumeVariability === true ? 'true' : 'false'}</div>
                 <div>n_min_analytical: {rosterFloor} agents{searchOutput.nMinBeforeReduction !== undefined && ` (before reduction: ${searchOutput.nMinBeforeReduction})`}</div>
                 <div>primary_driven_hc: {primaryHC} agents</div>
                 <div>prng_seed: {simParams.seed}</div>

@@ -295,6 +295,35 @@ function createPrng(seed: number) {
 }
 
 /**
+ * Volume variability (Item 7, opt-in `sla.volumeVariability === true`): the per-interval arrival COUNT stream.
+ * One stream per replication, seeded from a mixed copy of the replication seed so it never shares draws with the
+ * arrival-time stream (`createPrng(seed)`, left untouched). Counts are drawn in interval order, one draw per
+ * interval whose raw volume is > 0 (intervals with volume <= 0 draw nothing). Mean = the raw forecast volume.
+ * Exact Poisson (Knuth) below 30 expected cases; above that a rounded normal approximation (Box-Muller, clamped >= 0).
+ * Same stream for every candidate N (Common Random Numbers hold); OFF never constructs it.
+ */
+export function createVolumeCountStream(seed: number): (mean: number) => number {
+  const rng = createPrng((seed ^ 0x9e3779b9) >>> 0);
+  return (mean: number): number => {
+    if (!(mean > 0)) return 0;
+    if (mean < 30) {
+      const limit = Math.exp(-mean);
+      let k = 0;
+      let p = 1;
+      do {
+        k++;
+        p *= rng();
+      } while (p > limit);
+      return k - 1;
+    }
+    const u1 = rng() || 1e-12;
+    const u2 = rng();
+    const z = Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+    return Math.max(0, Math.round(mean + Math.sqrt(mean) * z));
+  };
+}
+
+/**
  * Fair agent-assignment defaults (DispatchFairnessConfig). Agent SELECTION only: which case
  * goes next stays Earliest-Deadline-First (CaseMinHeap.compare / pickNextCase, frozen #2).
  */
@@ -603,8 +632,12 @@ export function generateCaseEntities(params: {
   calendar: CalendarConfig;
   sla: SLAPolicyConfig;
   seed: number;
-}): { cases: CaseEntity[]; horizonStart: Date; horizonEnd: Date } {
+}): { cases: CaseEntity[]; horizonStart: Date; horizonEnd: Date; forecastCases?: CaseEntity[] } {
   const { intervals, openingWIP, categories, calendar, sla, seed } = params;
+  const varyVolume = sla.volumeVariability === true;
+  // Volume variability ON: roster design and siloed seats read the forecast (replay) case set, not the noisy draw.
+  const forecastCases = varyVolume ? generateCaseEntities({ ...params, sla: { ...sla, volumeVariability: false } }).cases : undefined;
+  const countStream = varyVolume ? createVolumeCountStream(seed) : undefined;
 
   const categoryMap = new Map<string, CategoryConfig>();
   categories.forEach((c) => categoryMap.set(c.name, c));
@@ -633,7 +666,7 @@ export function generateCaseEntities(params: {
 
   // Add Demand Intervals cases
   for (const interval of intervals) {
-    const vol = Math.round(interval.volume);
+    const vol = countStream ? (interval.volume > 0 ? countStream(interval.volume) : 0) : Math.round(interval.volume);
     if (vol <= 0) continue;
 
     const cat = categoryMap.get(interval.category) || {
@@ -694,7 +727,7 @@ export function generateCaseEntities(params: {
     }
   }
 
-  return { cases: allCases, horizonStart, horizonEnd };
+  return forecastCases ? { cases: allCases, horizonStart, horizonEnd, forecastCases } : { cases: allCases, horizonStart, horizonEnd };
 }
 
 /**
@@ -786,7 +819,7 @@ export function runBackofficeDES(params: {
   sla: SLAPolicyConfig;
   seed: number;
   queueArchitecture?: 'pooled' | 'siloed';
-  precomputedCases?: { cases: CaseEntity[]; horizonStart: Date; horizonEnd: Date };
+  precomputedCases?: { cases: CaseEntity[]; horizonStart: Date; horizonEnd: Date; forecastCases?: CaseEntity[] };
   skipCaseResultsAndTimeline?: boolean;
   /**
    * Optional deadline-coverage shift-start distribution (see computeShiftPlacement in
@@ -822,10 +855,12 @@ export function runBackofficeDES(params: {
   categories.forEach((c) => categoryMap.set(c.name, c));
 
   let allCases: CaseEntity[];
+  let seatCases: CaseEntity[] | undefined; // forecast case set for siloed seats (volume variability ON only)
   let horizonStart: Date;
   let horizonEnd: Date;
 
   if (precomputedCases) {
+    seatCases = precomputedCases.forecastCases;
     horizonStart = precomputedCases.horizonStart;
     horizonEnd = precomputedCases.horizonEnd;
     allCases = precomputedCases.cases.map((c) => ({
@@ -847,6 +882,7 @@ export function runBackofficeDES(params: {
     horizonStart = gen.horizonStart;
     horizonEnd = gen.horizonEnd;
     allCases = gen.cases;
+    seatCases = gen.forecastCases;
   }
 
   // Effective labor capacity and daily budget per agent
@@ -994,7 +1030,7 @@ export function runBackofficeDES(params: {
       siloedIdleAgents.set(name, []);
     });
     if (operationalHC > 0) {
-      const seats = allocateSiloedSeats(allCases, operationalHC, allCatNames);
+      const seats = allocateSiloedSeats(seatCases ?? allCases, operationalHC, allCatNames);
       let agentId = 0;
       for (const [catName, count] of seats.entries()) {
         for (let j = 0; j < count; j++) {

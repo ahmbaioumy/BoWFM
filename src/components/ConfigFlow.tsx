@@ -1184,6 +1184,36 @@ export function ConfigFlow({
                 </span>
               </div>
             </div>
+            {/* Volume variability (Item 7) */}
+            <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                    Volume Variability
+                  </span>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      data-testid="volume-variability-toggle"
+                      checked={sla.volumeVariability === true}
+                      onChange={(e) =>
+                        onUpdateSLA({
+                          ...sla,
+                          volumeVariability: e.target.checked,
+                        })
+                      }
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                  </label>
+                </div>
+                <span className="text-[11px] text-slate-500">
+                  Off (default): each interval brings exactly its forecast volume. On: each interval's case count
+                  is drawn at random around the forecast (day-to-day noise), so the headcount is tested against
+                  volumes that wobble. This is not forecast error, and results are not comparable with replay runs.
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       )}

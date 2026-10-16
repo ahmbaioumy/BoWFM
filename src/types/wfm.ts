@@ -198,6 +198,13 @@ export interface SLAPolicyConfig {
    * HCSearchOutput.belowWorkloadFloor.
    */
   nMinFloorEnabled?: boolean;
+  /**
+   * Volume variability (Item 7). undefined/false (default) = every interval's case count is its forecast volume
+   * (rounded), identical to today. true = each interval's count is drawn Poisson around the forecast volume
+   * (random arrival counts, day-to-day noise; NOT forecast error) from a seeded stream, so staffing is tested
+   * against volumes that wobble. N_min / N_occ / Gross stay on forecast volume.
+   */
+  volumeVariability?: boolean;
 }
 
 export interface SimulationParams {
