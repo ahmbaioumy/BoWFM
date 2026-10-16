@@ -2094,3 +2094,58 @@ F3. Results: per-category column shows target used ("own 30 min" / "global 60 mi
 F4. Config rule text: same sentence; ticking without changing the value has no effect (say so in the cell hint).
 F5. Docs: PRD L30/§6 rewritten (remove the false "looser tick" claim and the follower-pool text), version 1.26.0 stays (unreleased) or 1.26.1; project_context, docs/wfm/07, FINDINGS.
 F6. Tests: D82 updated — no follower pool; nothing ticked + ASA on → every category vs global; ASA off byte-identical to 24c21f2; existing ASA-on pins may move UP only (report each old → new); measure three samples + support + AJM_Only with ASA 60 before/after; mutation: restore pooled gate → D82 fails.
+
+---
+
+# BUILD PLAN — Item 4: drain period runs until the last deadline (G9, DES-10), 2026-10-16
+
+**Task:** the simulation keeps working after the planning horizon until the later of (horizon end + 14 days) and the latest case deadline, so no case is counted as failed before its deadline has passed.
+**End user:** WFM planner. **Tier 3** (headcount numbers). Reviewers: `tester` + `auditor` + `user-side` + final `challenger`.
+**Skills:** `wfm-sizing-simulation`, `wfm-engine-testing`, `browser-automation`.
+**Owner decision 2026-10-15:** drain end = later of (horizon end + 14 days) and the last case deadline.
+
+## Facts (investigator 2026-10-15, probe scratch `r3/q_p2b2.mts`)
+- `drainHorizonEnd = horizonEnd + 14 calendar days`, hand-rolled (`des-engine.ts:865`); agent day-scheduling loop `:1162-1213` stops there.
+- Cases unfinished at drain end count as SLA failures even if their deadline lies after drain end.
+- Repro: vol 20 → HC 8 without holidays; 12 with 8 holidays after the horizon (deadlines pushed past drain end). Expected after fix: 8.
+- Occupancy denominator = planned horizon, unchanged (frozen decision 3). ASA-gated runs may move slightly (later starts no longer censored).
+- Tests to re-check: D59.1 / D59.3 (re-pin with reason), AA.41 / AA.45d.
+
+## Design
+1. One helper computes the drain end: latest deadline over ALL cases the run will judge (primary deadline; secondary/other deadlines too if the engine judges them — builder confirms and reports), maximum with horizon end + 14 days. Deadlines are already business-calendar timestamps; any date shift goes through `calendar.ts` (replace the hand-rolled +14 days if a calendar helper fits without changing the result; otherwise keep it and say why).
+2. Agent day-scheduling, event loop end, unfinished-case counting all use that one value. Sync and async searches go through the same engine call (no duplicate logic).
+3. Occupancy denominator, N_min, N_occ, Gross HC untouched.
+4. Safety: a hard upper bound (e.g. horizon end + 366 days) to stop a bad deadline from making the run endless; if hit, the run proceeds with the bound and existing unfinished-case counting (report whether any sample/test reaches it).
+5. Deterministic: no `new Date()` / `Date.now()`.
+
+## Steps (builder `sonnet-executor`, fail-first)
+1. Checkpoint commit. Tests first — suite **D83** before the RESULTS block of `scripts/verify-sizing-fixes.mts`:
+   a. Holiday repro (vol 20, 8 post-horizon holidays): recommended HC equals the no-holiday value (8); fails on today's code.
+   b. Engine unit: a case whose deadline is after horizon + 14 days and that is finished before its deadline is counted as met (not unfinished).
+   c. Drain end = horizon + 14 days when every deadline is earlier (no change for short SLAs).
+   d. Sync == async on the repro.
+   e. Three built-in samples at defaults unchanged (31 / 27 / 31 HC; gross 40 / 34 / 39) and occupancy % unchanged.
+   f. Determinism: two runs byte-identical.
+2. Implement design 1–5 in `des-engine.ts` (plus `calendar.ts` only if a helper is needed).
+3. D59.1 / D59.3 / AA.41 / AA.45d: re-run; any change reported with reason, never silently re-pinned.
+4. `npm run lint`, `npm run build:standalone`, `npm test` once.
+5. Measure before/after, idle, one job at a time: three samples, AJM_Only, EGS_Only, repro — HC, gross, SLA %, occupancy %, runtime. Table into FINDINGS.md. Flag any case slower than 1.5x.
+6. Docs: `PRD.md` (G9/DES-10 resolved, glossary "drain", version bump), `project_context.md` (§5 drain, §11), `docs/wfm/06` (`:159` drain text), `docs/wfm/07` if a D-entry mentions the 14 days.
+
+## Scope lock
+`src/utils/des-engine.ts`, `src/utils/calendar.ts` (only if needed), `scripts/verify-sizing-fixes.mts` (D83 + listed re-pins), `scripts/verify-fixes.mts` (AA.41 / AA.45d only if they change, with reason), `PRD.md`, `project_context.md`, `docs/wfm/06-*.md`, `docs/wfm/07-known-defects-and-decisions.md`, `FINDINGS.md`, rebuilt `BoWFM.html`. No `hc-search.ts`, no UI component, no `package.json`.
+
+## Acceptance criteria and proof
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | Holidays after the horizon no longer inflate HC | D83.a: 8 with and without holidays |
+| 2 | No case failed before its deadline | D83.b |
+| 3 | Short-SLA runs unchanged | D83.c, D83.e; three samples identical |
+| 4 | Occupancy unchanged | D83.e occupancy %; diff shows denominator untouched |
+| 5 | Sync = async, deterministic | D83.d, D83.f |
+| 6 | Changes listed | FINDINGS table, every moved case old → new |
+| 7 | Run time acceptable | idle runtime; flag > 1.5x |
+| 8 | No regression | lint clean; `npm test` green (1,756 + D83) |
+| 9 | Mutation proof | revert drain end to +14 days only → D83.a/b fail |
+| 10 | Docs + artifact | PRD / project_context / docs updated; `npm run check:artifact` passes |
+| 11 | Scope | `git diff <checkpoint>..HEAD --stat` only scope files |
