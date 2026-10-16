@@ -1406,3 +1406,8 @@ Mutations (temporary edit of `des-engine.ts`, D59 + D83 only, source restored wi
 | M3 max at SimulationEnd, day-scheduling loop at +14 days | 14 failed (same set) |
 | Non-finite deadline not skipped | D83.h2 fails |
 | 366-day cap removed | D83.i1, i3 fail |
+
+## Item 4 review (2026-10-16) — supervisor verdicts
+- Round 1: tester pass (11/11; samples 31/40, 28/35, 31/39; repro 12→8; drain formula recomputed 10/10), auditor pass, user-side pass with 2 majors (stale "Unfinished by horizon end" label; silent 366-day cap) → fixed in rework 1 (652be8d).
+- Final challenger: pass. Major (owner info): long answer windows run slower than short ones (claims: default 6.1 s, 60-day window 39.6 s, 300-day 171 s) — the run now simulates until the last deadline; before the change those runs stopped at 14 days and wrongly failed cases. Builder's before/after on support 15/30-day windows was not slower (18.2→13.8 s, 31.0→21.6 s).
+- Backlog (minor): case-row "(deadline missed)" wording is wrong for rows cut by the 366-day cap; export CSV / hc-search reason strings still "Unfinished by horizon end" (export-rows.ts:49, hc-search.ts:3799/:4762); ASA censoring mixes horizon-end and real waits (documented); stale +14 comment fixed; drainCapped sync/async check added (D83.k2).
