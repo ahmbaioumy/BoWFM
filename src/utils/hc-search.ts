@@ -165,7 +165,9 @@ export function computeOccupancyFloor(params: {
   const capacityHoursPerAgent = labor.dailyProductiveHours * effectiveAdherence * days;
   const occCap = resolveOccupancyCapPct({ occupancyCapEnabled, occupancyCapPct }) / 100;
   const denominator = capacityHoursPerAgent * occCap;
-  return denominator > 0 ? Math.max(1, Math.ceil(totalWorkloadHours / denominator)) : 1;
+  // - HEADCOUNT_TIE_EPSILON: a workload summed from category parts can sit one ulp above an exact whole
+  // ratio (2.0000000000000004) and a bare ceil would add a seat.
+  return denominator > 0 ? Math.max(1, Math.ceil(totalWorkloadHours / denominator - HEADCOUNT_TIE_EPSILON)) : 1;
 }
 
 /**

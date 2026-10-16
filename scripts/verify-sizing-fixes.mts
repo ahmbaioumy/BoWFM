@@ -8180,6 +8180,18 @@ console.log('\n--- Suite D85: rounding ties (Gross HC .5 and N_min exact ratio) 
   assert(nMin85(61.875 * 1.9999) === 1, 'D85.b3 ratio 1.9999 (a real shortfall) still floors to 1', `got ${nMin85(61.875 * 1.9999)}`);
   assert(nMin85(61.875 * 2.5) === 2 && nMin85(61.875 * 3) === 3, 'D85.b4 ratio 2.5 -> 2 (floor), ratio 3 -> 3', `got ${nMin85(61.875 * 2.5)}, ${nMin85(61.875 * 3)}`);
 
+  // ---- g: N_occ (computeOccupancyFloor) ceiling, same tolerance ----
+  // A workload summed from category parts can land one ulp above an exact whole ratio
+  // (7 h x 0.55 x 15 days = 57.75 h per seat; 0.1+0.2+0.3+0.4 of 2 seats' work = 2.0000000000000004 seats) -> bare ceil gave 3.
+  const nOcc85 = (w: number, dph = 7, days = 15) => computeOccupancyFloor({ totalWorkloadHours: w, labor: { dailyProductiveHours: dph, adherencePct: 0.55 }, workingDaysInHorizon: days, occupancyCapEnabled: false, occupancyCapPct: 100 });
+  const seat85 = 7 * 0.55 * 15;
+  const parts85 = (k: number, dph = 7, days = 15) => [0.1, 0.2, 0.3, 0.4].reduce((a, x) => a + k * dph * 0.55 * days * x, 0);
+  assert(parts85(2) / seat85 > 2 && nOcc85(parts85(2)) === 2, 'D85.g1 workload summed from 4 category parts (ratio 2.0000000000000004) -> N_occ exactly 2', `ratio ${parts85(2) / seat85}, got ${nOcc85(parts85(2))}`);
+  assert(parts85(1) / seat85 > 1 && nOcc85(parts85(1)) === 1 && parts85(19, 7.5, 22) / (7.5 * 0.55 * 22) > 19 && nOcc85(parts85(19, 7.5, 22), 7.5, 22) === 19, 'D85.g2 same on k = 1 and on 7.5 h x 22 days k = 19', `got ${nOcc85(parts85(1))}, ${nOcc85(parts85(19, 7.5, 22), 7.5, 22)}`);
+  assert(nOcc85(seat85 * 2.0001) === 3, 'D85.g3 ratio 2.0001 (a real excess) -> 3', `got ${nOcc85(seat85 * 2.0001)}`);
+  assert(nOcc85(seat85 * (2 + 5e-10)) === 2, 'D85.g4 ratio 2 + 5e-10 (inside the tolerance) -> 2', `got ${nOcc85(seat85 * (2 + 5e-10))}`);
+  assert(nOcc85(seat85 * (2 + 1e-7)) === 3, 'D85.g5 ratio 2 + 1e-7 (a real excess) -> 3', `got ${nOcc85(seat85 * (2 + 1e-7))}`);
+
   // ---- d: Gross boundaries (one category, share 1, so the sum is exactly 10 / (1 - shr)) ----
   const grossAt85 = (target: number) => grossOf85(10, [['Only', 10]], 1 - 10 / target).grossHCTotal;
   assert(grossAt85(12.5 - 5e-10) === 13, 'D85.d1 12.5 - 5e-10 (float noise) -> 13', `got ${grossAt85(12.5 - 5e-10)}`);
