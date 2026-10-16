@@ -1003,6 +1003,11 @@ function ResultsFlowBody({
                       </>
                     ) : null}
                   </div>
+                  {des.drainCapped === true && (
+                    <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2 leading-relaxed">
+                      The simulation stopped 366 days after the plan end because some deadlines lie further out — check the answer-window unit.
+                    </div>
+                  )}
                   {searchOutput.belowWorkloadFloor && (
                     <div className="text-[11px] text-red-800 bg-red-50 border border-red-200 rounded-lg px-2.5 py-2 leading-relaxed">
                       Req HC {searchOutput.recommendedHC} is below the workload floor (N_min {searchOutput.nMinAnalytical}, N_occ {searchOutput.occupancyFeasibleFloor ?? 'n/a'}). This team only clears the SLA by draining backlog after the planning horizon — treat as optimistic.
@@ -1529,7 +1534,7 @@ function ResultsFlowBody({
                 <option value="ALL">All Statuses</option>
                 <option value="COMPLETED">Completed Only</option>
                 <option value="BREACHED">Breached SLA Only</option>
-                <option value="UNFINISHED">Unfinished Remainder Only</option>
+                <option value="UNFINISHED" title="Cases not finished by the end of the simulation (deadline missed)">Unfinished Remainder Only</option>
               </select>
             </div>
 
@@ -1556,7 +1561,7 @@ function ResultsFlowBody({
                       <td className="py-2 px-3 whitespace-nowrap">{formatSafeDateTime(c.arrival)}</td>
                       <td className="py-2 px-3 whitespace-nowrap">{formatSafeDateTime(c.primaryDeadline)}</td>
                       <td className="py-2 px-3 whitespace-nowrap">{formatSafeDateTime(c.firstStartTime)}</td>
-                      <td className="py-2 px-3 whitespace-nowrap">{c.completeTime ? formatSafeDateTime(c.completeTime) : 'Unfinished'}</td>
+                      <td className="py-2 px-3 whitespace-nowrap">{c.completeTime ? formatSafeDateTime(c.completeTime) : <span title="Not finished by end of simulation">Unfinished</span>}</td>
                       <td className="py-2 px-3">{c.parkCount}</td>
                       <td className="py-2 px-3 text-right font-sans">
                         {c.overdueAtStart ? (
@@ -2409,10 +2414,10 @@ function ResultsFlowBody({
                           <td className="py-2 px-3 whitespace-nowrap">{formatSafeDateTime(c.primaryDeadline)}</td>
                           <td className="py-2 px-3 whitespace-nowrap text-amber-700">{formatSafeDateTime(c.latestSafeStart)}</td>
                           <td className="py-2 px-3 whitespace-nowrap">{formatSafeDateTime(c.firstStartTime)}</td>
-                          <td className="py-2 px-3 whitespace-nowrap">{c.completeTime ? formatSafeDateTime(c.completeTime) : 'Unfinished'}</td>
+                          <td className="py-2 px-3 whitespace-nowrap">{c.completeTime ? formatSafeDateTime(c.completeTime) : <span title="Not finished by end of simulation">Unfinished</span>}</td>
                           <td className="py-2 px-3">{c.parkCount}</td>
                           <td className="py-2 px-3 font-sans text-rose-700 font-medium whitespace-nowrap">
-                            {c.isCompleted ? 'Completed after primary deadline' : 'Unfinished by horizon end'}
+                            {c.isCompleted ? 'Completed after primary deadline' : 'Not finished by end of simulation (deadline missed)'}
                           </td>
                         </tr>
                       ))}

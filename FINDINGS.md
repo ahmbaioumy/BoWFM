@@ -1340,3 +1340,74 @@ Mutation (scratch copy, D82 alone): pooled gate restored in place of the per-cat
 - Tester PASS (browser: ASA off 31/40, 28/35, 31/39; support ASA 60 → 62/78, binding Technical_Escalations; own 30 on Billing_Support → 62, column shows own target; independent re-check 61 fails / 62 passes). Challenger PASS. User-side PASS.
 - Owner approved 2026-10-16; merged into main (fast-forward).
 - Backlog (minor): run-progress text says "Primary-Driven" when an answer-time target binds; upper bound shown in minutes even for hour/day targets; mean vs upper-bound verdict note; stale "follower" comments (hc-search.ts:2468, 2848, 2937; D82 test comments); unused `_sla` parameter; CI bound rounded to 0.1 before comparison (same as before).
+
+# Item 4 build — drain runs until the last deadline (2026-10-16, branch item4-drain)
+
+Change: drain end = min( max(horizon end + 14 calendar days, latest finite `primaryDeadline`), horizon end + 366 days ), one `computeDrainEnd` call per `runBackofficeDES` (same for every candidate N, CRN kept). Drives the day-open/close scheduling, `SimulationEnd` and the unfinished count. `drainCapped: true` on `DESResult` when the cap bit. Occupancy denominator, N_min, N_occ, Gross HC untouched. DES-10 / G9 resolved. Base 5f5029b, node, idle machine except where noted.
+
+## Item 4 measurements
+
+Default settings (before = 5f5029b snapshot, after = item4-drain):
+
+| Case | HC / gross before | HC / gross after | SLA % before / after | Occupancy % before / after | Time before / after | Ratio |
+|---|---|---|---|---|---|---|
+| Repro vol 20, no holidays | 8 / 10 | 8 / 10 | 94.9 / 94.9 | 73.4 / 73.4 | 2.6 s / 2.3 s | 0.9 |
+| Repro vol 20, 8 holidays after horizon | **12 / 15** | **8 / 10** | 81.5 / 94.9 | 39.9 / 69.9 | 3.0 s / 2.9 s | 1.0 |
+| claims sample | 31 / 40 | 31 / 40 | 100 / 100 | 99.1 / 99.1 | 4.1 s / 4.8 s | 1.2 |
+| support sample | 28 / 35 | 28 / 35 | 89.5 / 89.5 | 74.9 / 74.9 | 12.9 s / 14.3 s | 1.1 |
+| healthcare sample | 31 / 39 | 31 / 39 | 86.7 / 86.7 | 58.9 / 58.9 | 54.9 s / 38.1 s | 0.7 |
+| AJM_Only.csv | 16 / 20 | 16 / 20 | 90.1 / 90.1 | 59.1 / 59.1 | 26.7 s / 33.5 s | 1.3 |
+| EGS_Only.csv | 100 / 125 | 100 / 125 | 92.7 / 92.7 | 53.4 / 53.4 | 1703 s / 1555 s | 0.9 |
+
+The plan's "31 / 27 / 31 HC, gross 40 / 34 / 39" is stale: since Item 2 the support sample is 28 / 35 (D81.a1). Nothing slower than 1.5x. The 1.2-1.3x readings for claims / support / AJM_Only were taken while other tools were running on the machine (the same runs went the other way for healthcare / EGS); no systematic slowdown. The holiday repro now equals the no-holiday answer in headcount, gross and SLA %; its occupancy differs (69.9 vs 73.4) only because 37 cases that are still open at their own deadline are unfinished and do not add handling minutes.
+
+Answer time ON, 60 minutes (item 3 figures: claims 31, healthcare 52, support 62, AJM_Only 41):
+
+| Case | HC / gross before | HC / gross after | ASA mean min before / after | Time before / after | Ratio |
+|---|---|---|---|---|---|
+| claims | 31 / 40 | 31 / 40 | 32.3 / 32.3 | 7.1 s / 5.5 s | 0.8 |
+| support | 62 / 78 | 62 / 78 | 45.7 / 45.7 | 135 s / 108 s | 0.8 |
+| healthcare | 52 / 65 | 52 / 65 | 44.1 / 44.1 | 268 s / 226 s | 0.8 |
+| AJM_Only | 41 / 51 | 41 / 51 | 38.8 / 38.8 | 364 s / 287 s | 0.8 |
+
+Multi-week answer window (support sample, primary window on every category and the global setting):
+
+| Case | HC / gross before | HC / gross after | Time before / after | Ratio |
+|---|---|---|---|---|
+| 15 working days | 21 / 26 | 21 / 26 | 18.2 s / 13.8 s | 0.8 |
+| 15 working days + ASA 60 | 62 / 78 | 62 / 78 | 243 s / 207 s | 0.9 |
+| 30 working days | 21 / 26 | 21 / 26 | 31.0 s / 21.6 s | 0.7 |
+| 30 working days + ASA 60 | 62 / 78 | 62 / 78 | 361 s / 311 s | 0.9 |
+
+(Occupancy 99.8 % in the 15 / 30-day rows is the occupancy floor binding, identical before and after.)
+
+- Nothing reached a deadline beyond the 366-day cap: no `drainCapped` on any sample, test fixture or measured run (only the 2030-deadline fixtures D83.i1 / i3 set it).
+- Not run: runtime of a deliberately undersized candidate with a very long window beyond what the searches evaluate (the search still ran 15 / 30-day windows without slowdown; lazy day scheduling not added, per G5).
+- G3: on all measured runs the final recommended result finishes every case, so answer-time figures and HC are unchanged. The effect shows only in runs that do not finish (undersized): fixture 10 x 1100 min, 1 agent, due Fri 30 Oct, ASA on: censored cases 5 -> 3, ASA mean 1340 -> 2454 min (more cases start, their real wait is counted), completed 4 -> 6, SLA 40 -> 60 %.
+- G6 (per-agent figures, same fixture): available minutes (planned-horizon denominator) 480 -> 480; handling minutes 5280 -> 7200, so rawOccupancyPct 1100 % -> 1500 % (the agent keeps working to the later drain end; the overload signal gets stronger, not weaker); agent busy / (busy + idle) 100 % -> 100 %; timeline slices 39 -> 53; `verifyAgentTimelineInvariants` valid before and after. Fixture 10 x 800 min due Fri 20 Nov: raw occupancy 1100 % -> 1667 %, agent utilisation 100 % -> 98 % (the agent runs out of work at the end), invariants valid. AA.41 / AA.45d (Agent Analytics) did not move.
+- Sizing effect on real input: only runs whose deadlines fall beyond horizon end + 14 days (long answer windows, post-horizon holidays) can change; all three samples, AJM_Only and EGS_Only did not.
+
+## Tests
+
+`npm test`: 174 + 1,343 + 97 + 164 (trusted-source) = 1,780 checks, 0 failed, artifact fresh (was 1,756; +24 = D83; rework 1 added D83.k1-k2: the cap flag reaches the search output, sync and async). Lint clean. Only D59.1-3 changed (redesign, below); no other existing test moved; every hand-built `precomputedCases` test passed unchanged (9 in verify-sizing-fixes.mts, 2 in verify-fixes.mts, none in verify-agent-analytics.mts).
+
+| Test | Old | New | Reason |
+|---|---|---|---|
+| D59.1-3 | 10 x 800 min, due Fri 30 Oct: 6 done / 4 unfinished, 60 % | 10 x 1100 min, due Fri 30 Oct: 6 / 4, 60 % | The old deadline (30 Oct) now lies inside the drain (to 30 Oct 17:00 = 15 days x 480 = 7200 min); at 800 min the team would finish 9. At 1100 min the agent is too slow to finish before the new drain end, so the "unfinished stay in the denominator" proof and the 6 / 10 / 60 % numbers are kept. Not a silent re-pin: the fixture changed, the claim did not. |
+
+Fail-first (D83 + redesigned D59 on the 5f5029b engine): 15 failed, 10 passed — D59.1-3, D83.a1, a2, d, b1-b3, g1, g2, h1, i1, i3, j2. After: 25 / 25 pass (D59 3 + D83 22).
+
+Mutations (temporary edit of `des-engine.ts`, D59 + D83 only, source restored with `git checkout` after each):
+
+| Mutation | Result |
+|---|---|
+| M1 drain end back to horizon + 14 days only | 14 failed incl. D83.a1, a2, b1-b3 |
+| M2 max in the day-scheduling loop, SimulationEnd at +14 days | 14 failed (same set) |
+| M3 max at SimulationEnd, day-scheduling loop at +14 days | 14 failed (same set) |
+| Non-finite deadline not skipped | D83.h2 fails |
+| 366-day cap removed | D83.i1, i3 fail |
+
+## Item 4 review (2026-10-16) — supervisor verdicts
+- Round 1: tester pass (11/11; samples 31/40, 28/35, 31/39; repro 12→8; drain formula recomputed 10/10), auditor pass, user-side pass with 2 majors (stale "Unfinished by horizon end" label; silent 366-day cap) → fixed in rework 1 (652be8d).
+- Final challenger: pass. Major (owner info): long answer windows run slower than short ones (claims: default 6.1 s, 60-day window 39.6 s, 300-day 171 s) — the run now simulates until the last deadline; before the change those runs stopped at 14 days and wrongly failed cases. Builder's before/after on support 15/30-day windows was not slower (18.2→13.8 s, 31.0→21.6 s).
+- Backlog (minor): case-row "(deadline missed)" wording is wrong for rows cut by the 366-day cap; export CSV / hc-search reason strings still "Unfinished by horizon end" (export-rows.ts:49, hc-search.ts:3799/:4762); ASA censoring mixes horizon-end and real waits (documented); stale +14 comment fixed; drainCapped sync/async check added (D83.k2).

@@ -156,8 +156,13 @@ state (opening WIP), rather than to statistical equilibrium. Two consequences:
 
 - **Opening WIP is the initial condition** and must be supplied. Starting from an empty
   queue is a modelling choice that flatters the result.
-- **A drain window** (up to 14 days past horizon end) lets in-flight work finish, so cases
-  arriving near the end are not counted as failures merely because the clock stopped.
+- **A drain window** lets in-flight work finish, so cases arriving near the end are not counted
+  as failures merely because the clock stopped. It runs until the **later of horizon end + 14
+  calendar days and the latest case deadline** (Item 4, 2026-10-16), never longer than horizon
+  end + 366 days (`DESResult.drainCapped` is set when that cap bit). A case is therefore never
+  counted as failed before its own deadline has passed - holidays after the horizon push
+  deadlines out and used to inflate the headcount (DES-10 / G9). The end is computed once per
+  run by `computeDrainEnd` in `des-engine.ts` (non-finite deadlines are skipped).
 
 The drain window creates an edge effect: a headcount below the steady-state line could
 "pass" by using drain-window time that would not exist in a repeating period. **`N_min` as a

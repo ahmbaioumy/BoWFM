@@ -4547,8 +4547,11 @@ console.log('\n--- Suite D58: Common Random Numbers ---');
 
 // ---------------------------------------------------------------
 // Suite D59 — Unfinished cases count in the SLA denominator (TEST-9)
-// 10 cases, 1 agent, AHT 800 min, 8 productive h/day. Horizon Mon 12 Oct, drain until Mon 26 Oct 17:00 = 11 working days
-// x 480 min = 5280 min -> floor(5280 / 800) = 6 cases finish (all inside their long deadline); 4 do not.
+// 10 cases, 1 agent, AHT 1100 min, 8 productive h/day. Horizon Mon 12 Oct; every case is due Fri 30 Oct 17:00.
+// Item 4 (2026-10-16): the drain now runs until the last deadline (Fri 30 Oct 17:00, later than horizon + 14 days = Mon 26 Oct 17:00)
+// = 15 working days x 480 min = 7200 min -> floor(7200 / 1100) = 6 cases finish (6600 min, inside the deadline); the 7th is
+// started but not finished, cases 8-10 never start: 4 unfinished at the new drain end. (Before item 4 this fixture used AHT 800 and
+// the 11-day drain, 6 / 4; at AHT 800 the new drain would finish 9 of 10 - the redesign keeps the same 6 / 10, 60 % expectations.)
 // ---------------------------------------------------------------
 console.log('\n--- Suite D59: unfinished cases stay in the SLA denominator ---');
 {
@@ -4560,8 +4563,8 @@ console.log('\n--- Suite D59: unfinished cases stay in the SLA denominator ---')
     priority: 1,
     arrival: at59(12, 9),
     clockStart: at59(12, 9),
-    totalAhtMinutes: 800,
-    remainingWorkMinutes: 800,
+    totalAhtMinutes: 1100,
+    remainingWorkMinutes: 1100,
     primaryDeadline: at59(30, 17),
     latestSafeStart: at59(28, 9),
     firstStartTime: null,
@@ -4569,7 +4572,7 @@ console.log('\n--- Suite D59: unfinished cases stay in the SLA denominator ---')
     parkCount: 0,
     isOpeningWip: false,
   }));
-  const cat59: CategoryConfig[] = [{ id: 'a', name: 'A', ahtMinutes: 800, shrinkagePct: 0.2, priority: 1, primaryWindowMinutes: 100000 }];
+  const cat59: CategoryConfig[] = [{ id: 'a', name: 'A', ahtMinutes: 1100, shrinkagePct: 0.2, priority: 1, primaryWindowMinutes: 100000 }];
   const r59 = runBackofficeDES({
     operationalHC: 1,
     intervals: [],
@@ -4582,7 +4585,7 @@ console.log('\n--- Suite D59: unfinished cases stay in the SLA denominator ---')
     skipCaseResultsAndTimeline: true,
     precomputedCases: { cases: cases59, horizonStart: at59(12, 9), horizonEnd: at59(12, 17) },
   });
-  assert(r59.totalCases === 10 && r59.completedCases === 6 && r59.unfinishedCases === 4, 'D59.1 6 of 10 cases finish inside horizon + drain (floor(11 x 480 / 800) = 6), 4 unfinished', `total ${r59.totalCases}, completed ${r59.completedCases}, unfinished ${r59.unfinishedCases}; expected 10/6/4`);
+  assert(r59.totalCases === 10 && r59.completedCases === 6 && r59.unfinishedCases === 4, 'D59.1 6 of 10 cases finish inside the drain (to the last deadline: floor(15 x 480 / 1100) = 6), 4 unfinished', `total ${r59.totalCases}, completed ${r59.completedCases}, unfinished ${r59.unfinishedCases}; expected 10/6/4`);
   assert(r59.primaryEligibleCount === 10 && r59.primaryPassCount === 6, 'D59.2 SLA denominator is all 10 cases, numerator the 6 finished in time', `eligible ${r59.primaryEligibleCount}, pass ${r59.primaryPassCount}; expected 10 / 6`);
   assert(r59.primaryAchievedPct === 60, 'D59.3 primaryAchievedPct is 60 (6/10), not 100 (6/6)', `got ${r59.primaryAchievedPct}`);
 }
@@ -7935,6 +7938,145 @@ console.log('\n--- Suite D82: per-category answer-time targets, explicit own-tar
     assert(cfgSrc.includes('Each category must meet its answer-time target on its own (its own target if ticked, otherwise the global target).') && resSrc.includes('Each category must meet its answer-time target on its own (its own target if ticked, otherwise the global target).'), 'D82.g2 the rule sentence is shown in Config and in Results', '');
     assert(!/shared pool|categories without their own target|share the global target/.test(cfgSrc + resSrc), 'D82.g4 no text about a shared pool or a shared-pool rule remains in the screens', '');
     assert(/boAsaOwn: false/.test(cfgSrc), 'D82.g3 "Apply Template to All Categories" sets every category back to follow the global target', '');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Suite D83 - Item 4 (G9 / DES-10): the drain runs until the last deadline (owner decision 2026-10-15; challenge amendments G1-G9 2026-10-16)
+// drain end = min( max(horizon end + 14 calendar days, latest finite primaryDeadline of the run's cases), horizon end + 366 days ).
+// The same value drives the day-open/close scheduling, SimulationEnd and the unfinished-case count; computed once per run from the case
+// array (same for every candidate N, CRN preserved). Non-finite deadlines are skipped. drainCapped is true on the result when the cap bit.
+// Occupancy denominator (planned horizon), N_min, N_occ and Gross HC are untouched (frozen decision 3).
+// Fail-first (pre-change): D83.a (12, not 8), D83.b (6 / 4, not 10 / 0), D83.d (async 12), D83.g (5 censored, not 3), D83.h1 (6 finish),
+// D83.i1 / D83.i3 (field absent), D83.j2 (timeline ends at the old drain end); D59.1-3 redesigned (see D59). Controls that hold before and after:
+// D83.c, D83.e, D83.f, D83.h2, D83.i2, D83.j1 / j3.
+// ---------------------------------------------------------------------------
+console.log('\n--- Suite D83: the drain runs until the last deadline (Item 4 / G9 / DES-10) ---');
+{
+  const at83 = (mo: number, d: number, h: number, m: number = 0) => new Date(2026, mo, d, h, m);
+  const mkCases83 = (n: number, aht: number, deadline: Date): any[] =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `U${i}`, syntheticId: i + 1, category: 'A', priority: 1,
+      arrival: at83(9, 12, 9), clockStart: at83(9, 12, 9),
+      totalAhtMinutes: aht, remainingWorkMinutes: aht,
+      primaryDeadline: deadline, latestSafeStart: at83(9, 12, 9),
+      firstStartTime: null, completeTime: null, parkCount: 0, isOpeningWip: false,
+    }));
+  const cat83 = (aht: number): CategoryConfig[] => [{ id: 'a', name: 'A', ahtMinutes: aht, shrinkagePct: 0.2, priority: 1, primaryWindowMinutes: 100000 }];
+  const run83 = (cases: any[], aht: number, full: boolean = false): any =>
+    runBackofficeDES({
+      operationalHC: 1, intervals: [], openingWIP: [], categories: cat83(aht), calendar: BIZ_CAL, labor: LABOR, sla: { ...DEFAULT_SLA }, seed: 7,
+      skipCaseResultsAndTimeline: !full,
+      precomputedCases: { cases, horizonStart: at83(9, 12, 9), horizonEnd: at83(9, 12, 17) },
+    });
+  const NOV20 = at83(10, 20, 17);
+
+  // ---- D83.a / D83.d / D83.f the holiday repro (vol 20, AHT 33, 5-day window; 8 holidays after the horizon push deadlines past the old drain end) ----
+  const HOLS83 = ['2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22', '2026-10-23', '2026-10-26', '2026-10-27', '2026-10-28'];
+  const mkIv83 = (): StandardInterval[] => {
+    const out: StandardInterval[] = [];
+    let idx = 0;
+    for (const d of [5, 15, 16]) {
+      for (let i = 0; i < 20; i++) {
+        const s = new Date(2026, 9, d, 8, i * 30);
+        out.push({ intervalIndex: idx++, start: s, end: new Date(s.getTime() + 30 * 60000), volume: d === 5 ? (i === 0 ? 1 : 0) : 20, category: 'A' } as StandardInterval);
+      }
+    }
+    return out;
+  };
+  const sla83: SLAPolicyConfig = { ...DEFAULT_SLA, primaryWindow: 5, primaryUnit: 'days', clockBasis: 'business_time', clockStartPolicy: 'next_open' } as SLAPolicyConfig;
+  const iv83 = mkIv83();
+  const cats83 = discoverAndSyncCategories(iv83, [{ ...DEFAULT_CATEGORIES[0], id: 'a', name: 'A', ahtMinutes: 33, primaryWindow: 5, primaryUnit: 'days' } as CategoryConfig], sla83);
+  const p83 = (hol: boolean) => ({ intervals: iv83, openingWIP: [] as OpeningWIPCase[], categories: cats83, calendar: { ...DEFAULT_CALENDAR, holidays: hol ? HOLS83 : [] }, labor: DEFAULT_LABOR, sla: sla83, seed: 12345, userMaxHC: 100, replications: 5, queueArchitecture: 'pooled' as const });
+  const sig83 = (r: any): string => `${r.recommendedHC}|${r.staffing?.grossHCTotal}|${r.isInfeasible}|${r.finalDESResult?.primaryAchievedPct}|${r.finalDESResult?.occupancyPct}|${r.finalDESResult?.unfinishedCases}|${JSON.stringify(r.searchHistory)}`;
+  const noHol: any = searchOptimalHC(p83(false));
+  const withHol: any = searchOptimalHC(p83(true));
+  assert(noHol.recommendedHC === 8 && withHol.recommendedHC === 8, 'D83.a1 vol 20: 8 HC with and without 8 holidays after the horizon (holidays push deadlines past the old drain end; it used to give 12)', `no holidays ${noHol.recommendedHC}, holidays ${withHol.recommendedHC}`);
+  assert(withHol.staffing?.grossHCTotal === noHol.staffing?.grossHCTotal && withHol.finalDESResult?.primaryAchievedPct === noHol.finalDESResult?.primaryAchievedPct, 'D83.a2 the holiday run has the same gross HC and the same SLA % in the recommended result (a case still open at its own deadline is a miss whether it is counted late or unfinished)', `gross ${withHol.staffing?.grossHCTotal}/${noHol.staffing?.grossHCTotal}, SLA ${withHol.finalDESResult?.primaryAchievedPct}/${noHol.finalDESResult?.primaryAchievedPct}`);
+  const withHolA: any = await searchOptimalHCAsync(p83(true));
+  assert(sig83(withHolA) === sig83(withHol) && withHolA.recommendedHC === 8, 'D83.d sync === async on the holiday repro (HC, gross, verdict, figures, full search history)', `sync=${withHol.recommendedHC} async=${withHolA.recommendedHC}`);
+  const withHol2: any = searchOptimalHC(p83(true));
+  assert(sig83(withHol2) === sig83(withHol), 'D83.f determinism: two sync runs of the holiday repro are byte-identical (HC, gross, figures, search history)', '');
+
+  // ---- D83.b a case due after horizon + 14 days and finished before its deadline is met, not unfinished ----
+  {
+    const r = run83(mkCases83(10, 800, NOV20), 800, true);
+    const lastDone = Math.max(...(r.caseResults as any[]).filter((c) => c.isCompleted).map((c) => c.completeTime.getTime()));
+    assert(r.completedCases === 10 && r.unfinishedCases === 0, 'D83.b1 10 x 800 min, 1 agent, all due Fri 20 Nov: all 10 finish (8000 min = 16.7 working days), none counted unfinished', `completed ${r.completedCases}, unfinished ${r.unfinishedCases}`);
+    assert(r.primaryEligibleCount === 10 && r.primaryPassCount === 10 && r.primaryAchievedPct === 100, 'D83.b2 all 10 met their deadline: 10 / 10 = 100 %', `eligible ${r.primaryEligibleCount}, pass ${r.primaryPassCount}, pct ${r.primaryAchievedPct}`);
+    assert(lastDone > at83(9, 26, 17).getTime() && lastDone <= NOV20.getTime(), 'D83.b3 the last case finished after the old drain end (Mon 26 Oct 17:00) and before its deadline', new Date(lastDone).toISOString());
+  }
+
+  // ---- D83.c deadlines earlier than horizon + 14 days: drain end unchanged (Mon 26 Oct 17:00 = 11 working days) ----
+  {
+    const r = run83(mkCases83(10, 800, at83(9, 20, 17)), 800, true);
+    assert(r.completedCases === 6 && r.unfinishedCases === 4, 'D83.c1 all deadlines earlier than horizon + 14 days (Tue 20 Oct): the drain still ends at horizon + 14 days: floor(5280 / 800) = 6 finish, 4 unfinished (unchanged)', `completed ${r.completedCases}, unfinished ${r.unfinishedCases}`);
+    assert(r.primaryPassCount === 4 && r.primaryAchievedPct === 40 && r.drainCapped !== true, 'D83.c2 only the 4 finished by Tue 20 Oct 17:00 are met (7 days x 480 / 800 = 4): 40 %; drain not capped', `pass ${r.primaryPassCount}, pct ${r.primaryAchievedPct}, capped ${r.drainCapped}`);
+  }
+
+  // ---- D83.e the three built-in samples and AJM_Only at defaults: headcount, gross and occupancy unchanged ----
+  for (const [type, hc, gross, occ] of [['claims', 31, 40, 99.1], ['support', 28, 35, 74.9], ['healthcare', 31, 39, 58.9]] as Array<['claims' | 'support' | 'healthcare', number, number, number]>) {
+    const { rows } = buildSampleDataset(type, new Date(2026, 9, 5, 8, 0, 0, 0));
+    const ivs = mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+    const cats = discoverAndSyncCategories(ivs, DEFAULT_CATEGORIES, DEFAULT_SLA);
+    const r: any = searchOptimalHC({ intervals: ivs, openingWIP: [], categories: cats, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, seed: DEFAULT_SIM_PARAMS.seed, userMaxHC: DEFAULT_SIM_PARAMS.maxHCSearch, replications: DEFAULT_SIM_PARAMS.replications, queueArchitecture: 'pooled', dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness });
+    assert(r.recommendedHC === hc && r.staffing.grossHCTotal === gross && r.finalDESResult?.occupancyPct === occ && r.finalDESResult?.drainCapped !== true, `D83.e ${type} sample (defaults): HC ${hc} / gross ${gross} / occupancy ${occ} % unchanged by the longer drain`, `got ${r.recommendedHC}/${r.staffing.grossHCTotal}/${r.finalDESResult?.occupancyPct}`);
+  }
+
+  // ---- D83.g answer time: a case that starts inside the longer drain has its real wait counted; one that never starts stays censored ----
+  {
+    const r = run83(mkCases83(10, 1100, at83(9, 30, 17)), 1100, true);
+    assert(r.boAsaCensoredCount === 3 && r.completedCases === 6, 'D83.g1 10 x 1100 min due Fri 30 Oct (drain to Fri 30 Oct 17:00): 7 cases start (6 done + 1 in progress), only the 3 that never start are censored (was 5 at the old drain end)', `censored ${r.boAsaCensoredCount}, completed ${r.completedCases}`);
+    const startedWaits = (r.caseResults as any[]).filter((c) => !c.asaCensored).length;
+    assert(startedWaits === 7, 'D83.g2 7 cases carry a real (uncensored) wait', `uncensored ${startedWaits}`);
+  }
+
+  // ---- D83.h a non-finite deadline is skipped: agents still work and the result equals the run where that case simply fails ----
+  {
+    const nan = mkCases83(10, 800, NOV20);
+    nan[0] = { ...nan[0], primaryDeadline: new Date(NaN) };
+    const early = mkCases83(10, 800, NOV20);
+    early[0] = { ...early[0], primaryDeadline: at83(9, 13, 9) };
+    const a = run83(nan, 800, true);
+    const b = run83(early, 800, true);
+    assert(a.completedCases === 10 && a.completedCases === b.completedCases && a.primaryPassCount === b.primaryPassCount && a.primaryPassCount === 9 && a.drainCapped !== true, 'D83.h1 one NaN deadline: the other 9 deadlines still set the drain (all 10 finish), equals the run where that case simply has an impossible deadline; not capped', `nan: ${a.completedCases}/${a.primaryPassCount}, early: ${b.completedCases}/${b.primaryPassCount}, capped ${a.drainCapped}`);
+    const allNaN = mkCases83(10, 800, new Date(NaN));
+    const c = run83(allNaN, 800, true);
+    assert(c.completedCases === 6 && c.unfinishedCases === 4 && c.drainCapped !== true, 'D83.h2 every deadline NaN: the drain falls back to horizon + 14 days (6 finish, 4 unfinished), no crash, no hang', `completed ${c.completedCases}, unfinished ${c.unfinishedCases}`);
+  }
+
+  // ---- D83.i a far-future deadline is capped at horizon end + 366 days and flagged ----
+  {
+    const far = mkCases83(10, 800, new Date(2030, 0, 4, 17, 0));
+    const r = run83(far, 800, true);
+    assert(r.drainCapped === true && r.completedCases === 10 && r.unfinishedCases === 0, 'D83.i1 a deadline in 2030 (beyond horizon end + 366 days): the run proceeds with the cap, drainCapped is true, the cases still finish', `capped ${r.drainCapped}, completed ${r.completedCases}`);
+    const near = run83(mkCases83(10, 800, NOV20), 800, true);
+    assert(near.drainCapped !== true, 'D83.i2 a deadline inside the cap leaves drainCapped unset / false', `capped ${near.drainCapped}`);
+    // a deadline well beyond the cap that no agent could reach: 40000-min cases, 1 agent, would need more than a year -> the cap still ends the run
+    const slow = run83(mkCases83(10, 40000, new Date(2030, 0, 4, 17, 0)), 40000, true);
+    assert(slow.drainCapped === true && slow.completedCases < 10 && slow.unfinishedCases === 10 - slow.completedCases, 'D83.i3 undersized run to a far-future deadline: stops at the cap, unfinished cases counted as before', `completed ${slow.completedCases}, unfinished ${slow.unfinishedCases}`);
+  }
+
+  // ---- D83.k the cap flag reaches the search output (sync and async), so Results can show the note (rework 1, R2) ----
+  {
+    const slaFar: SLAPolicyConfig = { ...sla83, primaryWindow: 300, primaryUnit: 'days' } as SLAPolicyConfig;
+    const catsFar = discoverAndSyncCategories(iv83, [{ ...DEFAULT_CATEGORIES[0], id: 'a', name: 'A', ahtMinutes: 33, primaryWindow: 300, primaryUnit: 'days' } as CategoryConfig], slaFar);
+    const pFar = { ...p83(false), categories: catsFar, sla: slaFar };
+    const farS: any = searchOptimalHC(pFar);
+    const farA: any = await searchOptimalHCAsync(pFar);
+    assert(farS.finalDESResult?.drainCapped === true && farA.finalDESResult?.drainCapped === true, 'D83.k2 a 300-working-day answer window: searchOutput.finalDESResult.drainCapped is true for sync and async', `sync ${farS.finalDESResult?.drainCapped}, async ${farA.finalDESResult?.drainCapped}`);
+    assert(noHol.finalDESResult?.drainCapped !== true, 'D83.k1 the ordinary holiday-free repro leaves drainCapped unset in the search output', `capped ${noHol.finalDESResult?.drainCapped}`);
+  }
+
+  // ---- D83.j undersized long-window run: the agent timeline extends to the longer drain and the invariants hold ----
+  {
+    const cases = mkCases83(10, 1100, at83(9, 30, 17));
+    const r = run83(cases, 1100, true);
+    const inv = verifyAgentTimelineInvariants(r, LABOR, BIZ_CAL);
+    const lastBusy = Math.max(...(r.agentTimeline as any[]).filter((s) => s.state === 'busy').map((s) => s.to.getTime()));
+    assert(inv.valid, 'D83.j1 undersized run to Fri 30 Oct: timeline invariants hold (contiguous, no overlap, busy sum = handling minutes, daily budget)', inv.errors.slice(0, 3).join(' | '));
+    assert(lastBusy > at83(9, 26, 17).getTime() && lastBusy <= at83(9, 30, 17).getTime(), 'D83.j2 the agent keeps working past the old drain end (busy slices to Fri 30 Oct)', new Date(lastBusy).toISOString());
+    assert(r.totalAvailableProductiveMinutes === 480, 'D83.j3 occupancy denominator is still the planned horizon (1 agent x 1 working day x 480 min) - frozen decision 3; the longer drain does not widen it', `available ${r.totalAvailableProductiveMinutes}, raw occupancy ${r.rawOccupancyPct}`);
   }
 }
 

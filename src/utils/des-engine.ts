@@ -751,6 +751,31 @@ export function resolveMinAgentsPerInterval(
   return Math.max(0, Math.min(operationalHC, Math.round(n)));
 }
 
+/** Fixed part of the drain after the planning horizon: 14 calendar days (millisecond arithmetic, kept as-is - no DST re-derivation). */
+const DRAIN_BASE_MS = 14 * 24 * 60 * 60 * 1000;
+/** Hard upper bound on the drain: a bad (far-future) deadline cannot make a run endless. */
+const DRAIN_CAP_MS = 366 * 24 * 60 * 60 * 1000;
+
+/**
+ * Where the simulation stops (Item 4, G9 / DES-10): the later of horizon end + 14 days and the latest finite
+ * `primaryDeadline` of the run's cases, never later than horizon end + 366 days. A case is judged against its
+ * deadline, so the run must not stop before the last deadline has passed - otherwise a case that is simply not due
+ * yet counts as failed (deadlines pushed out by holidays inflated the headcount). Non-finite deadlines are skipped.
+ * `capped` is true when the 366-day bound bit. Depends only on the case array (same for every candidate N).
+ * The occupancy denominator (planned horizon) is NOT affected by this value - frozen decision 3.
+ */
+export function computeDrainEnd(horizonEnd: Date, cases: ReadonlyArray<{ primaryDeadline: Date }>): { drainEnd: Date; capped: boolean } {
+  const baseMs = horizonEnd.getTime() + DRAIN_BASE_MS;
+  let latestMs = -Infinity;
+  for (let i = 0; i < cases.length; i++) {
+    const t = cases[i].primaryDeadline?.getTime();
+    if (typeof t === 'number' && Number.isFinite(t) && t > latestMs) latestMs = t;
+  }
+  const wantedMs = Math.max(baseMs, latestMs);
+  const capMs = horizonEnd.getTime() + DRAIN_CAP_MS;
+  return { drainEnd: new Date(Math.min(wantedMs, capMs)), capped: wantedMs > capMs };
+}
+
 export function runBackofficeDES(params: {
   operationalHC: number;
   intervals: StandardInterval[];
@@ -860,9 +885,11 @@ export function runBackofficeDES(params: {
   // Business-open/close event scheduling (step 2) happens further below, after the
   // siloed-architecture agent setup — staggered shift placement needs to know each
   // agent's category (agentCategoryMap) before it can assign slap start offsets, and
-  // the day-open events it schedules depend on that assignment. drainHorizonEnd is
-  // still declared here since it is also needed for SimulationEnd immediately below.
-  const drainHorizonEnd = new Date(horizonEnd.getTime() + 14 * 24 * 60 * 60 * 1000);
+  // the day-open events it schedules depend on that assignment. The drain end (computeDrainEnd, from the
+  // case list) is declared here because SimulationEnd needs it immediately below, and the day-open/close
+  // scheduling reuses the same value.
+  // The one drain end (Item 4): later of horizon end + 14 days and the last deadline, capped - see computeDrainEnd.
+  const { drainEnd: drainHorizonEnd, capped: drainCapped } = computeDrainEnd(horizonEnd, allCases);
   scheduleEvent(drainHorizonEnd, 'SimulationEnd', 'SYS_END');
 
   // Simulation State with fast Heap Priority Queue
@@ -2230,6 +2257,7 @@ export function runBackofficeDES(params: {
     agentTimeline,
     ...(shiftDistribution ? { shiftDistributionUsed: shiftDistribution } : {}),
     fixedShifts: staggeredMode,
+    ...(drainCapped ? { drainCapped: true } : {}),
     doubleBookedAssignments,
     ...(agentFairness ? { agentFairness } : {}),
   };
