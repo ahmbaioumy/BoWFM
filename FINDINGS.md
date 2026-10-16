@@ -1463,3 +1463,20 @@ All numbers identical before and after (before = checkpoint 2f50a89 source). AJM
 Finding: "0 mismatches" for `computeOccupancyFloor` was measured on single workload figures. A workload summed from category parts can be 1 ulp above an exact whole ratio (7 h x 0.55 x 15 days, 0.1+0.2+0.3+0.4 of 2 seats = 2.0000000000000004), and bare `Math.ceil` gave 3. Challenger probe: 2,290 of 2,999 whole-ratio cases one seat too high.
 Change (`src/utils/hc-search.ts`, `computeOccupancyFloor`): `Math.ceil(ratio - HEADCOUNT_TIE_EPSILON)` (same 1e-9). All three headcount boundaries (N_min floor, N_occ ceil, Gross round) now use it.
 Tests (suite D85.g1-g5): summed parts ratio 2.0000000000000004 -> 2; same for k = 1 and 7.5 h x 22 days k = 19; 2.0001 -> 3; 2 + 5e-10 -> 2; 2 + 1e-7 -> 3. Red before the change: g1, g2, g4 failed (g3, g5 controls passed). Mutation (epsilon removed again): g1, g2, g4 fail; restored: all 18 D85 checks pass.
+
+## Item 7 measurements (volume variability OFF vs ON), 2026-10-17
+Idle machine, one job at a time, `searchOptimalHC`, pooled, defaults (R = 30, seed 42), worktree `item7-poisson` at the Item 7 commit. Samples ran twice per mode (identical results both times); AJM_Only and EGS_Only once. "SLA %" is the final audit run's primary SLA; "cases" is the audit run's case count (ON draws counts, OFF rounds the forecast).
+
+| Dataset | OFF HC / gross | ON HC / gross | OFF SLA % | ON SLA % | OFF s | ON s | ON / OFF time |
+|---|---|---|---|---|---|---|---|
+| claims | 31 / 40 | 31 / 40 | 100 | 100 | 5.3, 4.5 | 6.2, 6.2 | 1.2x, 1.4x |
+| support | 28 / 35 | 28 / 35 | 89.5 | 89.5 | 16.0, 14.6 | 13.1, 12.8 | 0.8x, 0.9x |
+| healthcare | 31 / 39 | 32 / 40 | 86.7 | 87.9 | 36.2, 34.9 | 37.9, 37.4 | 1.0x, 1.1x |
+| AJM_Only | 16 / 20 | 17 / 21 | 90.1 | 92.4 | 31.9 | 97.4 | **3.1x (flag)** |
+| EGS_Only | 100 / 125 | 101 / 126 | 92.7 | 92.9 | 1376 | 1466 | 1.1x |
+
+Reading:
+- OFF reproduces main exactly (31/40, 28/35, 31/39; AJM_Only 16/20 and EGS_Only 100/125 equal the 2026-10-15 audit baseline).
+- ON raised the answer by one seat on 3 of 5 datasets (healthcare, AJM_Only, EGS_Only) and left two unchanged. The extra staff is small, as expected for per-interval Poisson noise averaged over a multi-week plan (PRD L39).
+- Runtime: within 10 % except claims (1.2-1.4x, a 5 s run, noise-sized) and **AJM_Only at 3.1x, above the 1.5x flag**. Cost per candidate is not higher (the count draw is O(intervals)); the extra time is more candidate headcounts evaluated (ON ends one seat higher, with more failing candidates near the boundary) and, when ON, a second forecast case set is generated per replication. Not investigated further; reported for the supervisor to decide.
+- ON audit-run case counts differ from OFF by under 2 % (claims 1358 vs 1380, healthcare 2215 vs 2190, AJM_Only 3079 vs 3119): Poisson noise plus the mean-versus-round difference on fractional volumes (PRD L39 point 3).
