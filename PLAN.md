@@ -2161,3 +2161,44 @@ G6. **Per-agent figures:** for runs that do not finish, per-agent available/idle
 G7. Only `primaryDeadline` exists (`wfm.ts:301`); judgement `completeTime <= primaryDeadline` (`des-engine.ts:1992`). No secondary deadlines; backlog/overdue cases cannot extend the drain.
 G8. **Keep the ms arithmetic** for +14 days (`:865`) — no calendar helper swap (DST risk). Compute the max once per run from the case array (same for every candidate N; CRN preserved).
 G9. **Mutation proof (criterion 9)** adds: max applied to the scheduling loop (`:1162`) but not to SimulationEnd (`:866`), and the reverse — D83.a/b must fail in both.
+
+---
+
+# BUILD PLAN — Item 5: manual backlog form default (G10, DES-7), 2026-10-16
+
+**Task:** in the manual backlog (opening work-in-progress) form, a blank "remaining time" means the full handling time of the case's category, so new manual backlog no longer jumps ahead of new cases as if part-worked.
+**End user:** WFM planner. **Tier 2** (form + docs; engine unchanged; headcount changes only through what the user enters). Reviewers: `tester` + `auditor` + `user-side`; final `challenger`.
+**Owner decision 2026-10-15:** fix the form default only; an explicitly entered remaining < AHT keeps in-progress priority. No engine change.
+
+## Facts (investigator 2026-10-15, probe scratch `r3/q_p4.mts`)
+- Engine rule already: remaining < full AHT → in-progress priority (`des-engine.ts:187-188, 270`).
+- Defect: manual form defaults remaining to 30 min (`DemandFlow.tsx:106, 276, 301`) while sample AHTs are 35/45/60, so every manual backlog case counts as part-worked.
+- Imported files without a remaining column already get full AHT.
+- Probe (VOL=1, 30 backlog, N=1): new-case SLA 51.7 % part-worked vs 91.7 % full.
+
+## Design
+1. Form field "remaining minutes" starts blank, with a hint: "Leave blank = not started (full handling time of the category)." Blank stored as "not set" so the engine path that already gives full AHT is used (same path as an import without the column) — builder confirms which representation (undefined / null / omitted) the engine and CSV path use and reuses it; no new engine branch.
+2. An entered value is kept exactly as today (validation unchanged; a value ≥ AHT behaves as not started, as today).
+3. Existing saved/loaded configs (JSON import/export of a scenario) with a numeric remaining keep their value; only the form default changes. Check any template/sample that pre-fills backlog.
+4. Summary/list of manual backlog rows shows "full" (or the AHT) when blank, not "30".
+
+## Steps (builder `sonnet-executor`, fail-first where testable)
+1. Tests first in `scripts/verify-sizing-fixes.mts` suite **D84**: (a) the form's default row object (extract a pure helper if the default lives inline in JSX, e.g. `createManualBacklogRow(category)` in a small util) has no remaining value; (b) a backlog row with no remaining value reaches the engine as not part-worked (full AHT, no in-progress priority) — via the same conversion the form uses; (c) an explicit remaining 10 < AHT keeps priority; (d) samples unchanged (31/40, 28/35, 31/39).
+2. Implement in `src/components/DemandFlow.tsx` (+ the small helper file if extracted).
+3. lint, build:standalone, fast suites + D84 via trimmed copy; full `npm test` once at the end.
+4. Browser: add a manual backlog row, leave remaining blank → hint visible, row shows full; run → no console errors; with probe-like input new-case SLA is the full-AHT value.
+5. Docs: PRD (G10/DES-7 resolved, form text, version 1.27.2), project_context §11, docs/wfm if backlog input is described; rebuild BoWFM.html; `npm run check:artifact`.
+
+## Scope lock
+`src/components/DemandFlow.tsx`, optional new `src/utils/<backlog-row helper>.ts`, `scripts/verify-sizing-fixes.mts` (D84 only), `PRD.md`, `project_context.md`, `docs/wfm/*` (backlog text only), `FINDINGS.md`, `BoWFM.html`. No engine files, no `package.json`.
+
+## Acceptance criteria
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | Blank = not started | D84.a/b; browser row shows full handling time |
+| 2 | Entered value kept | D84.c; browser enter 10 → shown and used |
+| 3 | Samples unchanged | D84.d; browser samples |
+| 4 | Hint visible and clear | browser screenshot; user-side |
+| 5 | No regression | lint; `npm test` green |
+| 6 | Docs + artifact | PRD / project_context; `check:artifact` passes |
+| 7 | Scope | diff stat only scope files |
