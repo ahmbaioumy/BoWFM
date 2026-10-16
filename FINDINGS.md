@@ -1436,3 +1436,8 @@ Tests: suite D84 (9 checks), fail-first 8 of 9 failed against the old-behaviour 
 - K2: hint now says to enter minutes only for part-worked cases, handled before new work. Both tables use `remainingWorkLabel`: "10m (in progress)" below the category handling time, "full (45m)" blank, plain "Nm" at or above.
 - K3: typed 0 goes through K1 (message), no silent clearing.
 - Tests: D84 now 14 checks (5 added: e1-e4 parsing, f1 label); trimmed run 14/14; D54 trimmed run 23/23 (D54.7 type="number" rule passes). Suite totals 1785 = 174 + 1350 + 97 + 164.
+
+## Item 5 review (2026-10-16) — supervisor verdicts
+- Round 1: auditor pass; tester fail + user-side fail (digits-only input turned "-5" into 5 and "12.5" into 125 silently; no on-screen explanation of in-progress priority; typed 0 cleared silently) → fixed in rework 1 (80168d2: strict decimal parse, amber invalid message, hint explains priority, "(in progress)" row label).
+- Round 2: tester pass 9/9 (labels, totals recomputed incl. decimals, samples 31/40, 28/35, 31/39, 0 console errors), user-side pass, final challenger pass.
+- Backlog (minor): "1,000" read as 1.0 minute (comma = decimal); no upper cap in the form (import caps at 100000); inputMode="numeric" may hide the decimal key on mobile → use "decimal"; hint is small grey text; value ≥ AHT shown plain with no note; backlog fingerprint shows "undefined" for blank rows (stale warning still fires via categories); project_context §9 line ~953 sizing count 1343 stale.
