@@ -2255,3 +2255,12 @@ H8. Scope lock adds: `src/types/wfm.ts` (that one field), `src/utils/wip-row.ts`
 | 6 | Mutation proof | remove tolerance → D85.a/b fail |
 | 7 | Docs + artifact | PRD / project_context / docs 07; check:artifact |
 | 8 | Scope | diff stat |
+
+## Item 6 — amendments after the plan challenge (2026-10-16). These OVERRIDE the item 6 text above.
+Challenger: fail (3 majors, minors) — accepted.
+J1. **Only two sites change:** Gross `Math.round(sumGrossHC)` (anchor text, ~`hc-search.ts:2224`) → `Math.round(sumGrossHC + 1e-9)`; N_min `Math.floor(W / (...))` (~`:133`) → `Math.floor(ratio + 1e-9)`. Absolute 1e-9 (double error ≈ 2e-16·|x|; no relative form). Anchor on code text, not line numbers.
+J2. **Dropped:** F7 floor tolerance (integer division, exact — no-op) and N_occ ceil tolerance (0 mismatches measured, FINDINGS:91). No edits there.
+J3. **D85.a fixture must go red first:** builder finds concrete inputs (category workloads/shrinkages, e.g. investigator's probe in scratchpad r3 or AJM_Simu-like shares) where `sumGrossHC` is 12.4999… in some category order, records the red run (all 120 orders: results differ / some 12) before implementing. If no realistic input reproduces it, report and stop at that step (do not invent).
+J4. D85.b: N_min example 123.75 h with 7.5 h × 15 days × 0.55 adherence × cap 100 % → 2 (red before: 1). D85.d boundary: 12.5 − 5e-10 → 13; 12.5 − 1e-7 → 12; 12.49 → 12. N_min boundary analog (1.9999999999 → 2; 1.9999 → 1).
+J5. Expected movement: any fixture with a true tie may move (e.g. 12 → 13); listed in FINDINGS as intended, not a regression. Full `npm test` reports any moved check; no silent re-pins. Add a tie scenario to trusted-source-validation.json only if cheap (scope add, optional).
+J6. Docs: "nearest whole HC; an exact half rounds up" wording in PRD/project_context/docs 07; note per-category Gross shown to 2 decimals may not sum to the total at a tie (pre-existing). Late-starter split `Math.round(share*seats)` (~:1011) untouched; mention in report.
