@@ -1197,7 +1197,9 @@ export function validateDataQuality(params: {
     totalOutsidePct,
   };
 
-  if (totalOutsidePct > 15) {
+  // With no working day selected every row is "outside" the hours; that figure contradicts the blocking Working Days error, so it is left out.
+  const noWorkingDays = getCalendarIssues(calendar, labor).some((i) => i.code === 'no_working_days');
+  if (totalOutsidePct > 15 && !noWorkingDays) {
     issues.push({
       severity: 'warning',
       field: 'Operating Hours & Demand Distribution Diagnostic',

@@ -192,7 +192,7 @@ export function SensitivityFlow({
           <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
           <span>
             Outdated: {matrixChangedSince.join(', ')} changed since this matrix was computed. The numbers below describe the
-            earlier inputs; compute the matrix again to refresh.
+            earlier inputs; compute the matrix again to refresh.{currentTab === 'compare' ? ' (Compute it again on the Scenarios Matrix tab.)' : ''}
           </span>
         </div>
       )}
@@ -202,7 +202,7 @@ export function SensitivityFlow({
           className="flex items-start gap-2 p-3 bg-slate-50 border border-slate-300 rounded-lg text-xs text-slate-700"
         >
           <AlertTriangle className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
-          <span>Stopped — leaving the tab cancels a running grid. Compute the matrix again to finish it.</span>
+          <span>Stopped — you left the tab while the grid was running, so it was cancelled. Compute the matrix again to finish it.</span>
         </div>
       )}
     </>

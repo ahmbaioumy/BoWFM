@@ -411,17 +411,18 @@ export function getCalendarIssues(calendar: CalendarConfig, labor?: Pick<LaborCo
     });
   }
   if (days.size > 0) {
-    const closedHolidays = (calendar.holidays ?? []).filter((h) => {
+    const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    const dayOf = (h: string): number => {
       const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(h);
-      if (!m) return false;
-      return !days.has(new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay());
-    });
+      return m ? new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay() : -1;
+    };
+    const closedHolidays = (calendar.holidays ?? []).filter((h) => dayOf(h) >= 0 && !days.has(dayOf(h)));
     if (closedHolidays.length > 0) {
       const one = closedHolidays.length === 1;
       issues.push({
         severity: 'warning',
         code: 'holiday_on_closed_weekday',
-        message: `${one ? 'Holiday' : 'Holidays'} ${closedHolidays.join(', ')} ${one ? 'falls' : 'fall'} on a weekday that is already closed, so ${one ? 'it has' : 'they have'} no effect.`,
+        message: `${one ? 'Holiday' : 'Holidays'} ${closedHolidays.map((h) => `${h} (${WEEKDAY_NAMES[dayOf(h)]})`).join(', ')} ${one ? 'falls' : 'fall'} on a day that is already closed, so ${one ? 'it has' : 'they have'} no effect.`,
       });
     }
   }

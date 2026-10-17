@@ -43,7 +43,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
         className={`${isPage ? 'min-h-screen' : 'min-h-64'} flex items-center justify-center bg-slate-100 p-6 font-sans text-slate-900`}
       >
         <div className="max-w-xl w-full bg-white border border-rose-300 rounded-xl p-6 shadow-sm space-y-3">
-          <h2 className="text-base font-black text-rose-900">Something went wrong on this screen</h2>
+          <h2 className="text-base font-black text-rose-900">{isPage ? 'BoWFM stopped working' : 'Something went wrong on this screen'}</h2>
           <p className="text-xs text-slate-700 leading-relaxed">
             {isPage
               ? 'The page hit an unexpected error and cannot continue. Reloading starts a fresh session; anything not exported (settings JSON, result CSVs) is lost.'
@@ -52,6 +52,10 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
           <pre className="text-[11px] bg-rose-50 border border-rose-200 rounded-lg p-3 text-rose-900 whitespace-pre-wrap break-words">
             {error.message || String(error)}
           </pre>
+          <p className="text-xs text-slate-600">If this keeps happening, note the message in the box.</p>
+          {!isPage && (
+            <p className="text-xs text-slate-600">Before reloading, use Export JSON in the left menu to save your settings.</p>
+          )}
           <button
             type="button"
             onClick={() => window.location.reload()}

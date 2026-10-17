@@ -187,7 +187,7 @@ Bo_4Final-main/
     │   ├── wip-import.ts         ← pure backlog-file row importer (safe fallbacks, counted summary)
     │   ├── export-rows.ts        ← case/breach/slice export row builders (shared local-time formatter)
     │   ├── agent-analytics.ts    ← pure per-agent/per-date analytics over the audit run (UI layer only)
-    │   ├── config-import.ts      ← pure settings-JSON validator `validateImportedConfig` (all-or-nothing for the five core sections; suite D87) pure helpers for number fields: when a typed draft is storable, what blur/Enter commits, percent display (suite D54)
+    │   ├── config-import.ts      ← pure settings-JSON validator `validateImportedConfig` (all-or-nothing for the five core sections; suite D87)
     │   └── number-input.ts       ← pure helpers for number fields: when a typed draft is storable, what blur/Enter commits, percent display (suite D54)
     └── components/               ← UI, one component per flow; ErrorBoundary.tsx = crash screen (outer in main.tsx, inner around the flow content in App.tsx); NumberField.tsx = the only number input (keeps the typed draft, validates on blur/Enter/unmount)
 ```

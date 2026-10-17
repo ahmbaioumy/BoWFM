@@ -8424,31 +8424,39 @@ console.log('\n--- Suite D87: import validator, calendar guards, crash/leave/Sen
     }
     const base = () => snap87(DEFAULT_CALENDAR, DEFAULT_LABOR, DEFAULT_SLA, DEFAULT_CATEGORIES, DEFAULT_SIM_PARAMS);
     const bads: Array<[string, (j: any) => void, RegExp]> = [
-      ['workingDays 7', (j) => { j.calendar.workingDays = [1, 7]; }, /calendar\.workingDays/],
-      ['workingDays text', (j) => { j.calendar.workingDays = 'Mon'; }, /calendar\.workingDays/],
-      ['open hour 24', (j) => { j.calendar.dailyOpenHour = 24; }, /dailyOpenHour/],
-      ['close hour 25', (j) => { j.calendar.dailyCloseHour = 25; }, /dailyCloseHour/],
-      ['close 24:30', (j) => { j.calendar.dailyCloseHour = 24; j.calendar.dailyCloseMinute = 30; }, /dailyCloseMinute/],
-      ['minute 60', (j) => { j.calendar.dailyOpenMinute = 60; }, /dailyOpenMinute/],
-      ['holiday format', (j) => { j.calendar.holidays = ['25/12/2026']; }, /holidays/],
-      ['holiday not a date', (j) => { j.calendar.holidays = ['2026-02-31']; }, /holidays/],
-      ['productive hours text', (j) => { j.labor.dailyProductiveHours = 'seven'; }, /labor\.dailyProductiveHours/],
-      ['adherence 0', (j) => { j.labor.adherencePct = 0; }, /labor\.adherencePct/],
-      ['adherence 90 (percent instead of fraction)', (j) => { j.labor.adherencePct = 90; }, /labor\.adherencePct/],
-      ['sla primaryPct 0', (j) => { j.sla.primaryPct = 0; }, /sla\.primaryPct/],
-      ['sla unit', (j) => { j.sla.primaryUnit = 'weeks'; }, /sla\.primaryUnit/],
-      ['categories not a list', (j) => { j.categories = {}; }, /categories/],
-      ['categories empty', (j) => { j.categories = []; }, /categories/],
-      ['category aht 0', (j) => { j.categories[0].ahtMinutes = 0; }, /ahtMinutes/],
-      ['category shrinkage 1', (j) => { j.categories[1].shrinkagePct = 1; }, /shrinkagePct/],
-      ['category no name', (j) => { delete j.categories[0].name; }, /name/],
-      ['simParams replications 0', (j) => { j.simParams.replications = 0; }, /replications/],
-      ['simParams seed null', (j) => { j.simParams.seed = null; }, /seed/],
+      ['workingDays 7', (j) => { j.calendar.workingDays = [1, 7]; }, /Calendar > Working days/],
+      ['workingDays text', (j) => { j.calendar.workingDays = 'Mon'; }, /Calendar > Working days/],
+      ['open hour 24', (j) => { j.calendar.dailyOpenHour = 24; }, /Calendar > Opening hour/],
+      ['close hour 25', (j) => { j.calendar.dailyCloseHour = 25; }, /Calendar > Closing hour/],
+      ['close 24:30', (j) => { j.calendar.dailyCloseHour = 24; j.calendar.dailyCloseMinute = 30; }, /Calendar > Closing minute/],
+      ['minute 60', (j) => { j.calendar.dailyOpenMinute = 60; }, /Calendar > Opening minute/],
+      ['holiday format', (j) => { j.calendar.holidays = ['25/12/2026']; }, /Calendar > Holidays/],
+      ['holiday not a date', (j) => { j.calendar.holidays = ['2026-02-31']; }, /Calendar > Holidays/],
+      ['productive hours text', (j) => { j.labor.dailyProductiveHours = 'seven'; }, /Labor > Daily productive hours/],
+      ['adherence 0', (j) => { j.labor.adherencePct = 0; }, /Labor > Adherence/],
+      ['adherence 90 (percent instead of fraction)', (j) => { j.labor.adherencePct = 90; }, /Labor > Adherence/],
+      ['sla primaryPct 0', (j) => { j.sla.primaryPct = 0; }, /SLA > Primary SLA target %/],
+      ['sla unit', (j) => { j.sla.primaryUnit = 'weeks'; }, /SLA > Primary SLA unit/],
+      ['categories not a list', (j) => { j.categories = {}; }, /Categories:/],
+      ['categories empty', (j) => { j.categories = []; }, /Categories:/],
+      ['category aht 0', (j) => { j.categories[0].ahtMinutes = 0; }, /Categories > \w+ > AHT \(minutes\)/],
+      ['category shrinkage 1', (j) => { j.categories[1].shrinkagePct = 1; }, /Categories > \w+ > Shrinkage/],
+      ['category no name', (j) => { delete j.categories[0].name; }, /Categories > item 1 > Name/],
+      ['simParams replications 0', (j) => { j.simParams.replications = 0; }, /Simulation > Replications/],
+      ['simParams seed null', (j) => { j.simParams.seed = null; }, /Simulation > Random seed/],
     ];
     for (const [label, mutate, re] of bads) {
       const j = base(); mutate(j);
       const r = validate87(j);
       assert(r.ok === false && r.problems.some((p: string) => re.test(p)) && r.value === undefined, `D87.a2 ${label}: rejected, problem names the field, nothing applied`, JSON.stringify(r.problems ?? r));
+    }
+    // plain-words format, technical path kept for the tooltip, tip line is in App
+    {
+      const j = base(); j.calendar.dailyCloseHour = 25; j.labor.adherencePct = 90;
+      const r = validate87(j);
+      assert(r.ok === false && r.problems.includes('Calendar > Closing hour: must be a whole number from 0 to 24 (found: 25)') && r.problems.includes('Labor > Adherence: must be a fraction above 0 up to 1, e.g. 0.9 for 90 % (found: 90)'), 'D87.a2b banner lines read "<Screen> > <field>: <rule> (found: <value>)"', JSON.stringify(r.problems));
+      assert(Array.isArray(r.technical) && r.technical.length === r.problems.length && r.technical.includes('calendar.dailyCloseHour') && r.technical.includes('labor.adherencePct'), 'D87.a2c technical JSON paths are returned for the tooltip, one per line');
+      assert(/Tip: export settings from this tool \(Export JSON\)/.test(src87('src/App.tsx')) && /title=\{importNotification\.technical/.test(src87('src/App.tsx')), 'D87.a2d App shows the tip line and puts the technical path in a tooltip');
     }
     // all-or-nothing: bad core keys next to good ones list every problem, apply nothing
     {
@@ -8513,6 +8521,7 @@ console.log('\n--- Suite D87: import validator, calendar guards, crash/leave/Sen
     assert(codes(DEFAULT_CALENDAR, { ...DEFAULT_LABOR, dailyProductiveHours: 10.5 }) === 'error:productive_exceeds_window', 'D87.c5 productive hours above the window: error (same rule and tolerance as M1)');
     assert(codes(DEFAULT_CALENDAR, { ...DEFAULT_LABOR, dailyProductiveHours: 10.04 }) === '', 'D87.c5b within the 0.05 h tolerance: no issue');
     assert(codes({ ...DEFAULT_CALENDAR, holidays: ['2026-10-10'] }) === 'warning:holiday_on_closed_weekday', 'D87.c6 holiday on a Saturday (closed weekday): warning');
+    assert(/Holiday 2026-10-10 \(Saturday\) falls on a day that is already closed/.test(issues87({ ...DEFAULT_CALENDAR, holidays: ['2026-10-10'] }, DEFAULT_LABOR)[0].message), 'D87.c6c holiday note names the weekday');
     assert(codes({ ...DEFAULT_CALENDAR, holidays: ['2026-10-12'] }) === '', 'D87.c6b holiday on a Monday: no issue');
     assert(codes({ ...CAL_24X7, workingDays: [], dailyCloseHour: 0, holidays: ['2026-10-10'] }) === '', 'D87.c7 24x7 short-circuits: never blocked, no holiday note');
   }
@@ -8538,6 +8547,8 @@ console.log('\n--- Suite D87: import validator, calendar guards, crash/leave/Sen
     assert(zero.passed === false, 'D87.d3 control: zero-length window already blocks the gate (via M1)');
     const zeroErrs = zero.issues.filter((i) => i.severity === 'error' && /window/i.test(i.field + i.message)).length;
     assert(zeroErrs === 1, 'D87.d3b zero window is reported once (no duplicate from the new check)', `count ${zeroErrs}`);
+    assert(!empty.issues.some((i) => /outside configured operating hours/.test(i.message)) && empty.operatingHoursBreakdown !== undefined, 'D87.d2b no working days: the off-hours "outside operating hours" diagnostic is suppressed (breakdown still reported)');
+    assert(dq87('claims', { ...DEFAULT_CALENDAR, workingDays: [1] }).issues.some((i) => /outside configured operating hours/.test(i.message)), 'D87.d2c control: one working day still shows the off-hours diagnostic');
     const h24 = dq87('claims', { ...CAL_24X7, workingDays: [] });
     assert(!h24.issues.some((i) => i.field === 'Working Days'), 'D87.d4 24x7 with an empty weekday list is not newly blocked');
   }

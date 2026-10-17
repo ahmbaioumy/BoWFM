@@ -134,10 +134,10 @@ export function App() {
   const [searchProgress, setSearchProgress] = useState<SearchProgressState | null>(null);
   const [simulationError, setSimulationError] = useState<string | null>(null);
   // success = green, auto-hides. warning (amber) and error (red) stay until dismissed; `problems` lists each rejected item.
-  const [importNotification, setImportNotification] = useState<{ type: 'success' | 'warning' | 'error'; message: string; problems?: string[] } | null>(null);
+  const [importNotification, setImportNotification] = useState<{ type: 'success' | 'warning' | 'error'; message: string; problems?: string[]; technical?: string[]; tip?: string } | null>(null);
   const notificationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // One timer at a time: a newer message must never be removed by an older message's timeout.
-  function notify(n: { type: 'success' | 'warning' | 'error'; message: string; problems?: string[] } | null, autoHideMs?: number) {
+  function notify(n: { type: 'success' | 'warning' | 'error'; message: string; problems?: string[]; technical?: string[]; tip?: string } | null, autoHideMs?: number) {
     if (notificationTimer.current) clearTimeout(notificationTimer.current);
     notificationTimer.current = null;
     setImportNotification(n);
@@ -525,6 +525,8 @@ export function App() {
           type: 'error',
           message: `Configuration file rejected: ${result.problems.length} problem${result.problems.length === 1 ? '' : 's'} found. Nothing was changed.`,
           problems: result.problems,
+          technical: result.technical,
+          tip: 'Tip: export settings from this tool (Export JSON) and edit that file, or fix the values on screen and export again.',
         });
         return;
       }
@@ -634,10 +636,11 @@ export function App() {
                     {importNotification.problems && importNotification.problems.length > 0 && (
                       <ul className="list-disc pl-4 font-normal space-y-0.5 max-h-48 overflow-y-auto break-words">
                         {importNotification.problems.map((p, i) => (
-                          <li key={i}>{p}</li>
+                          <li key={i} title={importNotification.technical?.[i] || undefined}>{p}</li>
                         ))}
                       </ul>
                     )}
+                    {importNotification.tip && <p className="font-normal pt-1">{importNotification.tip}</p>}
                   </div>
                 </div>
                 <button
