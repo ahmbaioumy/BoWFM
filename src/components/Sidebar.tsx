@@ -226,7 +226,12 @@ export function Sidebar({
           <input
             type="file"
             ref={fileInputRef}
-            onChange={onImportParams}
+            onChange={(e) => {
+              // The handler reads the picked file synchronously; clearing the value afterwards lets the same
+              // file (e.g. after fixing it) be picked again, which would otherwise not fire a change event.
+              onImportParams(e);
+              e.target.value = '';
+            }}
             accept=".json"
             className="hidden"
           />

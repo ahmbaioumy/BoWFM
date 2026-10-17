@@ -21,6 +21,7 @@ import {
   convertDurationToMinutes,
   formatDate24,
   formatDateTime24,
+  getCalendarIssues,
   getCalendarWorkingDaysInHorizon,
   getDailyWindowLengthHours,
   isWorking,
@@ -1196,7 +1197,9 @@ export function validateDataQuality(params: {
     totalOutsidePct,
   };
 
-  if (totalOutsidePct > 15) {
+  // With no working day selected every row is "outside" the hours; that figure contradicts the blocking Working Days error, so it is left out.
+  const noWorkingDays = getCalendarIssues(calendar, labor).some((i) => i.code === 'no_working_days');
+  if (totalOutsidePct > 15 && !noWorkingDays) {
     issues.push({
       severity: 'warning',
       field: 'Operating Hours & Demand Distribution Diagnostic',
@@ -1582,6 +1585,18 @@ export function validateDataQuality(params: {
       field: 'Capacity Basis (M1)',
       message: `Daily productive hours (${labor.dailyProductiveHours}h) exceeds the daily business window (${dailyWindowLength}h).`,
       details: 'Productive hours cannot exceed open business hours.',
+    });
+  }
+
+  // No working days (non-24x7): the business is never open, so the run cannot size anything. Only this rule is
+  // taken from getCalendarIssues here: the zero-length window and productive-above-window cases are already caught
+  // by M1 above, and the closed-weekday holiday note is a panel-only warning.
+  if (getCalendarIssues(calendar, labor).some((i) => i.code === 'no_working_days')) {
+    issues.push({
+      severity: 'error',
+      field: 'Working Days',
+      message: 'No working days are selected, so the business is never open and nothing can be sized.',
+      details: 'Select at least one working day in the business calendar (or tick 24/7 Operations).',
     });
   }
 
