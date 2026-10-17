@@ -6,7 +6,8 @@
 import React, { useState } from 'react';
 import { NumberField } from './NumberField';
 import { CalendarConfig, LaborConfig } from '../types/wfm';
-import { Calendar as CalendarIcon, CheckCircle2 } from 'lucide-react';
+import { getCalendarIssues } from '../utils/calendar';
+import { Calendar as CalendarIcon, CheckCircle2, AlertTriangle } from 'lucide-react';
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -370,6 +371,27 @@ export function CalendarConfigPanel({
               : `${String(Math.floor(dailyWindow)).padStart(2, '0')}h ${String(Math.round((dailyWindow % 1) * 60)).padStart(2, '0')}m`}
           </span>
         </div>
+
+        {/* Calendar guards: errors also block the data-quality gate (zero window / productive hours above the window /
+            no working days); the closed-weekday holiday note is advice only. */}
+        {getCalendarIssues(calendar, labor).map((issue) => (
+          <div
+            key={issue.code}
+            role={issue.severity === 'error' ? 'alert' : 'status'}
+            data-testid={`calendar-issue-${issue.code}`}
+            className={`p-3 rounded-lg border text-xs flex items-start gap-2 ${
+              issue.severity === 'error'
+                ? 'bg-rose-50 border-rose-300 text-rose-900'
+                : 'bg-amber-50 border-amber-300 text-amber-900'
+            }`}
+          >
+            <AlertTriangle className={`w-4 h-4 shrink-0 mt-0.5 ${issue.severity === 'error' ? 'text-rose-600' : 'text-amber-600'}`} />
+            <span>
+              <strong>{issue.severity === 'error' ? 'Blocks the run: ' : 'Note: '}</strong>
+              {issue.message}
+            </span>
+          </div>
+        ))}
 
         {/* Holidays List */}
         <div className={`pt-4 border-t border-slate-100 space-y-3 ${calendar.is24x7 ? 'opacity-50 pointer-events-none' : ''}`}>

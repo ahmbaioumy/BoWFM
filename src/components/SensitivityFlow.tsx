@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   CalendarConfig,
   CategoryConfig,
@@ -15,7 +15,8 @@ import {
   StandardInterval,
 } from '../types/wfm';
 import { searchOptimalHCAsync } from '../utils/hc-search';
-import { TrendingUp, RefreshCw, Layers, ShieldCheck, ArrowRight, Loader2 } from 'lucide-react';
+import type { RunDataFingerprints, RunInputs } from '../utils/run-inputs';
+import { TrendingUp, RefreshCw, Layers, ShieldCheck, ArrowRight, Loader2, AlertTriangle } from 'lucide-react';
 
 interface SensitivityFlowProps {
   currentTab: string;
@@ -27,6 +28,17 @@ interface SensitivityFlowProps {
   openingWIP: OpeningWIPCase[];
   simParams: SimulationParams;
   onRunSizing: () => void;
+  /** The computed matrix lives in App (this component unmounts on every flow switch). null = none computed. */
+  matrixScenarios: SensitivityScenario[] | null;
+  /** Names of the settings / data that differ now from what the matrix was computed with ([] = still current). */
+  matrixChangedSince: string[];
+  /** True when the planner left this tab while a grid was computing (leaving cancels it). */
+  matrixStopped: boolean;
+  onMatrixStoppedChange: (stopped: boolean) => void;
+  /** Content fingerprints of the live demand / backlog, captured with the settings at click time. */
+  demandFingerprint: string;
+  backlogFingerprint: string;
+  onMatrixComputed: (scenarios: SensitivityScenario[], inputs: RunInputs & { data: RunDataFingerprints }) => void;
 }
 
 const VOL_DELTAS = [-20, -10, 0, 10, 20];
@@ -41,16 +53,47 @@ export function SensitivityFlow({
   intervals,
   openingWIP,
   simParams,
+  matrixScenarios,
+  matrixChangedSince,
+  matrixStopped,
+  onMatrixStoppedChange,
+  demandFingerprint,
+  backlogFingerprint,
+  onMatrixComputed,
 }: SensitivityFlowProps) {
-  const [matrixScenarios, setMatrixScenarios] = useState<SensitivityScenario[] | null>(null);
   const [isCalculating, setIsCalculating] = useState(false);
   const [calcProgress, setCalcProgress] = useState<{ current: number; total: number; scenarioDesc: string } | null>(null);
   const [metricView, setMetricView] = useState<'operational' | 'gross'>('operational');
   const cancelSensitivityRef = React.useRef(false);
+  const calculatingRef = React.useRef(false);
+  const onStoppedChangeRef = React.useRef(onMatrixStoppedChange);
+  onStoppedChangeRef.current = onMatrixStoppedChange;
+
+  // Leaving the tab (unmount) cancels a running grid; the planner is told when they come back.
+  useEffect(
+    () => () => {
+      if (calculatingRef.current) {
+        cancelSensitivityRef.current = true;
+        onStoppedChangeRef.current(true);
+      }
+    },
+    []
+  );
 
   async function calculateSensitivityGrid() {
     setIsCalculating(true);
+    calculatingRef.current = true;
+    onMatrixStoppedChange(false);
     cancelSensitivityRef.current = false;
+    // Exactly what this grid is computed with (the loop below uses the same props captured here).
+    const clickInputs: RunInputs & { data: RunDataFingerprints } = {
+      calendar,
+      labor,
+      sla,
+      categories,
+      simParams,
+      data: { demand: demandFingerprint, backlog: backlogFingerprint },
+    };
     const totalScenarios = VOL_DELTAS.length * AHT_DELTAS.length;
     const results: SensitivityScenario[] = [];
     let completedCount = 0;
@@ -116,9 +159,13 @@ export function SensitivityFlow({
       }
 
       if (!cancelSensitivityRef.current) {
-        setMatrixScenarios(results);
+        onMatrixComputed(results, clickInputs);
       }
+    } catch (err) {
+      // Stop / leaving the tab makes the search throw this on purpose; anything else is a real fault.
+      if (!(err instanceof Error && err.message === 'SIMULATION_CANCELLED')) throw err;
     } finally {
+      calculatingRef.current = false;
       setIsCalculating(false);
       setCalcProgress(null);
     }
@@ -126,12 +173,40 @@ export function SensitivityFlow({
 
   function handleCancelSensitivity() {
     cancelSensitivityRef.current = true;
+    calculatingRef.current = false;
     setIsCalculating(false);
     setCalcProgress(null);
   }
 
   // Find baseline scenario
   const baseline = matrixScenarios?.find((s) => s.volumeDeltaPct === 0 && s.ahtDeltaPct === 0);
+
+  // Shown on both tabs above the matrix / comparison table.
+  const matrixNotes = (
+    <>
+      {matrixScenarios && matrixChangedSince.length > 0 && (
+        <div
+          data-testid="matrix-outdated-note"
+          className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-300 rounded-lg text-xs text-amber-900"
+        >
+          <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+          <span>
+            Outdated: {matrixChangedSince.join(', ')} changed since this matrix was computed. The numbers below describe the
+            earlier inputs; compute the matrix again to refresh.
+          </span>
+        </div>
+      )}
+      {matrixStopped && !isCalculating && (
+        <div
+          data-testid="matrix-stopped-note"
+          className="flex items-start gap-2 p-3 bg-slate-50 border border-slate-300 rounded-lg text-xs text-slate-700"
+        >
+          <AlertTriangle className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
+          <span>Stopped — leaving the tab cancels a running grid. Compute the matrix again to finish it.</span>
+        </div>
+      )}
+    </>
+  );
 
   return (
     <div className="space-y-6">
@@ -206,7 +281,12 @@ export function SensitivityFlow({
               </div>
             </div>
 
+            {matrixNotes}
+
             {/* Sensitivity Calculation Live Progress */}
+            {isCalculating && (
+              <p className="text-[11px] text-slate-500">Leaving this tab cancels a running grid.</p>
+            )}
             {isCalculating && calcProgress && (
               <div className="p-4 bg-slate-900 text-white rounded-xl border border-slate-800 space-y-2.5 animate-in fade-in duration-150">
                 <div className="flex items-center justify-between text-xs">
@@ -306,6 +386,8 @@ export function SensitivityFlow({
                 Detailed comparison table of staffing requirements, SLA achievements, and BO ASA.
               </p>
             </div>
+
+            {matrixNotes}
 
             {matrixScenarios ? (
               <div className="overflow-x-auto border border-slate-200 rounded-lg">

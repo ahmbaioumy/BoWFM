@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { CalendarConfig, ClockBasis, TimeUnit } from '../types/wfm';
+import { CalendarConfig, ClockBasis, LaborConfig, TimeUnit } from '../types/wfm';
 
 export function convertSlaDurationToMinutes(
   value: number,
@@ -371,6 +371,61 @@ export function getDailyWindowLengthHours(calendar: CalendarConfig): number {
   const openMin = openH * 60 + openM;
   const closeMin = closeH * 60 + closeM;
   return Math.max(0, (closeMin - openMin) / 60);
+}
+
+export interface CalendarIssue {
+  severity: 'error' | 'warning';
+  code: 'no_working_days' | 'zero_window' | 'productive_exceeds_window' | 'holiday_on_closed_weekday';
+  message: string;
+}
+
+/**
+ * Pure check of the calendar/labor combination, for the calendar panel banner and the data-quality gate.
+ * 24/7 short-circuits (never blocked). The zero-window rule is the engine's own: getDailyWindowLengthHours <= 0.
+ * Productive-hours-above-window is an error with the same tolerance as the DQ rule M1 (the DQ gate does not
+ * repeat it from here). A holiday that falls on a weekday the business is closed anyway is a warning only.
+ */
+export function getCalendarIssues(calendar: CalendarConfig, labor?: Pick<LaborConfig, 'dailyProductiveHours'>): CalendarIssue[] {
+  if (calendar.is24x7) return [];
+  const issues: CalendarIssue[] = [];
+  const days = new Set((calendar.workingDays ?? []).filter((d) => Number.isInteger(d) && d >= 0 && d <= 6));
+  if (days.size === 0) {
+    issues.push({
+      severity: 'error',
+      code: 'no_working_days',
+      message: 'No working days are selected, so the business is never open and nothing can be sized. Select at least one working day.',
+    });
+  }
+  const windowHours = getDailyWindowLengthHours(calendar);
+  if (windowHours <= 0) {
+    issues.push({
+      severity: 'error',
+      code: 'zero_window',
+      message: 'The daily window has zero length (closing time is not after opening time). Set a closing time after the opening time (24:00 is allowed).',
+    });
+  } else if (labor && labor.dailyProductiveHours > windowHours + 0.05) {
+    issues.push({
+      severity: 'error',
+      code: 'productive_exceeds_window',
+      message: `Daily productive hours (${labor.dailyProductiveHours}h) exceed the daily business window (${windowHours}h). Productive hours cannot exceed open business hours.`,
+    });
+  }
+  if (days.size > 0) {
+    const closedHolidays = (calendar.holidays ?? []).filter((h) => {
+      const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(h);
+      if (!m) return false;
+      return !days.has(new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]))).getUTCDay());
+    });
+    if (closedHolidays.length > 0) {
+      const one = closedHolidays.length === 1;
+      issues.push({
+        severity: 'warning',
+        code: 'holiday_on_closed_weekday',
+        message: `${one ? 'Holiday' : 'Holidays'} ${closedHolidays.join(', ')} ${one ? 'falls' : 'fall'} on a weekday that is already closed, so ${one ? 'it has' : 'they have'} no effect.`,
+      });
+    }
+  }
+  return issues;
 }
 
 /**

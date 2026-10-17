@@ -8397,6 +8397,169 @@ console.log('\n--- Suite D86: volume variability (opt-in Poisson arrival counts)
   assert(JSON.stringify(ON86) !== JSON.stringify(OFF86), 'D86.g flag changes the stringified sla section the run fingerprint is built from');
 }
 
+// ---------------------------------------------------------------
+// Suite D87 — Lane A input safety (P1-11 / P1-12): import validator, calendar issues, DQ empty weekdays,
+// and source checks for the crash boundary / leave warning / kept Sensitivity matrix.
+// ---------------------------------------------------------------
+console.log('\n--- Suite D87: import validator, calendar guards, crash/leave/Sensitivity wiring ---');
+{
+  const repoRoot87 = resolve(import.meta.dirname, '..');
+  const src87 = (p: string) => (existsSync(join(repoRoot87, p)) ? readFileSync(join(repoRoot87, p), 'utf8') : '');
+  let validate87: ((j: unknown) => any) | undefined;
+  try { validate87 = ((await import('../src/utils/config-import')) as any).validateImportedConfig; } catch { validate87 = undefined; }
+  const issues87 = (calNs as any).getCalendarIssues as ((c: CalendarConfig, l?: any) => Array<{ severity: string; code: string; message: string }>) | undefined;
+
+  // snapshot shaped exactly like App.buildConfigSnapshot (plus the optional run-snapshot `outdated` flag)
+  const snap87 = (calendar: any, labor: any, sla: any, categories: any, simParams: any) =>
+    JSON.parse(JSON.stringify({ calendar, labor, sla, categories, simParams, columnMapping: { intervalStartCol: 'IntervalStart', volumeCol: 'Volume' }, exportedAt: '2026-10-17T00:00:00.000Z', outdated: false }));
+  const same87 = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const key87 = (o: any): any => (o && typeof o === 'object' ? (Array.isArray(o) ? o.map(key87) : Object.fromEntries(Object.keys(o).sort().map((k) => [k, key87(o[k])]))) : o);
+
+  // ---- a: validator exists and rejects malformed input ----
+  assert(typeof validate87 === 'function', 'D87.a0 validateImportedConfig is exported from src/utils/config-import.ts');
+  if (validate87) {
+    for (const [label, bad] of [['array', []], ['number', 5], ['text', 'x'], ['null', null], ['empty object', {}], ['only unknown keys', { exportedAt: 'x' }]] as Array<[string, unknown]>) {
+      const r = validate87(bad);
+      assert(r.ok === false && r.problems.length > 0, `D87.a1 ${label} is rejected with a problem`);
+    }
+    const base = () => snap87(DEFAULT_CALENDAR, DEFAULT_LABOR, DEFAULT_SLA, DEFAULT_CATEGORIES, DEFAULT_SIM_PARAMS);
+    const bads: Array<[string, (j: any) => void, RegExp]> = [
+      ['workingDays 7', (j) => { j.calendar.workingDays = [1, 7]; }, /calendar\.workingDays/],
+      ['workingDays text', (j) => { j.calendar.workingDays = 'Mon'; }, /calendar\.workingDays/],
+      ['open hour 24', (j) => { j.calendar.dailyOpenHour = 24; }, /dailyOpenHour/],
+      ['close hour 25', (j) => { j.calendar.dailyCloseHour = 25; }, /dailyCloseHour/],
+      ['close 24:30', (j) => { j.calendar.dailyCloseHour = 24; j.calendar.dailyCloseMinute = 30; }, /dailyCloseMinute/],
+      ['minute 60', (j) => { j.calendar.dailyOpenMinute = 60; }, /dailyOpenMinute/],
+      ['holiday format', (j) => { j.calendar.holidays = ['25/12/2026']; }, /holidays/],
+      ['holiday not a date', (j) => { j.calendar.holidays = ['2026-02-31']; }, /holidays/],
+      ['productive hours text', (j) => { j.labor.dailyProductiveHours = 'seven'; }, /labor\.dailyProductiveHours/],
+      ['adherence 0', (j) => { j.labor.adherencePct = 0; }, /labor\.adherencePct/],
+      ['adherence 90 (percent instead of fraction)', (j) => { j.labor.adherencePct = 90; }, /labor\.adherencePct/],
+      ['sla primaryPct 0', (j) => { j.sla.primaryPct = 0; }, /sla\.primaryPct/],
+      ['sla unit', (j) => { j.sla.primaryUnit = 'weeks'; }, /sla\.primaryUnit/],
+      ['categories not a list', (j) => { j.categories = {}; }, /categories/],
+      ['categories empty', (j) => { j.categories = []; }, /categories/],
+      ['category aht 0', (j) => { j.categories[0].ahtMinutes = 0; }, /ahtMinutes/],
+      ['category shrinkage 1', (j) => { j.categories[1].shrinkagePct = 1; }, /shrinkagePct/],
+      ['category no name', (j) => { delete j.categories[0].name; }, /name/],
+      ['simParams replications 0', (j) => { j.simParams.replications = 0; }, /replications/],
+      ['simParams seed null', (j) => { j.simParams.seed = null; }, /seed/],
+    ];
+    for (const [label, mutate, re] of bads) {
+      const j = base(); mutate(j);
+      const r = validate87(j);
+      assert(r.ok === false && r.problems.some((p: string) => re.test(p)) && r.value === undefined, `D87.a2 ${label}: rejected, problem names the field, nothing applied`, JSON.stringify(r.problems ?? r));
+    }
+    // all-or-nothing: bad core keys next to good ones list every problem, apply nothing
+    {
+      const j = base(); j.calendar.workingDays = [9]; j.labor.adherencePct = 5; j.categories[0].ahtMinutes = -1;
+      const r = validate87(j);
+      assert(r.ok === false && r.problems.length >= 3 && r.value === undefined, 'D87.a3 three bad sections: all problems listed together, nothing applied', JSON.stringify(r.problems));
+    }
+    // partial file: only some core keys; absent keys are not in the result
+    {
+      const r = validate87({ labor: { dailyProductiveHours: 6 } });
+      assert(r.ok === true && r.value.labor.dailyProductiveHours === 6 && r.value.labor.adherencePct === DEFAULT_LABOR.adherencePct && r.value.calendar === undefined && r.value.sla === undefined && r.value.categories === undefined, 'D87.a4 partial file: labor merged over defaults, absent sections not returned');
+    }
+    // columnMapping invalid -> ignored with a note, core keys still apply
+    {
+      const j = base(); j.columnMapping = { intervalStartCol: 5 };
+      const r = validate87(j);
+      assert(r.ok === true && r.value.columnMapping === undefined && r.notes.length === 1 && r.value.calendar !== undefined, 'D87.a5 invalid columnMapping is ignored with a note; core keys still apply');
+    }
+    // unknown top-level keys ignored; unknown / optional keys inside a section survive
+    {
+      const j = base(); j.futureKey = { a: 1 }; j.labor.shiftPlacementEnabled = true; j.labor.shiftSlapMinutes = 30; j.simParams.dispatchFairness = { enabled: false, resetDaily: true };
+      const r = validate87(j);
+      assert(r.ok === true && r.value.labor.shiftPlacementEnabled === true && r.value.labor.shiftSlapMinutes === 30 && r.value.simParams.dispatchFairness.enabled === false && !('futureKey' in r.value), 'D87.a6 unknown top-level key ignored; optional engine fields inside sections kept');
+    }
+    // sla sanitising kept (clamps)
+    {
+      const j = base(); j.sla.confidenceLevelPct = 200; j.sla.slaAcceptanceSlackPct = 99; j.sla.clockBasis = 'business_time'; j.sla.clockStartPolicy = 'arrival';
+      const r = validate87(j);
+      assert(r.ok === true && r.value.sla.confidenceLevelPct === 99.9 && r.value.sla.slaAcceptanceSlackPct === 20 && r.value.sla.clockStartPolicy === 'next_open', 'D87.a7 sla clamps and derived clock start behave as the old importer did');
+    }
+
+    // ---- b: round trip of what Export JSON writes is accepted unchanged ----
+    const trips: Array<[string, any, any, any, any]> = [
+      ['defaults', DEFAULT_CALENDAR, DEFAULT_LABOR, DEFAULT_CATEGORIES, DEFAULT_SIM_PARAMS],
+      ['24:00 preset', { ...DEFAULT_CALENDAR, dailyOpenHour: 0, dailyOpenMinute: 0, dailyCloseHour: 24, dailyCloseMinute: 0 }, DEFAULT_LABOR, DEFAULT_CATEGORIES, DEFAULT_SIM_PARAMS],
+      ['00:00 close', { ...DEFAULT_CALENDAR, dailyCloseHour: 0, dailyCloseMinute: 0 }, DEFAULT_LABOR, DEFAULT_CATEGORIES, DEFAULT_SIM_PARAMS],
+      ['24x7', CAL_24X7, { ...DEFAULT_LABOR, workingDaysPerWeek: 7, offDaysPerWeek: 0 }, DEFAULT_CATEGORIES, { ...DEFAULT_SIM_PARAMS, queueArchitecture: 'siloed', dispatchFairness: { enabled: true, utilTolerancePp: 2, countTolerance: 1, workloadToleranceMin: 5, resetDaily: false } }],
+    ];
+    for (const type of ['claims', 'support', 'healthcare'] as const) {
+      const { rows } = buildSampleDataset(type, new Date(2026, 9, 5, 8, 0, 0, 0));
+      const ivs = mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+      trips.push([`sample ${type}`, DEFAULT_CALENDAR, DEFAULT_LABOR, discoverAndSyncCategories(ivs, DEFAULT_CATEGORIES, DEFAULT_SLA), DEFAULT_SIM_PARAMS]);
+    }
+    for (const [label, cal, lab, cats, sp] of trips) {
+      const j = snap87(cal, lab, DEFAULT_SLA, cats, sp);
+      const r = validate87(j);
+      assert(r.ok === true && r.notes.length === 0 && same87(key87(r.value.calendar), key87(j.calendar)) && same87(key87(r.value.labor), key87(j.labor)) && same87(key87(r.value.sla), key87(j.sla)) && same87(key87(r.value.categories), key87(j.categories)) && same87(key87(r.value.simParams), key87(j.simParams)) && same87(r.value.columnMapping, j.columnMapping), `D87.b1 round trip ${label}: accepted with no problems, every section equal to the exported one`, r.ok ? '' : JSON.stringify(r.problems));
+    }
+  }
+
+  // ---- c: getCalendarIssues ----
+  assert(typeof issues87 === 'function', 'D87.c0 getCalendarIssues is exported from calendar.ts');
+  if (issues87) {
+    const codes = (c: CalendarConfig, l: any = DEFAULT_LABOR) => issues87(c, l).map((i) => `${i.severity}:${i.code}`).sort().join(',');
+    assert(codes(DEFAULT_CALENDAR) === '', 'D87.c1 default calendar: no issues');
+    assert(codes({ ...DEFAULT_CALENDAR, workingDays: [] }) === 'error:no_working_days', 'D87.c2 no working days: error');
+    assert(codes({ ...DEFAULT_CALENDAR, dailyCloseHour: 8, dailyCloseMinute: 0 }) === 'error:zero_window', 'D87.c3 close == open: zero-window error');
+    assert(codes({ ...DEFAULT_CALENDAR, dailyCloseHour: 7 }) === 'error:zero_window', 'D87.c3b close before open: zero-window error');
+    assert(codes({ ...DEFAULT_CALENDAR, dailyOpenHour: 0, dailyCloseHour: 0, dailyCloseMinute: 0 }) === 'error:zero_window', 'D87.c3c open 00:00 and close 00:00 (not 24:00): zero-window error');
+    assert(codes({ ...DEFAULT_CALENDAR, dailyCloseHour: 0, dailyCloseMinute: 0 }) === '', 'D87.c4 close 00:00 after a later open means 24:00: no issue');
+    assert(codes({ ...DEFAULT_CALENDAR, dailyOpenHour: 0, dailyCloseHour: 24 }) === '', 'D87.c4b 00:00 to 24:00: no issue');
+    assert(codes(DEFAULT_CALENDAR, { ...DEFAULT_LABOR, dailyProductiveHours: 10.5 }) === 'error:productive_exceeds_window', 'D87.c5 productive hours above the window: error (same rule and tolerance as M1)');
+    assert(codes(DEFAULT_CALENDAR, { ...DEFAULT_LABOR, dailyProductiveHours: 10.04 }) === '', 'D87.c5b within the 0.05 h tolerance: no issue');
+    assert(codes({ ...DEFAULT_CALENDAR, holidays: ['2026-10-10'] }) === 'warning:holiday_on_closed_weekday', 'D87.c6 holiday on a Saturday (closed weekday): warning');
+    assert(codes({ ...DEFAULT_CALENDAR, holidays: ['2026-10-12'] }) === '', 'D87.c6b holiday on a Monday: no issue');
+    assert(codes({ ...CAL_24X7, workingDays: [], dailyCloseHour: 0, holidays: ['2026-10-10'] }) === '', 'D87.c7 24x7 short-circuits: never blocked, no holiday note');
+  }
+
+  // ---- d: DQ gate ----
+  {
+    const map87 = { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any;
+    const ds87 = (t: 'claims' | 'support' | 'healthcare') => {
+      const ivs = mapRawRecordsToIntervals(buildSampleDataset(t, new Date(2026, 9, 5, 8, 0, 0, 0)).rows, map87);
+      return { ivs, cats: discoverAndSyncCategories(ivs, DEFAULT_CATEGORIES, DEFAULT_SLA) };
+    };
+    const dq87 = (t: 'claims' | 'support' | 'healthcare', calendar: CalendarConfig) => {
+      const { ivs, cats } = ds87(t);
+      return validateDataQuality({ intervals: ivs, mapping: map87, categories: cats, calendar, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, openingWIP: [] });
+    };
+    for (const t of ['claims', 'support', 'healthcare'] as const) {
+      const r = dq87(t, DEFAULT_CALENDAR);
+      assert(r.passed === true && !r.issues.some((i) => i.field === 'Working Days'), `D87.d1 sample (${t}) DQ unchanged: passes, no Working Days issue`);
+    }
+    const empty = dq87('claims', { ...DEFAULT_CALENDAR, workingDays: [] });
+    assert(empty.passed === false && empty.issues.some((i) => i.severity === 'error' && i.field === 'Working Days'), 'D87.d2 empty weekdays (non-24x7): DQ blocked with a Working Days error', JSON.stringify(empty.issues.filter((i) => i.severity === 'error').map((i) => i.field)));
+    const zero = dq87('claims', { ...DEFAULT_CALENDAR, dailyCloseHour: 8 });
+    assert(zero.passed === false, 'D87.d3 control: zero-length window already blocks the gate (via M1)');
+    const zeroErrs = zero.issues.filter((i) => i.severity === 'error' && /window/i.test(i.field + i.message)).length;
+    assert(zeroErrs === 1, 'D87.d3b zero window is reported once (no duplicate from the new check)', `count ${zeroErrs}`);
+    const h24 = dq87('claims', { ...CAL_24X7, workingDays: [] });
+    assert(!h24.issues.some((i) => i.field === 'Working Days'), 'D87.d4 24x7 with an empty weekday list is not newly blocked');
+  }
+
+  // ---- e: wiring (source) ----
+  {
+    const app = src87('src/App.tsx');
+    const main = src87('src/main.tsx');
+    const eb = src87('src/components/ErrorBoundary.tsx');
+    const sens = src87('src/components/SensitivityFlow.tsx');
+    const side = src87('src/components/Sidebar.tsx');
+    assert(/validateImportedConfig\(/.test(app) && !/if \(json\.calendar\) setCalendar/.test(app), 'D87.e1 App import goes through validateImportedConfig (no raw json.* setters left)');
+    assert(/getDerivedStateFromError|componentDidCatch/.test(eb) && /extends (React\.)?Component/.test(eb) && /Reload/.test(eb), 'D87.e2 ErrorBoundary is a class component with a Reload button');
+    assert(/<ErrorBoundary/.test(main) && /<ErrorBoundary/.test(app), 'D87.e3 outer boundary in main.tsx and inner boundary in App.tsx');
+    assert(/key=\{currentFlow\}/.test(app), 'D87.e3b inner boundary resets on flow change (key = currentFlow)');
+    assert(/addEventListener\('beforeunload'/.test(app) && /removeEventListener\('beforeunload'/.test(app), 'D87.e4 leave-page warning registered and removed in App.tsx');
+    assert(/matrixScenarios/.test(app) && !/useState<SensitivityScenario\[\] \| null>/.test(sens), 'D87.e5 Sensitivity matrix state lives in App.tsx, not in SensitivityFlow');
+    assert(/cancelSensitivityRef\.current = true/.test(sens) && /useEffect\(\s*\(\) => \(\) => \{/.test(sens), 'D87.e6 SensitivityFlow cancels a running grid on unmount');
+    assert(/\.value = ''/.test(side), 'D87.e7 Sidebar resets the file input after reading (same file can be re-picked)');
+  }
+}
+
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');
