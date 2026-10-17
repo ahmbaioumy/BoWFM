@@ -701,6 +701,9 @@ console.log('\n--- Suite D9: Offline & zero-dependency integrity ---');
       assert(!(banned in allDeps), `D9.4 unused dependency '${banned}' is absent from package.json`);
     }
     assert('react' in (pkg.dependencies || {}), 'D9.5 required dependency react is still present');
+    // Build tooling (vite, @vitejs/plugin-react, @tailwindcss/vite) is devDependency-only (NFR-2.2).
+    const runtimeDeps = Object.keys(pkg.dependencies || {}).sort().join(',');
+    assert(runtimeDeps === ['lucide-react', 'react', 'react-dom'].join(','), `D9.5b dependencies is exactly {react, react-dom, lucide-react}`, runtimeDeps);
   }
 
   // The shipped artifact must be genuinely self-contained.
