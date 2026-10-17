@@ -2361,3 +2361,31 @@ P4. **Tests (D86) rewritten so they can fail:** (a) OFF digest of `generateCaseE
 P5. **Wording:** toggle + badge/note say it models random arrival counts around the forecast (day-to-day noise), NOT forecast error; N_min / N_occ stay on forecast volume. PRD limitation: per-interval Poisson averages out over long horizons; may show little extra staff; does not replace a forecast-error buffer.
 P6. **Scope trimmed:** `src/types/wfm.ts`, `src/utils/default-config.ts`, `src/utils/des-engine.ts`, `src/utils/hc-search.ts` (P1 only), `src/components/ConfigFlow.tsx`, `src/components/ResultsFlow.tsx` (badge + exported inputs block `~:2519`), `scripts/verify-sizing-fixes.mts` (D86), `PRD.md`, `project_context.md`, `docs/wfm/06-simulation-des.md`, `FINDINGS.md`. No run-inputs.ts, no SensitivityFlow.tsx.
 P7. Runtime: measure ON vs OFF; expected within ~10 %; flag > 1.5x. Full `npm test` only when the supervisor says lane A is idle.
+
+---
+
+# BUILD PLANS — last items, two parallel lanes (2026-10-17)
+
+Facts: investigator 2026-10-17 (main b782e0a). No headcount effect in any item. Lanes never edit the same file; docs (PRD / project_context / FINDINGS) reconciled at merge; `BoWFM.html` rebuilt only after merge. Housekeeping (package.json) runs AFTER both lanes merge (it makes the artifact stale). Audit of never-reviewed areas = report only, after merges.
+
+## Lane A — P1-11 (safer import, crash screen, leave warning, Sensitivity kept) + P1-12 (calendar guards). Tier 2. Branch `laneA-input-safety`.
+1. **Import validation:** new pure `src/utils/config-import.ts` `validateImportedConfig(json)` — per-key type/range checks (calendar: workingDays int[] 0–6, hours/minutes ranges, holidays `YYYY-MM-DD`; labor finite numbers in ranges; sla merged over defaults with existing sanitising; categories array, each with name, ahtMinutes > 0, shrinkage in valid range; simParams finite; columnMapping object). Valid keys applied, rejected keys listed in a red/amber banner (no green "successfully loaded" when anything was rejected). Non-object JSON → error. `App.tsx:461-514` uses it; `Sidebar.tsx:226-232` resets `input.value` after reading.
+2. **Crash screen:** new `src/components/ErrorBoundary.tsx` (class component, no dependency) wraps `<App/>` in `main.tsx`; fallback: plain message, error text, "Reload" button; second boundary around the main content in `App.tsx` so the sidebar (Export JSON) stays usable.
+3. **Leave-page warning:** `beforeunload` registered in `App.tsx` only while data is loaded or results exist; removed on cleanup.
+4. **Sensitivity kept:** keep `SensitivityFlow` mounted and hidden when another flow is shown (CSS `hidden`), and show an "outdated" note on the matrix when live inputs differ from those it was computed with (reuse `run-inputs.ts` fingerprint/diff helpers); cancel any in-flight computation on unmount.
+5. **Calendar guards:** pure `getCalendarIssues(calendar, labor)` in `calendar.ts` → errors: no working days (non-24x7); zero-length window (close <= open, except close 00:00 = 24:00); warnings: productive hours > window; holiday on a non-working weekday. Banner in `CalendarConfigPanel.tsx` near the window-length row. Errors added to the data-quality gate (`csv-parser.ts` DQ area ~:1578) so "CLEARED" can no longer coexist with a run that fails.
+- Tests (fail-first, new suite D87 in `scripts/verify-sizing-fixes.mts`): validator malformed/partial/valid fixtures; getCalendarIssues cases; DQ `passed === false` for empty weekdays and zero window; samples' DQ unchanged.
+- Browser: import a broken JSON → banner lists rejected keys, app usable; force an error (e.g. import shape that previously white-screened) → crash screen, not white page; leave warning prompt registered; Sensitivity matrix survives flow switch + outdated note after a change; calendar banners; samples 31/40, 28/35, 31/39; 0 console errors.
+- Scope: `src/App.tsx`, `src/main.tsx`, `src/components/ErrorBoundary.tsx` (new), `src/utils/config-import.ts` (new), `src/components/Sidebar.tsx` (input reset only), `src/components/SensitivityFlow.tsx`, `src/components/CalendarConfigPanel.tsx`, `src/utils/calendar.ts` (helper only), `src/utils/csv-parser.ts` (DQ area only), `scripts/verify-sizing-fixes.mts` (D87), docs.
+
+## Lane B — P2-13 (outdated note on exports) + DataTable dead code. Tier 1/2. Branch `laneB-export-note`.
+1. Pure helper in a NEW file `src/utils/export-notes.ts`: `withOutdatedNote(sections, settingsChanged, dataChanged)` appends a trailing section `NOTE: Exported from outdated results — settings changed (…), data changed (…). Re-run to refresh.`; absent when nothing changed. (Trailing section keeps header-based re-import working.)
+2. `ResultsFlow.tsx` five CSV exports (cases, breached, queue/WIP, agent slices, agent summary) use it; `AgentAnalyticsPanel.tsx` gets an optional `outdatedNote` prop from ResultsFlow and appends it in its export. Config JSON from Results gets `"outdated": true|false` plus the changed-key lists.
+3. Delete dead `src/components/DataTable.tsx` (grep proves no import).
+- Tests: suite D88 (or AA checks) on the helper via `buildExcelCSV`: note present only when stale; columns unchanged.
+- Browser: run, change a setting, export → note at the end; re-run → no note; 0 console errors.
+- Scope: `src/utils/export-notes.ts` (new), `src/components/ResultsFlow.tsx`, `src/components/AgentAnalyticsPanel.tsx`, `src/components/DataTable.tsx` (delete), `scripts/verify-sizing-fixes.mts` (D88 — appended in a separate block; merge conflicts with D87 resolved at merge), docs. NOT csv-parser.ts (lane A edits it).
+
+## After merges
+- Housekeeping: move `vite`, `@vitejs/plugin-react`, `@tailwindcss/vite` to devDependencies (approved PLAN:1748); `npm install` to refresh lockfile; prove BoWFM.html functionally identical; optional D9 exact-dependencies assertion; PRD P2-14 removed.
+- Audit (report only): `docs/wfm/*`, Sidebar + reset dialog, personal data in sample files.
