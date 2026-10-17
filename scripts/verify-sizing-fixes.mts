@@ -8299,9 +8299,9 @@ console.log('\n--- Suite D86: volume variability (opt-in Poisson arrival counts)
   const ivsD = mkIv86(8);
   const onD = gen86(ON86, ivsD, 99).cases;
   const stream = createVolumeCountStream(99);
-  const expectD = ivsD.map((iv) => (iv.volume > 0 ? stream(iv.volume) : 0));
+  const expectD = ivsD.map((iv) => (Math.round(iv.volume) > 0 ? stream(Math.round(iv.volume)) : 0)); // mean = the rounded forecast volume, the same basis Off uses
   const gotD = ivsD.map((iv) => perInterval86(onD, [iv], iv.category)[0]);
-  assert(JSON.stringify(gotD) === JSON.stringify(expectD), 'D86.d1 per-interval counts equal a standalone count stream for the same seed (volume <= 0 draws nothing)', `got ${gotD.slice(0, 12)} want ${expectD.slice(0, 12)}`);
+  assert(JSON.stringify(gotD) === JSON.stringify(expectD), 'D86.d1 per-interval counts equal a standalone count stream for the same seed (rounded volume <= 0 draws nothing)', `got ${gotD.slice(0, 12)} want ${expectD.slice(0, 12)}`);
   const aIdx = ivsD.map((iv, i) => (iv.category === 'A' ? i : -1)).filter((i) => i >= 0);
   const ivsD40 = mkIv86(40);
   const gotD2 = perInterval86(gen86(ON86, ivsD40, 99).cases, ivsD40, 'A');
@@ -8375,6 +8375,20 @@ console.log('\n--- Suite D86: volume variability (opt-in Poisson arrival counts)
   }
   assert(syncRosters86.every((x) => x === WANT_ROSTER86), 'D86.e5a sync search, ON: roster (11 agents: 0x1 30x4 60x2 120x4) is the same for 5 seeds, i.e. built from the forecast set', syncRosters86.join(' | '));
   assert(asyncRosters86.every((x) => x === WANT_ROSTER86), 'D86.e5b async search, ON: same roster for 5 seeds', asyncRosters86.join(' | '));
+
+  // ---- h: ON mean = OFF's rounding basis (ON = OFF + noise only, never less demand) ----
+  // 0.6 rounds to 1 case per interval Off; a raw mean of 0.6 would give ON about 40 % less demand and could recommend fewer staff.
+  const fracVols86 = [0.6, 1.4, 2.5, 0.6, 0.9, 3.6, 0.6, 1.4, 2.5, 0.6];
+  const ivsH86: StandardInterval[] = [];
+  for (let day = 0; day < 4; day++) fracVols86.forEach((v, i) => ivsH86.push({ intervalIndex: ivsH86.length, start: new Date(2026, 9, 5 + day, 9, i * 30), end: new Date(2026, 9, 5 + day, 9, i * 30 + 30), volume: v, category: 'A' }));
+  const offTotalH86 = gen86(OFF86, ivsH86).cases.length;
+  const wantTotalH86 = ivsH86.reduce((a, iv) => a + Math.max(0, Math.round(iv.volume)), 0);
+  const nRepH86 = 300;
+  let onSumH86 = 0;
+  for (let sd = 1; sd <= nRepH86; sd++) onSumH86 += gen86(ON86, ivsH86, sd).cases.length;
+  const onMeanH86 = onSumH86 / nRepH86;
+  const tolH86 = 4 * Math.sqrt(wantTotalH86 / nRepH86); // sum of independent Poissons: variance = total mean
+  assert(offTotalH86 === wantTotalH86 && Math.abs(onMeanH86 - wantTotalH86) <= tolH86, 'D86.h fractional volumes: ON mean case total equals OFF (sum of rounded volumes) within 4 sigma', `off ${offTotalH86} want ${wantTotalH86} on mean ${onMeanH86.toFixed(2)} tol ${tolH86.toFixed(2)}`);
 
   // ---- f: report only ----
   console.log(`  [D86.f report] fixture HC off=${syncOff.recommendedHC} on=${syncOn.recommendedHC} (no assertion)`);

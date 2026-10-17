@@ -1495,3 +1495,17 @@ Each mutation applied alone to the Item 7 code, D86 run as a trimmed copy (the f
 | M7 | async search ignores the flag when building replication sets | D86.e1 fails (32 / 1) |
 
 D86.e5 is the search-level roster test: a peaky one-category fixture (loose SLA, shift placement on, 5 replications) where ON recommends 11 and the chosen roster is `0x1 30x4 60x2 120x4` for each of seeds 1-5 in BOTH `searchOptimalHC` and `searchOptimalHCAsync`; with either site reverted the roster moves with the noisy draw (e.g. `30x3 60x2 120x5`).
+
+## Item 7 rework 2: ON mean = rounded forecast (R1) and re-measurement, 2026-10-17
+Change: ON draws Poisson with mean `Math.round(volume)` (the figure Off uses), skipping intervals that round to 0 or less. With the earlier raw mean, volumes of 0.5-0.99 gave ON about 40 % less expected demand than Off, so ON could recommend fewer staff. Test D86.h (fractional fixture 0.6 / 1.4 / 2.5 / 0.9 / 3.6; 300 seeds; ON mean case total 68 within 4 sigma of Off's sum of rounded volumes, 68): red before (ON mean 58.84, tolerance 1.90), green after; with the raw mean put back it fails again (also D86.d1). D86.d4 (pinned stream counts) is unchanged because it tests the stream, not the volume path.
+
+ON re-measured after the change (single run each; machine otherwise idle; OFF figures from the table above are unaffected):
+
+| Dataset | ON HC / gross | ON SLA % | ON s | candidate history (ON) |
+|---|---|---|---|---|
+| claims | 31 / 40 | 100 | 8.5 | 31 |
+| support | 28 / 35 | 89.5 | 18.1 | 21, 27, 28 |
+| healthcare | 32 / 40 | 87.9 | 47.9 | 19, 31, 32, 33, 34 |
+| AJM_Only | 17 / 21 | 92.4 | 118.5 | 10, 16, 17, 18, ..., 25 |
+
+Results equal the round-1 ON figures exactly: these data sets carry whole-number volumes, so rounding the mean changes nothing for them (it matters for fractional volumes, covered by D86.h). Timings are within run-to-run noise of round 1 (AJM_Only 118 s against 32 s Off is 3.7x, same cause as above). EGS_Only was not re-measured (Off alone takes about 23 minutes); its round-1 ON result (101 / 126) stands only if its volumes are whole numbers, which was not checked.

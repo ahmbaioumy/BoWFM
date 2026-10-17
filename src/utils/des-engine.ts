@@ -298,7 +298,7 @@ function createPrng(seed: number) {
  * Volume variability (Item 7, opt-in `sla.volumeVariability === true`): the per-interval arrival COUNT stream.
  * One stream per replication, seeded from a mixed copy of the replication seed so it never shares draws with the
  * arrival-time stream (`createPrng(seed)`, left untouched). Counts are drawn in interval order, one draw per
- * interval whose raw volume is > 0 (intervals with volume <= 0 draw nothing). Mean = the raw forecast volume.
+ * interval whose rounded volume is > 0 (intervals that round to 0 or less draw nothing). Mean = the rounded forecast volume (Off's basis).
  * Exact Poisson (Knuth) below 30 expected cases; above that a rounded normal approximation (Box-Muller, clamped >= 0).
  * Same stream for every candidate N (Common Random Numbers hold); OFF never constructs it.
  */
@@ -666,7 +666,9 @@ export function generateCaseEntities(params: {
 
   // Add Demand Intervals cases
   for (const interval of intervals) {
-    const vol = countStream ? (interval.volume > 0 ? countStream(interval.volume) : 0) : Math.round(interval.volume);
+    const roundedVolume = Math.round(interval.volume);
+    // ON draws around the SAME rounded forecast Off uses (ON = Off + noise only); a raw fractional mean would shrink expected demand.
+    const vol = countStream ? (roundedVolume > 0 ? countStream(roundedVolume) : 0) : roundedVolume;
     if (vol <= 0) continue;
 
     const cat = categoryMap.get(interval.category) || {

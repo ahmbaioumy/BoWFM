@@ -93,7 +93,7 @@ by regenerating cases per candidate.
 ### Optional arrival-count noise (volume variability)
 
 By default each interval brings its forecast volume (rounded) and only the arrival *times* are random. With
-`sla.volumeVariability` on, the *count* is random too: Poisson with mean equal to the interval volume (exact below 30
+`sla.volumeVariability` on, the *count* is random too: Poisson with mean equal to the interval volume rounded to a whole number (the figure Off uses) (exact below 30
 expected cases, rounded normal above), drawn from a separate seeded stream per replication so the same counts are
 reused for every candidate N (CRN still holds) and the arrival-time stream is not shifted. This is day-to-day noise
 around the forecast, not forecast error, and per-interval noise averages out over a long horizon. Roster design and

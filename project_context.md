@@ -347,9 +347,9 @@ one of CLAUDE.md's ten frozen decisions; it is recorded here (not added to CLAUD
 the owner to promote if wanted.
 
 > **Volume variability (Item 7, 1.28.0, opt-in, default OFF).** `sla.volumeVariability === true` makes each interval's case
-> count Poisson(mean = raw volume) instead of `Math.round(volume)`. `generateCaseEntities` (`des-engine.ts`) draws counts from
+> count Poisson(mean = `Math.round(volume)`, the same rounded forecast Off uses; ON = Off + noise only, D86.h) instead of exactly `Math.round(volume)`. `generateCaseEntities` (`des-engine.ts`) draws counts from
 > `createVolumeCountStream(seed)` (own `createPrng((seed ^ 0x9e3779b9) >>> 0)`, interval order, Knuth below 30, rounded
-> Box-Muller normal from 30; volume <= 0 draws nothing); the arrival-time `createPrng(seed)` is untouched and OFF makes no extra
+> Box-Muller normal from 30; rounded volume <= 0 draws nothing); the arrival-time `createPrng(seed)` is untouched and OFF makes no extra
 > PRNG call. When ON it also returns `forecastCases` (the OFF-style set for the same seed): `representativeCasesOf` (`hc-search.ts`,
 > used by both searches) feeds roster design from it and `runBackofficeDES` seats siloed agents from it, so a noisy draw never
 > shapes the roster or seats. N_min / N_occ / Gross stay on forecast. Suite D86; PRD FR-5.14 / L39.
@@ -1207,7 +1207,7 @@ older utilisation checks pass `true` explicitly; AA.47e pins the restored export
 - **Not pushed.** `main` is 8 commits ahead of `origin/main` (engine shift end 1.21.0, search
   rescue ladder 1.22.0, their checkpoints and review records). Left local by owner decision.
 - **Audit baseline regenerated 2026-10-15** (see the note under §9 testing and `docs/audit/sample-hc-audit.md`); `npm run test:audit` passes against `docs/audit/sample-hc-after-2026-10-15.jsonl`.
-- **PRD L39 - volume variability is opt-in and not forecast error** (Item 7, 1.28.0). Off by default (byte-identical, D86.a). On: Poisson counts around the forecast, one count stream per replication (an earlier interval's volume shifts later draws), fractional volumes keep their mean (Off rounds), long horizons average the noise out. Roster and siloed seats use the forecast copy (`forecastCases`).
+- **PRD L39 - volume variability is opt-in and not forecast error** (Item 7, 1.28.0). Off by default (byte-identical, D86.a). On: Poisson counts around the forecast, one count stream per replication (an earlier interval's volume shifts later draws), the Poisson mean is the rounded forecast, same as Off (D86.h), long horizons average the noise out. Roster and siloed seats use the forecast copy (`forecastCases`).
 - **PRD L38 — exact half-seat rounds up** (Item 6, 1.27.3; resolves F4 / HC-1 / HC-5). 1e-9 tolerance on the Gross `round`, the `N_min` `floor` and the `N_occ` `ceil`; only exact ties move (+1 / -1 for N_occ). Samples unchanged. Suite D85. Per-category Gross shown to 2 decimals may not sum to the total at a tie (display only).
 - **PRD L37 — blank manual backlog rows are sized at full handling time** (Item 5, 1.27.2; resolves G10 / DES-7). Headcount can rise versus the old 30-minute default where handling time > 30; `remainingWorkMinutes` is optional (undefined = not started); engine untouched. Stored backlog and file imports unchanged.
 - **PRD L36 — the drain now runs to the last deadline** (Item 4, 1.27.0; resolves G9 / DES-10). An undersized run's raw occupancy, answer-time mean and per-agent analytics cover the longer drain (denominator unchanged); Results shows an amber note when the 366-day cap bites (1.27.1).
