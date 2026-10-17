@@ -12,6 +12,8 @@ import {
   buildAgentAnalyticsNotes,
   buildAgentInsights,
   computeAgentAnalytics,
+  maskedCell,
+  POOLED_FILTER_NOTE,
   SHOW_UTILISATION,
   sortRowsByCases,
   utilisationReadsLowByDesign,
@@ -92,6 +94,14 @@ function CasesBarChart({ a }: { a: AgentAnalytics }) {
 
 function OccUtilChart({ a }: { a: AgentAnalytics }) {
   const id = useId();
+  // Pooled run + category filter: no bars, no tooltips, no figures in the title/description; the note replaces the chart body.
+  if (a.maskedForPooledFilter) {
+    return (
+      <div role="img" aria-label={`Occupancy not shown. ${POOLED_FILTER_NOTE}`} className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg p-3" data-testid="agent-analytics-chart-masked">
+        {POOLED_FILTER_NOTE}
+      </div>
+    );
+  }
   const rows = a.rows;
   const rowH = 26;
   const labelW = 72;
@@ -421,10 +431,10 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
                 <td className={td}>{r.casesCompleted}</td>
                 <td className={td}>{r.casesTouched}</td>
                 <td className={td}>{r1(r.busyMin)}</td>
-                <td className={td}>{r1(r.availableMin)}</td>
+                <td className={td}>{maskedCell(a, r1(r.availableMin))}</td>
                 <td className={td}>{r1(r.idleMin)}</td>
-                <td className={td}>{r1(r.occupancyPct)}%</td>
-                {SHOW_UTILISATION && <td className={td}>{r1(r.utilisationPct)}%</td>}
+                <td className={td}>{maskedCell(a, `${r1(r.occupancyPct)}%`)}</td>
+                {SHOW_UTILISATION && <td className={td}>{maskedCell(a, `${r1(r.utilisationPct)}%`)}</td>}
                 <td className={td}>{num(r.avgHandleMin)}</td>
                 <td className={td}>{num(r.casesPerDay)}</td>
                 <td className={td}>{r.resumes}</td>
@@ -443,10 +453,10 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
                 <td className={td}>{a.team.casesTotal}</td>
                 <td className={td}>-</td>
                 <td className={td}>{r1(a.team.busyMin)}</td>
-                <td className={td}>{r1(a.team.availableMin)}</td>
+                <td className={td}>{maskedCell(a, r1(a.team.availableMin))}</td>
                 <td className={td}>{r1(a.team.availableMin - a.team.busyMin)}</td>
-                <td className={td}>{r1(a.team.occupancyPct)}%</td>
-                {SHOW_UTILISATION && <td className={td}>{r1(a.team.utilisationPct)}%</td>}
+                <td className={td}>{maskedCell(a, `${r1(a.team.occupancyPct)}%`)}</td>
+                {SHOW_UTILISATION && <td className={td}>{maskedCell(a, `${r1(a.team.utilisationPct)}%`)}</td>}
                 <td className={td} colSpan={4}>avg {r1(a.team.casesMean)} cases (work share) / agent</td>
               </tr>
             </tfoot>
@@ -461,7 +471,7 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
         </ChartFrame>
         <ChartFrame
           title={SHOW_UTILISATION ? 'Occupancy and utilisation per agent' : 'Occupancy per agent'}
-          desc={SHOW_UTILISATION ? 'Blue = occupancy, amber = utilisation. Labels show occupancy / utilisation.' : 'Blue = occupancy.'}
+          desc={a.maskedForPooledFilter ? 'Not shown while a category is selected on a pooled team.' : SHOW_UTILISATION ? 'Blue = occupancy, amber = utilisation. Labels show occupancy / utilisation.' : 'Blue = occupancy.'}
         >
           <div className="max-h-[36rem] overflow-auto"><OccUtilChart a={a} /></div>
         </ChartFrame>

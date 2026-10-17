@@ -1463,3 +1463,16 @@ All numbers identical before and after (before = checkpoint 2f50a89 source). AJM
 Finding: "0 mismatches" for `computeOccupancyFloor` was measured on single workload figures. A workload summed from category parts can be 1 ulp above an exact whole ratio (7 h x 0.55 x 15 days, 0.1+0.2+0.3+0.4 of 2 seats = 2.0000000000000004), and bare `Math.ceil` gave 3. Challenger probe: 2,290 of 2,999 whole-ratio cases one seat too high.
 Change (`src/utils/hc-search.ts`, `computeOccupancyFloor`): `Math.ceil(ratio - HEADCOUNT_TIE_EPSILON)` (same 1e-9). All three headcount boundaries (N_min floor, N_occ ceil, Gross round) now use it.
 Tests (suite D85.g1-g5): summed parts ratio 2.0000000000000004 -> 2; same for k = 1 and 7.5 h x 22 days k = 19; 2.0001 -> 3; 2 + 5e-10 -> 2; 2 + 1e-7 -> 3. Red before the change: g1, g2, g4 failed (g3, g5 controls passed). Mutation (epsilon removed again): g1, g2, g4 fail; restored: all 18 D85 checks pass.
+
+---
+
+# G7 (UI-2 / L29 / P2-11) - CLOSED 2026-10-17 (`g7-pooled-filter`, PRD 1.27.4); F7 recorded
+
+- UI-2 resolved by masking (owner decision: dash plus a short note). On a pooled run with a category filter, Available, Scheduled, Occupancy % and Utilisation % are not shown: dash in the table and team row, chart body replaced by the note, occupancy / utilisation insight lines left out, utilisation fairness metrics "-", CSV columns empty (not 0). Busy and Idle stay. One predicate: `maskedForPooledFilter` (model keeps raw values). Siloed and unfiltered pooled views unchanged. Headcount unchanged (samples 31/40, 28/35, 31/39).
+- Tests: AA.48-AA.51 added; AA.44d and AA.44f rewritten (the old note claimed Available smaller / occupancy reads lower; the new M5 note replaces it); AA.38 unchanged (model keeps raw values).
+- F7 (floor of the team total before gross-up, L14): decided, keep the floor (owner 2026-10-15). Worked example added to PRD section 6 Stage 4 (10 / 5 open days / 4 worked / 20 % shrinkage: floor(12.5) = 12 -> 15, not 16).
+
+## F7 + G7 review (2026-10-17) — supervisor verdicts
+- Plan challenge: fail → amendments M1–M7. Build e7d329e.
+- Auditor pass; tester pass 5/5 (Busy recomputed from slice export: 31/31 agents match; Idle equal to unfiltered; clear filter restores identical figures; siloed unchanged; samples 31/40, 28/35, 31/39; 0 console errors); user-side pass; final challenger pass (double export download: not caused by code — one link.click()).
+- Backlog (minor): "Pooled" appears as a dead category option on pooled runs (pre-existing; now shows dashes); note shown twice (header + chart panel); Busy/Idle headers could name the filter while masked; single-category pooled run filtered on its only category shows dashes; panel subtitle still says "occupancy and utilisation" while masked.
