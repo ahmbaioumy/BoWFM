@@ -1524,3 +1524,9 @@ ON re-measured after the change (single run each; machine otherwise idle; OFF fi
 | AJM_Only | 17 / 21 | 92.4 | 118.5 | 10, 16, 17, 18, ..., 25 |
 
 Results equal the round-1 ON figures exactly: these data sets carry whole-number volumes, so rounding the mean changes nothing for them (it matters for fractional volumes, covered by D86.h). Timings are within run-to-run noise of round 1 (AJM_Only 118 s against 32 s Off is 3.7x, same cause as above). EGS_Only was not re-measured (Off alone takes about 23 minutes); its round-1 ON result (101 / 126) stands only if its volumes are whole numbers, which was not checked.
+
+## Lane B - outdated-results note on exports + DataTable removal (2026-10-17, branch laneB-export-note)
+
+- P2-13 resolved: `src/utils/export-notes.ts` (`withOutdatedNote`, `prepareNotedExport`, `exportWithOutdatedNote`). Five `ResultsFlow` CSV handlers and the Agent Analytics export end with one trailing `NOTE: Exported from outdated results - settings changed (...), data changed (...). Re-run to refresh.` section when stale; fresh results give an unchanged file; empty exports still return early. Config JSON flag dropped (plan N6). Suite D88 (22 checks, red first: 10 failed before the change).
+- `DataTable.tsx` deleted (unreferenced); removed from the EX.9 file list in `scripts/verify-agent-analytics.mts`; PRD P2-1 and project_context updated (only `NativeCharts.tsx`, 363 lines, remains dead).
+- Browser (file://, headless Chrome, built BoWFM.html, not committed): claims 31/40, support 28/35, healthcare 31/39. Fresh exports: no note. After a data change: note names "data changed (opening backlog)". After a Labor change: "settings changed (Labor)". Both: both parts. After re-run: no note on any export. 0 console errors. Note is always the last line of the file.

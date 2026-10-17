@@ -186,6 +186,7 @@ Bo_4Final-main/
     │   ├── number-cell.ts        ← strict number reader for file cells (decimal comma/point rules per delimiter and per column)
     │   ├── wip-import.ts         ← pure backlog-file row importer (safe fallbacks, counted summary)
     │   ├── export-rows.ts        ← case/breach/slice export row builders (shared local-time formatter)
+    │   ├── export-notes.ts       ← trailing "exported from outdated results" NOTE section for CSV exports (suite D88)
     │   ├── agent-analytics.ts    ← pure per-agent/per-date analytics over the audit run (UI layer only)
     │   └── number-input.ts       ← pure helpers for number fields: when a typed draft is storable, what blur/Enter commits, percent display (suite D54)
     └── components/               ← UI, one component per flow; NumberField.tsx = the only number input (keeps the typed draft, validates on blur/Enter/unmount)
@@ -1173,9 +1174,9 @@ live — it decides `.pop()` and the `len === 1` fast path), but is **not** what
 2+ candidates during real dispatch. Two independent implementations of the same tiering is
 still a drift risk (D18) even now that the doc correctly states which one ships.
 
-**671 lines of dead code.** `DataTable.tsx` (308) and `NativeCharts.tsx` (363) are referenced
-nowhere and do not reach the bundle. **The shipped app has no charts at all** — the "Staffing
-Path" and "Queue/WIP" tabs are table-only despite purpose-built chart components existing for
+**363 lines of dead code.** `NativeCharts.tsx` (363) is referenced
+nowhere and does not reach the bundle (`DataTable.tsx` was deleted in 1.28.1). **The shipped app has no charts at all** — the "Staffing
+Path" and "Queue/WIP" tabs are table-only despite a purpose-built chart component existing for
 exactly those views.
 
 **The in-app "M1–M5 Compliance" panel is display-only.** It renders four statically-passing
@@ -1208,6 +1209,7 @@ older utilisation checks pass `true` explicitly; AA.47e pins the restored export
   rescue ladder 1.22.0, their checkpoints and review records). Left local by owner decision.
 - **Audit baseline regenerated 2026-10-15** (see the note under §9 testing and `docs/audit/sample-hc-audit.md`); `npm run test:audit` passes against `docs/audit/sample-hc-after-2026-10-15.jsonl`.
 - **PRD L29 — pooled + category filter masks occupancy** (G7, 1.27.4; resolves UI-2 / P2-11). Display and export only; headcount unchanged (samples 31/40, 28/35, 31/39). Code: `agent-analytics.ts` (`maskedForPooledFilter`, `maskedCell`, `POOLED_FILTER_NOTE`), `AgentAnalyticsPanel.tsx`; suite AA.48-AA.51; AA.44d and AA.44f rewritten. F7 (floor before gross-up, L14) stays as built: owner decision 2026-10-15, worked example added to PRD §6 Stage 4.
+- **PRD L32 / P2-13 - outdated-results note on exports** (Lane B, 1.28.1). When settings or data changed since the run, every Results CSV export (cases, breached, queue/WIP, slices, agent summary, agent analytics) ends with one trailing `NOTE: Exported from outdated results - ...` section built by `utils/export-notes.ts` (`withOutdatedNote`; `exportWithOutdatedNote` is the only download path of the five `ResultsFlow` handlers; the analytics panel appends it to its `sections`). Trailing block only: tables and headers unchanged, tools that read by header ignore it; fresh results give a byte-identical file; empty exports still return early. The lists come from `App.tsx` (`settingsChangedSinceRun` / `dataChangedSinceRun`) through existing ResultsFlow props. Config JSON has no flag. Dead `DataTable.tsx` deleted (also removed from the EX.9 file list in `verify-agent-analytics.mts`). Suite D88. Headcount unchanged.
 - **PRD L39 - volume variability is opt-in and not forecast error** (Item 7, 1.28.0). Off by default (byte-identical, D86.a). On: Poisson counts around the forecast, one count stream per replication (an earlier interval's volume shifts later draws), the Poisson mean is the rounded forecast, same as Off (D86.h), long horizons average the noise out. Roster and siloed seats use the forecast copy (`forecastCases`).
 - **PRD L38 — exact half-seat rounds up** (Item 6, 1.27.3; resolves F4 / HC-1 / HC-5). 1e-9 tolerance on the Gross `round`, the `N_min` `floor` and the `N_occ` `ceil`; only exact ties move (+1 / -1 for N_occ). Samples unchanged. Suite D85. Per-category Gross shown to 2 decimals may not sum to the total at a tie (display only).
 - **PRD L37 — blank manual backlog rows are sized at full handling time** (Item 5, 1.27.2; resolves G10 / DES-7). Headcount can rise versus the old 30-minute default where handling time > 30; `remainingWorkMinutes` is optional (undefined = not started); engine untouched. Stored backlog and file imports unchanged.

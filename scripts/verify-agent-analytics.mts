@@ -96,7 +96,7 @@ console.log('\n--- Suite EX: export timestamps match the screen ---');
 
   // Static guard: nothing in the results/export path may reintroduce UTC ISO output.
   const srcOf = (f: string) => readFileSync(resolve(import.meta.dirname, '..', f), 'utf8');
-  const bad = ['src/components/ResultsFlow.tsx', 'src/components/DataTable.tsx', 'src/components/AgentAnalyticsPanel.tsx', 'src/utils/export-rows.ts', 'src/utils/agent-analytics.ts']
+  const bad = ['src/components/ResultsFlow.tsx', 'src/components/AgentAnalyticsPanel.tsx', 'src/utils/export-rows.ts', 'src/utils/agent-analytics.ts']
     .filter((f) => /toISOString\(/.test(srcOf(f)));
   assert(bad.length === 0, 'EX.9 no toISOString() in results UI / export builders', bad.join(', '));
   const exporterSrc = srcOf('src/utils/csv-parser.ts');
