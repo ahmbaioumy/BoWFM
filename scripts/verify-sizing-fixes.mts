@@ -8396,6 +8396,256 @@ console.log('\n--- Suite D86: volume variability (opt-in Poisson arrival counts)
   // ---- g: the flag lives on sla, so the run-inputs fingerprint (stringified sla) sees it ----
   assert(JSON.stringify(ON86) !== JSON.stringify(OFF86), 'D86.g flag changes the stringified sla section the run fingerprint is built from');
 }
+// ============================================================================
+// D88: "outdated results" note on CSV exports (P2-13); DataTable.tsx removed
+// ============================================================================
+{
+  console.log('\n--- D88: outdated-results note on exports ---');
+  const en: any = await import('../src/utils/export-notes').catch(() => ({}));
+  const { buildExcelCSV } = await import('../src/utils/csv-parser');
+  const root88 = resolve(import.meta.dirname, '..');
+  const has = typeof en.withOutdatedNote === 'function';
+  assert(has, 'D88.a withOutdatedNote exists in src/utils/export-notes.ts');
+  if (has) {
+    const base = [{ title: 'Sec A', rows: [{ x: 1, y: 'a' }] }];
+    const rows = [{ Agent: 'A1', Cases: 3 }, { Agent: 'A2', Cases: 4 }];
+    const fresh = en.withOutdatedNote(base, [], []);
+    assert(JSON.stringify(fresh) === JSON.stringify(base), 'D88.b nothing changed: sections returned unchanged (no note)');
+    assert(buildExcelCSV(rows, fresh) === buildExcelCSV(rows, base), 'D88.b2 nothing changed: CSV text identical to the plain export');
+    const input = [{ title: 'Sec A', rows: [{ x: 1 }] }];
+    en.withOutdatedNote(input, ['Labor'], []);
+    assert(input.length === 1, 'D88.c input array is not mutated');
+    const s = en.withOutdatedNote(base, ['Labor', 'SLA policy'], []);
+    assert(s.length === 2 && s[0] === base[0] && s[1].rows.length === 0, 'D88.d settings only: one trailing note section appended after the real sections, no rows');
+    assert(s[1].title === 'NOTE: Exported from outdated results - settings changed (Labor, SLA policy). Re-run to refresh.', 'D88.d2 settings-only wording', s[1].title);
+    const d = en.withOutdatedNote([], [], ['demand data']);
+    assert(d.length === 1 && d[0].title === 'NOTE: Exported from outdated results - data changed (demand data). Re-run to refresh.', 'D88.e data-only wording', d[0]?.title);
+    const b = en.withOutdatedNote(base, ['Labor'], ['opening backlog']);
+    assert(b[1].title === 'NOTE: Exported from outdated results - settings changed (Labor), data changed (opening backlog). Re-run to refresh.', 'D88.f both: wording', b[1].title);
+    const csvNoted = buildExcelCSV(rows, s);
+    const csvPlain = buildExcelCSV(rows, base);
+    assert(csvNoted.startsWith(csvPlain) && csvNoted.slice(csvPlain.length).split('\r\n').filter((l) => l !== '').length === 1, 'D88.g note is only a trailing block: the plain export is an exact prefix, one extra line');
+    assert(csvNoted.split('\r\n')[0] === '\uFEFF"Agent","Cases"', 'D88.g2 header row and columns unchanged');
+    assert(buildExcelCSV(rows, d).startsWith(buildExcelCSV(rows, [])), 'D88.g3 plain rows export keeps rows first, note after');
+    // empty-data guard: a note alone must never produce a file
+    assert(typeof en.prepareNotedExport === 'function' ? en.prepareNotedExport([], [], ['Labor'], []) === null : false, 'D88.h empty export (no rows, no sections) returns null even when stale: no note-only file');
+    const ne = typeof en.prepareNotedExport === 'function' ? en.prepareNotedExport(rows, [], ['Labor'], []) : null;
+    assert(ne !== null && ne.sections.length === 1, 'D88.h2 non-empty export gets the note section');
+  }
+  // source checks: every export path goes through the helper
+  const rf = readFileSync(join(root88, 'src/components/ResultsFlow.tsx'), 'utf8').replace(/\r\n/g, '\n');
+  const ap = readFileSync(join(root88, 'src/components/AgentAnalyticsPanel.tsx'), 'utf8');
+  const handlers = ['handleExportCasesCSV', 'handleExportBreachedCasesCSV', 'handleExportQueueWipCSV', 'handleExportAgentSlicesCSV', 'handleExportAgentSummaryCSV'];
+  for (const h of handlers) {
+    const i = rf.indexOf(`function ${h}(`);
+    const j = rf.indexOf('\n  }\n', i);
+    const body = i >= 0 && j > i ? rf.slice(i, j) : '';
+    assert(body.length > 0 && !/exportToExcelCSV\(/.test(body) && /exportWithOutdatedNote\(/.test(body), `D88.i ${h} exports through exportWithOutdatedNote (not plain exportToExcelCSV)`);
+  }
+  assert(/withOutdatedNote\(/.test(ap) && /outdatedNote/.test(ap), 'D88.j AgentAnalyticsPanel export appends the note via withOutdatedNote');
+  assert(/outdatedNote=\{/.test(rf), 'D88.k ResultsFlow passes outdatedNote to AgentAnalyticsPanel');
+  assert(!existsSync(join(root88, 'src/components/DataTable.tsx')), 'D88.l dead src/components/DataTable.tsx is deleted');
+  const dtRefs = walkSrc88(join(root88, 'src')).filter((f) => /DataTable/.test(readFileSync(f, 'utf8')));
+  assert(dtRefs.length === 0, 'D88.m no source file mentions DataTable', dtRefs.join(','));
+}
+
+function walkSrc88(dir: string): string[] {
+  const out: string[] = [];
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) out.push(...walkSrc88(p));
+    else if (/\.(ts|tsx)$/.test(e.name)) out.push(p);
+  }
+  return out;
+}
+
+
+// ---------------------------------------------------------------
+// Suite D87 — Lane A input safety (P1-11 / P1-12): import validator, calendar issues, DQ empty weekdays,
+// and source checks for the crash boundary / leave warning / kept Sensitivity matrix.
+// ---------------------------------------------------------------
+console.log('\n--- Suite D87: import validator, calendar guards, crash/leave/Sensitivity wiring ---');
+{
+  const repoRoot87 = resolve(import.meta.dirname, '..');
+  const src87 = (p: string) => (existsSync(join(repoRoot87, p)) ? readFileSync(join(repoRoot87, p), 'utf8') : '');
+  let validate87: ((j: unknown) => any) | undefined;
+  try { validate87 = ((await import('../src/utils/config-import')) as any).validateImportedConfig; } catch { validate87 = undefined; }
+  const issues87 = (calNs as any).getCalendarIssues as ((c: CalendarConfig, l?: any) => Array<{ severity: string; code: string; message: string }>) | undefined;
+
+  // snapshot shaped exactly like App.buildConfigSnapshot (plus the optional run-snapshot `outdated` flag)
+  const snap87 = (calendar: any, labor: any, sla: any, categories: any, simParams: any) =>
+    JSON.parse(JSON.stringify({ calendar, labor, sla, categories, simParams, columnMapping: { intervalStartCol: 'IntervalStart', volumeCol: 'Volume' }, exportedAt: '2026-10-17T00:00:00.000Z', outdated: false }));
+  const same87 = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const key87 = (o: any): any => (o && typeof o === 'object' ? (Array.isArray(o) ? o.map(key87) : Object.fromEntries(Object.keys(o).sort().map((k) => [k, key87(o[k])]))) : o);
+
+  // ---- a: validator exists and rejects malformed input ----
+  assert(typeof validate87 === 'function', 'D87.a0 validateImportedConfig is exported from src/utils/config-import.ts');
+  if (validate87) {
+    for (const [label, bad] of [['array', []], ['number', 5], ['text', 'x'], ['null', null], ['empty object', {}], ['only unknown keys', { exportedAt: 'x' }]] as Array<[string, unknown]>) {
+      const r = validate87(bad);
+      assert(r.ok === false && r.problems.length > 0, `D87.a1 ${label} is rejected with a problem`);
+    }
+    const base = () => snap87(DEFAULT_CALENDAR, DEFAULT_LABOR, DEFAULT_SLA, DEFAULT_CATEGORIES, DEFAULT_SIM_PARAMS);
+    const bads: Array<[string, (j: any) => void, RegExp]> = [
+      ['workingDays 7', (j) => { j.calendar.workingDays = [1, 7]; }, /Calendar > Working days/],
+      ['workingDays text', (j) => { j.calendar.workingDays = 'Mon'; }, /Calendar > Working days/],
+      ['open hour 24', (j) => { j.calendar.dailyOpenHour = 24; }, /Calendar > Opening hour/],
+      ['close hour 25', (j) => { j.calendar.dailyCloseHour = 25; }, /Calendar > Closing hour/],
+      ['close 24:30', (j) => { j.calendar.dailyCloseHour = 24; j.calendar.dailyCloseMinute = 30; }, /Calendar > Closing minute/],
+      ['minute 60', (j) => { j.calendar.dailyOpenMinute = 60; }, /Calendar > Opening minute/],
+      ['holiday format', (j) => { j.calendar.holidays = ['25/12/2026']; }, /Calendar > Holidays/],
+      ['holiday not a date', (j) => { j.calendar.holidays = ['2026-02-31']; }, /Calendar > Holidays/],
+      ['productive hours text', (j) => { j.labor.dailyProductiveHours = 'seven'; }, /Labor > Daily productive hours/],
+      ['adherence 0', (j) => { j.labor.adherencePct = 0; }, /Labor > Adherence/],
+      ['adherence 90 (percent instead of fraction)', (j) => { j.labor.adherencePct = 90; }, /Labor > Adherence/],
+      ['sla primaryPct 0', (j) => { j.sla.primaryPct = 0; }, /SLA > Primary SLA target %/],
+      ['sla unit', (j) => { j.sla.primaryUnit = 'weeks'; }, /SLA > Primary SLA unit/],
+      ['categories not a list', (j) => { j.categories = {}; }, /Categories:/],
+      ['categories empty', (j) => { j.categories = []; }, /Categories:/],
+      ['category aht 0', (j) => { j.categories[0].ahtMinutes = 0; }, /Categories > \w+ > AHT \(minutes\)/],
+      ['category shrinkage 1', (j) => { j.categories[1].shrinkagePct = 1; }, /Categories > \w+ > Shrinkage/],
+      ['category no name', (j) => { delete j.categories[0].name; }, /Categories > item 1 > Name/],
+      ['simParams replications 0', (j) => { j.simParams.replications = 0; }, /Simulation > Replications/],
+      ['simParams seed null', (j) => { j.simParams.seed = null; }, /Simulation > Random seed/],
+    ];
+    for (const [label, mutate, re] of bads) {
+      const j = base(); mutate(j);
+      const r = validate87(j);
+      assert(r.ok === false && r.problems.some((p: string) => re.test(p)) && r.value === undefined, `D87.a2 ${label}: rejected, problem names the field, nothing applied`, JSON.stringify(r.problems ?? r));
+    }
+    // plain-words format, technical path kept for the tooltip, tip line is in App
+    {
+      const j = base(); j.calendar.dailyCloseHour = 25; j.labor.adherencePct = 90;
+      const r = validate87(j);
+      assert(r.ok === false && r.problems.includes('Calendar > Closing hour: must be a whole number from 0 to 24 (found: 25)') && r.problems.includes('Labor > Adherence: must be a fraction above 0 up to 1, e.g. 0.9 for 90 % (found: 90)'), 'D87.a2b banner lines read "<Screen> > <field>: <rule> (found: <value>)"', JSON.stringify(r.problems));
+      assert(Array.isArray(r.technical) && r.technical.length === r.problems.length && r.technical.includes('calendar.dailyCloseHour') && r.technical.includes('labor.adherencePct'), 'D87.a2c technical JSON paths are returned for the tooltip, one per line');
+      assert(/Tip: export settings from this tool \(Export JSON\)/.test(src87('src/App.tsx')) && /title=\{importNotification\.technical/.test(src87('src/App.tsx')), 'D87.a2d App shows the tip line and puts the technical path in a tooltip');
+    }
+    // all-or-nothing: bad core keys next to good ones list every problem, apply nothing
+    {
+      const j = base(); j.calendar.workingDays = [9]; j.labor.adherencePct = 5; j.categories[0].ahtMinutes = -1;
+      const r = validate87(j);
+      assert(r.ok === false && r.problems.length >= 3 && r.value === undefined, 'D87.a3 three bad sections: all problems listed together, nothing applied', JSON.stringify(r.problems));
+    }
+    // partial file: only some core keys; absent keys are not in the result
+    {
+      const r = validate87({ labor: { dailyProductiveHours: 6 } });
+      assert(r.ok === true && r.value.labor.dailyProductiveHours === 6 && r.value.labor.adherencePct === DEFAULT_LABOR.adherencePct && r.value.calendar === undefined && r.value.sla === undefined && r.value.categories === undefined, 'D87.a4 partial file: labor merged over defaults, absent sections not returned');
+    }
+    // columnMapping invalid -> ignored with a note, core keys still apply
+    {
+      const j = base(); j.columnMapping = { intervalStartCol: 5 };
+      const r = validate87(j);
+      assert(r.ok === true && r.value.columnMapping === undefined && r.notes.length === 1 && r.value.calendar !== undefined, 'D87.a5 invalid columnMapping is ignored with a note; core keys still apply');
+    }
+    // unknown top-level keys ignored; unknown / optional keys inside a section survive
+    {
+      const j = base(); j.futureKey = { a: 1 }; j.labor.shiftPlacementEnabled = true; j.labor.shiftSlapMinutes = 30; j.simParams.dispatchFairness = { enabled: false, resetDaily: true };
+      const r = validate87(j);
+      assert(r.ok === true && r.value.labor.shiftPlacementEnabled === true && r.value.labor.shiftSlapMinutes === 30 && r.value.simParams.dispatchFairness.enabled === false && !('futureKey' in r.value), 'D87.a6 unknown top-level key ignored; optional engine fields inside sections kept');
+    }
+    // sla sanitising kept (clamps)
+    {
+      const j = base(); j.sla.confidenceLevelPct = 200; j.sla.slaAcceptanceSlackPct = 99; j.sla.clockBasis = 'business_time'; j.sla.clockStartPolicy = 'arrival';
+      const r = validate87(j);
+      assert(r.ok === true && r.value.sla.confidenceLevelPct === 99.9 && r.value.sla.slaAcceptanceSlackPct === 20 && r.value.sla.clockStartPolicy === 'next_open', 'D87.a7 sla clamps and derived clock start behave as the old importer did');
+    }
+
+    // ---- b: round trip of what Export JSON writes is accepted unchanged ----
+    const trips: Array<[string, any, any, any, any]> = [
+      ['defaults', DEFAULT_CALENDAR, DEFAULT_LABOR, DEFAULT_CATEGORIES, DEFAULT_SIM_PARAMS],
+      ['24:00 preset', { ...DEFAULT_CALENDAR, dailyOpenHour: 0, dailyOpenMinute: 0, dailyCloseHour: 24, dailyCloseMinute: 0 }, DEFAULT_LABOR, DEFAULT_CATEGORIES, DEFAULT_SIM_PARAMS],
+      ['00:00 close', { ...DEFAULT_CALENDAR, dailyCloseHour: 0, dailyCloseMinute: 0 }, DEFAULT_LABOR, DEFAULT_CATEGORIES, DEFAULT_SIM_PARAMS],
+      ['24x7', CAL_24X7, { ...DEFAULT_LABOR, workingDaysPerWeek: 7, offDaysPerWeek: 0 }, DEFAULT_CATEGORIES, { ...DEFAULT_SIM_PARAMS, queueArchitecture: 'siloed', dispatchFairness: { enabled: true, utilTolerancePp: 2, countTolerance: 1, workloadToleranceMin: 5, resetDaily: false } }],
+    ];
+    for (const type of ['claims', 'support', 'healthcare'] as const) {
+      const { rows } = buildSampleDataset(type, new Date(2026, 9, 5, 8, 0, 0, 0));
+      const ivs = mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+      trips.push([`sample ${type}`, DEFAULT_CALENDAR, DEFAULT_LABOR, discoverAndSyncCategories(ivs, DEFAULT_CATEGORIES, DEFAULT_SLA), DEFAULT_SIM_PARAMS]);
+    }
+    for (const [label, cal, lab, cats, sp] of trips) {
+      const j = snap87(cal, lab, DEFAULT_SLA, cats, sp);
+      const r = validate87(j);
+      assert(r.ok === true && r.notes.length === 0 && same87(key87(r.value.calendar), key87(j.calendar)) && same87(key87(r.value.labor), key87(j.labor)) && same87(key87(r.value.sla), key87(j.sla)) && same87(key87(r.value.categories), key87(j.categories)) && same87(key87(r.value.simParams), key87(j.simParams)) && same87(r.value.columnMapping, j.columnMapping), `D87.b1 round trip ${label}: accepted with no problems, every section equal to the exported one`, r.ok ? '' : JSON.stringify(r.problems));
+    }
+    // b2: every value the screens can save must be accepted (override hours are total hours over the horizon, seed has no limit, AHT has no upper limit)
+    {
+      const cats2 = DEFAULT_CATEGORIES.map((c: any, i: number) => (i === 0 ? { ...c, ahtMinutes: 2000, priority: 5000000 } : c));
+      const j = snap87(DEFAULT_CALENDAR, { ...DEFAULT_LABOR, contractualHoursSource: 'override', contractualProductiveHoursOverride: 160 }, DEFAULT_SLA, cats2, { ...DEFAULT_SIM_PARAMS, seed: 5000000000 });
+      const r = validate87(j);
+      assert(r.ok === true && r.value.labor.contractualProductiveHoursOverride === 160 && r.value.labor.contractualHoursSource === 'override', 'D87.b2a override hours 160 (total over the horizon) round-trips', r.ok ? '' : JSON.stringify(r.problems));
+      assert(r.ok === true && r.value.simParams.seed === 5000000000, 'D87.b2b seed 5000000000 round-trips', r.ok ? '' : JSON.stringify(r.problems));
+      assert(r.ok === true && r.value.categories[0].ahtMinutes === 2000 && r.value.categories[0].priority === 5000000, 'D87.b2c category AHT 2000 min and priority 5000000 round-trip', r.ok ? '' : JSON.stringify(r.problems));
+      const neg = validate87(snap87(DEFAULT_CALENDAR, DEFAULT_LABOR, DEFAULT_SLA, DEFAULT_CATEGORIES, { ...DEFAULT_SIM_PARAMS, seed: -5000000000 }));
+      assert(neg.ok === true, 'D87.b2d negative large seed accepted');
+      const frac = validate87(snap87(DEFAULT_CALENDAR, DEFAULT_LABOR, DEFAULT_SLA, DEFAULT_CATEGORIES, { ...DEFAULT_SIM_PARAMS, seed: 1.5 }));
+      assert(frac.ok === false, 'D87.b2e fractional seed still rejected');
+    }
+  }
+
+  // ---- c: getCalendarIssues ----
+  assert(typeof issues87 === 'function', 'D87.c0 getCalendarIssues is exported from calendar.ts');
+  if (issues87) {
+    const codes = (c: CalendarConfig, l: any = DEFAULT_LABOR) => issues87(c, l).map((i) => `${i.severity}:${i.code}`).sort().join(',');
+    assert(codes(DEFAULT_CALENDAR) === '', 'D87.c1 default calendar: no issues');
+    assert(codes({ ...DEFAULT_CALENDAR, workingDays: [] }) === 'error:no_working_days', 'D87.c2 no working days: error');
+    assert(codes({ ...DEFAULT_CALENDAR, dailyCloseHour: 8, dailyCloseMinute: 0 }) === 'error:zero_window', 'D87.c3 close == open: zero-window error');
+    assert(codes({ ...DEFAULT_CALENDAR, dailyCloseHour: 7 }) === 'error:zero_window', 'D87.c3b close before open: zero-window error');
+    assert(codes({ ...DEFAULT_CALENDAR, dailyOpenHour: 0, dailyCloseHour: 0, dailyCloseMinute: 0 }) === 'error:zero_window', 'D87.c3c open 00:00 and close 00:00 (not 24:00): zero-window error');
+    assert(codes({ ...DEFAULT_CALENDAR, dailyCloseHour: 0, dailyCloseMinute: 0 }) === '', 'D87.c4 close 00:00 after a later open means 24:00: no issue');
+    assert(codes({ ...DEFAULT_CALENDAR, dailyOpenHour: 0, dailyCloseHour: 24 }) === '', 'D87.c4b 00:00 to 24:00: no issue');
+    assert(codes(DEFAULT_CALENDAR, { ...DEFAULT_LABOR, dailyProductiveHours: 10.5 }) === 'error:productive_exceeds_window', 'D87.c5 productive hours above the window: error (same rule and tolerance as M1)');
+    assert(codes(DEFAULT_CALENDAR, { ...DEFAULT_LABOR, dailyProductiveHours: 10.04 }) === '', 'D87.c5b within the 0.05 h tolerance: no issue');
+    assert(codes({ ...DEFAULT_CALENDAR, holidays: ['2026-10-10'] }) === 'warning:holiday_on_closed_weekday', 'D87.c6 holiday on a Saturday (closed weekday): warning');
+    assert(/Holiday 2026-10-10 \(Saturday\) falls on a day that is already closed/.test(issues87({ ...DEFAULT_CALENDAR, holidays: ['2026-10-10'] }, DEFAULT_LABOR)[0].message), 'D87.c6c holiday note names the weekday');
+    assert(codes({ ...DEFAULT_CALENDAR, holidays: ['2026-10-12'] }) === '', 'D87.c6b holiday on a Monday: no issue');
+    assert(codes({ ...CAL_24X7, workingDays: [], dailyCloseHour: 0, holidays: ['2026-10-10'] }) === '', 'D87.c7 24x7 short-circuits: never blocked, no holiday note');
+  }
+
+  // ---- d: DQ gate ----
+  {
+    const map87 = { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any;
+    const ds87 = (t: 'claims' | 'support' | 'healthcare') => {
+      const ivs = mapRawRecordsToIntervals(buildSampleDataset(t, new Date(2026, 9, 5, 8, 0, 0, 0)).rows, map87);
+      return { ivs, cats: discoverAndSyncCategories(ivs, DEFAULT_CATEGORIES, DEFAULT_SLA) };
+    };
+    const dq87 = (t: 'claims' | 'support' | 'healthcare', calendar: CalendarConfig) => {
+      const { ivs, cats } = ds87(t);
+      return validateDataQuality({ intervals: ivs, mapping: map87, categories: cats, calendar, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, openingWIP: [] });
+    };
+    for (const t of ['claims', 'support', 'healthcare'] as const) {
+      const r = dq87(t, DEFAULT_CALENDAR);
+      assert(r.passed === true && !r.issues.some((i) => i.field === 'Working Days'), `D87.d1 sample (${t}) DQ unchanged: passes, no Working Days issue`);
+    }
+    const empty = dq87('claims', { ...DEFAULT_CALENDAR, workingDays: [] });
+    assert(empty.passed === false && empty.issues.some((i) => i.severity === 'error' && i.field === 'Working Days'), 'D87.d2 empty weekdays (non-24x7): DQ blocked with a Working Days error', JSON.stringify(empty.issues.filter((i) => i.severity === 'error').map((i) => i.field)));
+    const zero = dq87('claims', { ...DEFAULT_CALENDAR, dailyCloseHour: 8 });
+    assert(zero.passed === false, 'D87.d3 control: zero-length window already blocks the gate (via M1)');
+    const zeroErrs = zero.issues.filter((i) => i.severity === 'error' && /window/i.test(i.field + i.message)).length;
+    assert(zeroErrs === 1, 'D87.d3b zero window is reported once (no duplicate from the new check)', `count ${zeroErrs}`);
+    assert(!empty.issues.some((i) => /outside configured operating hours/.test(i.message)) && empty.operatingHoursBreakdown !== undefined, 'D87.d2b no working days: the off-hours "outside operating hours" diagnostic is suppressed (breakdown still reported)');
+    assert(dq87('claims', { ...DEFAULT_CALENDAR, workingDays: [1] }).issues.some((i) => /outside configured operating hours/.test(i.message)), 'D87.d2c control: one working day still shows the off-hours diagnostic');
+    const h24 = dq87('claims', { ...CAL_24X7, workingDays: [] });
+    assert(!h24.issues.some((i) => i.field === 'Working Days'), 'D87.d4 24x7 with an empty weekday list is not newly blocked');
+  }
+
+  // ---- e: wiring (source) ----
+  {
+    const app = src87('src/App.tsx');
+    const main = src87('src/main.tsx');
+    const eb = src87('src/components/ErrorBoundary.tsx');
+    const sens = src87('src/components/SensitivityFlow.tsx');
+    const side = src87('src/components/Sidebar.tsx');
+    assert(/validateImportedConfig\(/.test(app) && !/if \(json\.calendar\) setCalendar/.test(app), 'D87.e1 App import goes through validateImportedConfig (no raw json.* setters left)');
+    assert(/getDerivedStateFromError|componentDidCatch/.test(eb) && /extends (React\.)?Component/.test(eb) && /Reload/.test(eb), 'D87.e2 ErrorBoundary is a class component with a Reload button');
+    assert(/<ErrorBoundary/.test(main) && /<ErrorBoundary/.test(app), 'D87.e3 outer boundary in main.tsx and inner boundary in App.tsx');
+    assert(/key=\{currentFlow\}/.test(app), 'D87.e3b inner boundary resets on flow change (key = currentFlow)');
+    assert(/addEventListener\('beforeunload'/.test(app) && /removeEventListener\('beforeunload'/.test(app), 'D87.e4 leave-page warning registered and removed in App.tsx');
+    assert(/matrixScenarios/.test(app) && !/useState<SensitivityScenario\[\] \| null>/.test(sens), 'D87.e5 Sensitivity matrix state lives in App.tsx, not in SensitivityFlow');
+    assert(/cancelSensitivityRef\.current = true/.test(sens) && /useEffect\(\s*\(\) => \(\) => \{/.test(sens), 'D87.e6 SensitivityFlow cancels a running grid on unmount');
+    assert(/\.value = ''/.test(side), 'D87.e7 Sidebar resets the file input after reading (same file can be re-picked)');
+  }
+}
 
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);

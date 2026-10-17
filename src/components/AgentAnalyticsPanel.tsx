@@ -19,12 +19,15 @@ import {
   utilisationReadsLowByDesign,
 } from '../utils/agent-analytics';
 import { exportToExcelCSV } from '../utils/csv-parser';
+import { withOutdatedNote, type OutdatedNote } from '../utils/export-notes';
 import { Download, Info, RotateCcw, Sparkles } from 'lucide-react';
 
 interface Props {
   des: DESResult;
   calendar: CalendarConfig;
   labor: LaborConfig;
+  /** What changed since the run; when non-empty the export ends with a NOTE section. */
+  outdatedNote?: OutdatedNote;
 }
 
 const r1 = (n: number) => (Math.round(n * 10) / 10).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -257,7 +260,7 @@ function TrendChart({ a }: { a: AgentAnalytics }) {
 
 /* --------------------------------- Panel --------------------------------- */
 
-export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
+export function AgentAnalyticsPanel({ des, calendar, labor, outdatedNote }: Props) {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [category, setCategory] = useState('ALL');
@@ -291,7 +294,9 @@ export function AgentAnalyticsPanel({ des, calendar, labor }: Props) {
   }
 
   function handleExport() {
-    exportToExcelCSV([], 'wfm_agent_analytics.csv', buildAgentAnalyticsExport(a, labor).sections);
+    const sections = buildAgentAnalyticsExport(a, labor).sections;
+    if (sections.length === 0) return; // a stale note alone never makes a file
+    exportToExcelCSV([], 'wfm_agent_analytics.csv', withOutdatedNote(sections, outdatedNote?.settings ?? [], outdatedNote?.data ?? []));
   }
 
   const th = 'py-2 px-2.5 text-right whitespace-nowrap';
