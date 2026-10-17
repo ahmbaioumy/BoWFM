@@ -1478,5 +1478,20 @@ Idle machine, one job at a time, `searchOptimalHC`, pooled, defaults (R = 30, se
 Reading:
 - OFF reproduces main exactly (31/40, 28/35, 31/39; AJM_Only 16/20 and EGS_Only 100/125 equal the 2026-10-15 audit baseline).
 - ON raised the answer by one seat on 3 of 5 datasets (healthcare, AJM_Only, EGS_Only) and left two unchanged. The extra staff is small, as expected for per-interval Poisson noise averaged over a multi-week plan (PRD L39).
-- Runtime: within 10 % except claims (1.2-1.4x, a 5 s run, noise-sized) and **AJM_Only at 3.1x, above the 1.5x flag**. Cost per candidate is not higher (the count draw is O(intervals)); the extra time is more candidate headcounts evaluated (ON ends one seat higher, with more failing candidates near the boundary) and, when ON, a second forecast case set is generated per replication. Not investigated further; reported for the supervisor to decide.
+- Runtime: within 10 % except claims (1.2-1.4x, a 5 s run, noise-sized) and **AJM_Only at 3.1x, above the 1.5x flag**. Cause (rework 1, re-verified from the search history): OFF evaluates N = [10, 15, 16, 17] and stops at 16; ON evaluates [10, 16, 17, 18, ..., 25]: candidate 16 now fails the SLA gate, the search leaps to 25 and walks down eight extra full-replication candidates to 17. Case generation (the second forecast case set per replication) adds under 10 %. Cost per candidate is unchanged. Recorded as PRD L39 caveat 5.
 - ON audit-run case counts differ from OFF by under 2 % (claims 1358 vs 1380, healthcare 2215 vs 2190, AJM_Only 3079 vs 3119): Poisson noise plus the mean-versus-round difference on fractional volumes (PRD L39 point 3).
+
+## Item 7 mutation proofs (rework 1), 2026-10-17
+Each mutation applied alone to the Item 7 code, D86 run as a trimmed copy (the full suite is unchanged), then restored byte-identical. Every one fails D86.
+
+| # | Mutation | D86 result |
+|---|---|---|
+| M1 | sync search `representativeCases` reverted to `precomputedCaseSets[0]?.cases` (`hc-search.ts` sync site) | D86.e5a fails (32 passed, 1 failed) |
+| M2 | async search site reverted the same way | D86.e5b fails (32 / 1) |
+| M3 | `representativeCasesOf` returns the noisy set (both sites) | D86.e2b, e5a, e5b fail (30 / 3) |
+| M4 | count stream seeded with the unmixed seed (`createPrng(seed)`) | D86.d4 fails: pinned first counts for seed 12345 are `[5,7,0,12,23,41,391,4]` for means `[3.4,2.5,0.4,12,29,45.5,400,7.6]` (32 / 1) |
+| M5 | counts drawn from the arrival stream (`prng()`) | D86.d1 and d3 fail (31 / 2) |
+| M6 | siloed seats from the noisy set | D86.e4 fails (32 / 1) |
+| M7 | async search ignores the flag when building replication sets | D86.e1 fails (32 / 1) |
+
+D86.e5 is the search-level roster test: a peaky one-category fixture (loose SLA, shift placement on, 5 replications) where ON recommends 11 and the chosen roster is `0x1 30x4 60x2 120x4` for each of seeds 1-5 in BOTH `searchOptimalHC` and `searchOptimalHCAsync`; with either site reverted the roster moves with the noisy draw (e.g. `30x3 60x2 120x5`).

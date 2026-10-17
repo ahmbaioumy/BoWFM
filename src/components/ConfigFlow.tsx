@@ -1208,9 +1208,11 @@ export function ConfigFlow({
                   </label>
                 </div>
                 <span className="text-[11px] text-slate-500">
-                  Off (default): each interval brings exactly its forecast volume. On: each interval's case count
-                  is drawn at random around the forecast (day-to-day noise), so the headcount is tested against
-                  volumes that wobble. This is not forecast error, and results are not comparable with replay runs.
+                  Use this when daily volumes swing around your forecast and you want a headcount that holds on
+                  bad days. Off (default) replays the forecast exactly. On draws each interval's case count at
+                  random around the forecast (day-to-day swings, not forecast error). The recommended headcount
+                  may rise by a seat or so; on long plans the swings average out and it may not change. Runs can
+                  take longer. Results are not comparable with runs where this is Off.
                 </span>
               </div>
             </div>

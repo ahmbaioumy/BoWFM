@@ -8307,6 +8307,9 @@ console.log('\n--- Suite D86: volume variability (opt-in Poisson arrival counts)
   const gotD2 = perInterval86(gen86(ON86, ivsD40, 99).cases, ivsD40, 'A');
   const gotD1A = perInterval86(onD, ivsD, 'A');
   assert(aIdx.every((i) => gotD1A[i] === gotD2[i]), 'D86.d2 category A counts unchanged when the later category B volume changes (8 -> 40)');
+  // Pinned stream: first counts for seed 12345 (a stream seeded with the unmixed seed, or any other draw order, gives different numbers).
+  const pinned86 = createVolumeCountStream(12345);
+  assert(JSON.stringify([3.4, 2.5, 0.4, 12, 29, 45.5, 400, 7.6].map((m) => pinned86(m))) === '[5,7,0,12,23,41,391,4]', 'D86.d4 count stream for seed 12345 matches the pinned values (mixed seed, Knuth below 30, normal from 30)');
   // The arrival-time stream is untouched: the first arrivals match the OFF stream draw by draw.
   const ivsE = [{ intervalIndex: 0, start: new Date(2026, 9, 5, 9, 0), end: new Date(2026, 9, 5, 10, 0), volume: 6, category: 'A' }] as StandardInterval[];
   const offE = gen86(OFF86, ivsE, 5).cases.map((c) => c.arrival.getTime());
@@ -8352,6 +8355,26 @@ console.log('\n--- Suite D86: volume variability (opt-in Poisson arrival counts)
   const seeds86 = Array.from({ length: 12 }, (_, i) => i + 1);
   const onSeats = seeds86.map((s) => seatsOf86(ON86, s));
   assert(new Set(onSeats).size === 1 && onSeats[0] === offSeats && offSeats === '[["A",5],["B",5]]', 'D86.e4 siloed ON: per-category seats identical across 12 replications and equal to the OFF seats (5/5)', `on ${[...new Set(onSeats)].join(' | ')} off ${offSeats}`);
+
+  // ---- e5: search level P1 - the roster chosen by BOTH searches is built from the forecast set ----
+  // Peaky one-category fixture, loose SLA so the roster is decided by demand placement; ON recommends 11 and
+  // the roster must not move with the noisy draw (it did when a call site read precomputedCaseSets[0].cases).
+  const volsR86 = [3, 5, 14, 9, 4, 7, 16, 3, 6, 11, 2, 8, 15, 5, 3, 9];
+  const ivsR86: StandardInterval[] = [];
+  for (let day = 0; day < 5; day++) volsR86.forEach((v, i) => ivsR86.push({ intervalIndex: ivsR86.length, start: new Date(2026, 9, 5 + day, 9, i * 30), end: new Date(2026, 9, 5 + day, 9, i * 30 + 30), volume: v, category: 'A' }));
+  const catsR86: CategoryConfig[] = [{ id: 'a', name: 'A', ahtMinutes: 30, shrinkagePct: 0.2, priority: 1 }];
+  const laborR86: LaborConfig = { ...LABOR, dailyProductiveHours: 6, shiftPlacementEnabled: true, shiftSlapMinutes: 30 };
+  const argsR86 = (seed: number) => ({ intervals: ivsR86, openingWIP: [], categories: catsR86, calendar: BIZ_CAL, labor: laborR86, sla: { ...DEFAULT_SLA, primaryPct: 50, primaryWindow: 48, primaryUnit: 'hours' as const, volumeVariability: true }, seed, userMaxHC: 60, replications: 5, queueArchitecture: 'pooled' as const });
+  const rosterOf86 = (r: any) => r.recommendedHC + ':' + JSON.stringify(r.finalDESResult?.shiftDistributionUsed?.__POOLED__?.slaps?.map((x: any) => `${x.startMinutesFromOpen}x${x.agentCount}`));
+  const WANT_ROSTER86 = '11:["0x1","30x4","60x2","120x4"]';
+  const syncRosters86: string[] = [];
+  const asyncRosters86: string[] = [];
+  for (const sd of [1, 2, 3, 4, 5]) {
+    syncRosters86.push(rosterOf86(searchOptimalHC(argsR86(sd))));
+    asyncRosters86.push(rosterOf86(await searchOptimalHCAsync(argsR86(sd))));
+  }
+  assert(syncRosters86.every((x) => x === WANT_ROSTER86), 'D86.e5a sync search, ON: roster (11 agents: 0x1 30x4 60x2 120x4) is the same for 5 seeds, i.e. built from the forecast set', syncRosters86.join(' | '));
+  assert(asyncRosters86.every((x) => x === WANT_ROSTER86), 'D86.e5b async search, ON: same roster for 5 seeds', asyncRosters86.join(' | '));
 
   // ---- f: report only ----
   console.log(`  [D86.f report] fixture HC off=${syncOff.recommendedHC} on=${syncOn.recommendedHC} (no assertion)`);

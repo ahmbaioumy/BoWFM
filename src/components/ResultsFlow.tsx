@@ -670,6 +670,15 @@ function ResultsFlowBody({
             </div>
           </div>
 
+          {sla.volumeVariability === true && (
+            <div
+              className="text-xs text-indigo-900 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2.5 leading-relaxed"
+              data-testid="volume-variability-note"
+            >
+              <strong>Volume variability on:</strong> case counts were drawn at random around your forecast. The recommended headcount includes a buffer for these day-to-day swings, so it can be higher than with this Off. The baseline figures (minimum staff, occupancy floor, gross headcount inputs) still use your forecast. Do not compare with runs where this is Off.
+            </div>
+          )}
+
           {singleShiftNoLateStarts && !searchOutput.isInfeasible && (
             <div
               className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 leading-relaxed"
@@ -1011,11 +1020,6 @@ function ResultsFlowBody({
                   {searchOutput.belowWorkloadFloor && (
                     <div className="text-[11px] text-red-800 bg-red-50 border border-red-200 rounded-lg px-2.5 py-2 leading-relaxed">
                       Req HC {searchOutput.recommendedHC} is below the workload floor (N_min {searchOutput.nMinAnalytical}, N_occ {searchOutput.occupancyFeasibleFloor ?? 'n/a'}). This team only clears the SLA by draining backlog after the planning horizon — treat as optimistic.
-                    </div>
-                  )}
-                  {sla.volumeVariability === true && (
-                    <div data-testid="volume-variability-note" className="text-[11px] text-indigo-800 bg-indigo-50 border border-indigo-200 rounded-lg px-2.5 py-2 leading-relaxed">
-                      <strong>Volume variability on:</strong> each interval's case count is drawn at random around the forecast (day-to-day noise, not forecast error). Not comparable with replay runs. N_min, N_occ and Gross HC still use the forecast volume.
                     </div>
                   )}
                   {sla.nMinFloorEnabled !== false &&
@@ -2523,7 +2527,7 @@ function ResultsFlowBody({
                 <div>confidence_level_pct: {sla.confidenceLevelPct ?? 95}%</div>
                 <div>n_min_floor_enabled: {sla.nMinFloorEnabled !== false ? 'true' : 'false'}</div>
                 <div>below_workload_floor: {searchOutput.belowWorkloadFloor ? 'true' : 'false'}</div>
-                <div>volume_variability: {sla.volumeVariability === true ? 'true' : 'false'}</div>
+                <div>volume_variability: {sla.volumeVariability === true ? 'true (random day-to-day volume swings)' : 'false'}</div>
                 <div>n_min_analytical: {rosterFloor} agents{searchOutput.nMinBeforeReduction !== undefined && ` (before reduction: ${searchOutput.nMinBeforeReduction})`}</div>
                 <div>primary_driven_hc: {primaryHC} agents</div>
                 <div>prng_seed: {simParams.seed}</div>
