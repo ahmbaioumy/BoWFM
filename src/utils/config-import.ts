@@ -182,7 +182,7 @@ function validateLabor(raw: unknown, problems: Problem[]): LaborConfig | undefin
   c.int(o, 'workingDaysPerWeek', 1, 7);
   c.int(o, 'offDaysPerWeek', 0, 6);
   c.optEnum(o, 'contractualHoursSource', ['derived', 'override']);
-  c.optNum(o, 'contractualProductiveHoursOverride', 0, 24);
+  c.optNum(o, 'contractualProductiveHoursOverride', 0, Infinity); // total agent hours over the demand horizon, not per day
   c.optBool(o, 'shiftPlacementEnabled');
   c.optNum(o, 'shiftSlapMinutes', 0, 24 * 60, true);
   if (!Array.isArray(o.shifts) || !o.shifts.every(isObj)) c.fail('shifts', 'must be a list of shift objects', o.shifts);
@@ -253,9 +253,9 @@ function validateCategories(raw: unknown, problems: Problem[]): CategoryConfig[]
     const shown = typeof item.name === 'string' && item.name.trim() ? `Categories > ${item.name}` : `Categories > item ${i + 1}`;
     const c = new Check(shown, `categories[${i}]`, LABELS.category);
     if (typeof item.name !== 'string' || !item.name.trim()) c.fail('name', 'must be a non-empty text', item.name);
-    c.num(item, 'ahtMinutes', 0, 24 * 60, true);
+    c.num(item, 'ahtMinutes', 0, Infinity, true); // the screen has no upper limit
     if (!isNum(item.shrinkagePct) || item.shrinkagePct < 0 || item.shrinkagePct >= 1) c.fail('shrinkagePct', 'must be a fraction from 0 up to (not including) 1, e.g. 0.2 for 20 %', item.shrinkagePct);
-    c.optNum(item, 'priority', -1e6, 1e6);
+    c.optNum(item, 'priority', -Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER);
     c.optNum(item, 'primaryPct', 0, 100, true);
     c.optNum(item, 'primaryWindow', 0, Infinity, true);
     c.optEnum(item, 'primaryUnit', TIME_UNITS);
@@ -285,7 +285,7 @@ function validateSimParams(raw: unknown, problems: Problem[]): SimulationParams 
   }
   const c = new Check('Simulation', 'simParams', LABELS.simParams);
   const o: Obj = { ...DEFAULT_SIM_PARAMS, ...raw };
-  c.num(o, 'seed', -2147483648, 4294967295);
+  c.int(o, 'seed', -Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER); // the screen has no limit; the engine floors the seed and mixes it with 32-bit ops
   c.int(o, 'maxHCSearch', 1, 100000);
   c.int(o, 'replications', 1, 10000);
   c.optEnum(o, 'queueArchitecture', ['pooled', 'siloed']);

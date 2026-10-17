@@ -8568,6 +8568,19 @@ console.log('\n--- Suite D87: import validator, calendar guards, crash/leave/Sen
       const r = validate87(j);
       assert(r.ok === true && r.notes.length === 0 && same87(key87(r.value.calendar), key87(j.calendar)) && same87(key87(r.value.labor), key87(j.labor)) && same87(key87(r.value.sla), key87(j.sla)) && same87(key87(r.value.categories), key87(j.categories)) && same87(key87(r.value.simParams), key87(j.simParams)) && same87(r.value.columnMapping, j.columnMapping), `D87.b1 round trip ${label}: accepted with no problems, every section equal to the exported one`, r.ok ? '' : JSON.stringify(r.problems));
     }
+    // b2: every value the screens can save must be accepted (override hours are total hours over the horizon, seed has no limit, AHT has no upper limit)
+    {
+      const cats2 = DEFAULT_CATEGORIES.map((c: any, i: number) => (i === 0 ? { ...c, ahtMinutes: 2000, priority: 5000000 } : c));
+      const j = snap87(DEFAULT_CALENDAR, { ...DEFAULT_LABOR, contractualHoursSource: 'override', contractualProductiveHoursOverride: 160 }, DEFAULT_SLA, cats2, { ...DEFAULT_SIM_PARAMS, seed: 5000000000 });
+      const r = validate87(j);
+      assert(r.ok === true && r.value.labor.contractualProductiveHoursOverride === 160 && r.value.labor.contractualHoursSource === 'override', 'D87.b2a override hours 160 (total over the horizon) round-trips', r.ok ? '' : JSON.stringify(r.problems));
+      assert(r.ok === true && r.value.simParams.seed === 5000000000, 'D87.b2b seed 5000000000 round-trips', r.ok ? '' : JSON.stringify(r.problems));
+      assert(r.ok === true && r.value.categories[0].ahtMinutes === 2000 && r.value.categories[0].priority === 5000000, 'D87.b2c category AHT 2000 min and priority 5000000 round-trip', r.ok ? '' : JSON.stringify(r.problems));
+      const neg = validate87(snap87(DEFAULT_CALENDAR, DEFAULT_LABOR, DEFAULT_SLA, DEFAULT_CATEGORIES, { ...DEFAULT_SIM_PARAMS, seed: -5000000000 }));
+      assert(neg.ok === true, 'D87.b2d negative large seed accepted');
+      const frac = validate87(snap87(DEFAULT_CALENDAR, DEFAULT_LABOR, DEFAULT_SLA, DEFAULT_CATEGORIES, { ...DEFAULT_SIM_PARAMS, seed: 1.5 }));
+      assert(frac.ok === false, 'D87.b2e fractional seed still rejected');
+    }
   }
 
   // ---- c: getCalendarIssues ----
