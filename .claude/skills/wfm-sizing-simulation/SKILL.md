@@ -53,8 +53,8 @@ exploiting the simulation's drain-window edge effect (see below) while being uns
 in a repeating period.
 
 **Stage 4** grosses up *per category with its own shrinkage rate*, sums, then applies a
-single `ceil` — blending rates first or ceiling-ing per category both introduce systematic
-error. The blended-equivalent rate is a **harmonic** mean (not arithmetic), because gross-up
+single `round` (exact .5 rounds up, 1e-9 tolerance) — blending rates first or per-category
+rounding (drifts systematically) both introduce error. The blended-equivalent rate is a **harmonic** mean (not arithmetic), because gross-up
 divides by `(1 − shrinkage)`, so the quantity that adds linearly is `1/(1−shrinkage)`.
 
 ## The DES simulator — mechanics you need before touching `des-engine.ts`

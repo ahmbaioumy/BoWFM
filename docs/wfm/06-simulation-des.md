@@ -143,9 +143,9 @@ answer, never lower it.
 ### Roster layouts tried at each candidate
 
 At each candidate N the search tries rosters in a fixed order, each judged by the same
-primary-plus-confirmation gate: the uniform layout, the coverage-repair roster (Minimum
-Coverage ON, default; tried first when the shift is shorter than the open day, because uniform
-cannot cover the tail then), the even-spread layout of the repair roster
+primary-plus-confirmation gate: repair-first or uniform-first (the coverage-repair roster,
+Minimum Coverage ON, default, goes first when the shift is shorter than the open day, because
+uniform cannot cover the tail then; otherwise uniform goes first), the even-spread layout of the repair roster
 (`buildCoverageSpreadDistribution`), and, only with Shift Placement ON (opt-in), the analytic
 placement roster and finally the rescue ladder (`buildRescueLadder`, late-start shares
 `RESCUE_LATE_SHARES`), which is also confirmed on the second block. The roster polish chain (opt-in Shift Placement) runs only after
