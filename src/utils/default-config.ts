@@ -42,6 +42,7 @@ export const DEFAULT_SLA: SLAPolicyConfig = {
   clockBasis: 'business_time',
   clockStartPolicy: 'next_open', // derived from clockBasis (business_time -> next_open); see resolveClockStartPolicy
   nMinFloorEnabled: true,
+  volumeVariability: false,
   occupancyCapEnabled: false,
   occupancyCapPct: 85,
   confidenceLevelPct: 95,

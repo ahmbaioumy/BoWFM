@@ -2431,8 +2431,18 @@ export function getTCrit95(df: number): number {
 
 export interface PrecomputedCaseSet {
   cases: any[];
+  /** Volume variability ON only: the forecast (replay) case set for roster design and siloed seats (Item 7). */
+  forecastCases?: any[];
   horizonStart: Date;
   horizonEnd: Date;
+}
+
+/**
+ * The case set roster design (shift placement, coverage repair, rescue ladder) reads: replication 0's FORECAST (replay)
+ * set when volume variability is ON, else its ordinary set. A noisy draw must never shape the roster (Item 7, P1).
+ */
+export function representativeCasesOf(sets: PrecomputedCaseSet[]): CaseEntity[] | undefined {
+  return (sets[0]?.forecastCases ?? sets[0]?.cases) as CaseEntity[] | undefined;
 }
 
 /** One replication's case set: replication `index` of the block that starts at `baseSeed` (the single place the per-replication seed is derived). */
@@ -3259,7 +3269,7 @@ export function searchOptimalHC(params: {
   // overstated N_sla bypass the walk-down safety net.
   let placementFeasibleFloor: number | undefined;
   let placementSlapMinutes = resolveShiftSlapMinutes(labor);
-  const representativeCases = precomputedCaseSets[0]?.cases as CaseEntity[] | undefined;
+  const representativeCases = representativeCasesOf(precomputedCaseSets);
   // 24x7 RE-ENABLED (2026-08-28, 24x7 multi-start) — see the removed is24x7 guard in
   // computeCandidatePlacementDistribution. Note: buildOneDayDemandGrid still buckets ALL
   // 24x7 demand into a single whole-day cell (a pre-existing simplification, not new here),
@@ -4065,7 +4075,7 @@ export async function searchOptimalHCAsync(params: {
   // on the demand-grid caveat for 24x7 placement quality.
   let placementFeasibleFloor: number | undefined;
   const placementSlapMinutes = resolveShiftSlapMinutes(labor);
-  const representativeCases = precomputedCaseSets[0]?.cases as CaseEntity[] | undefined;
+  const representativeCases = representativeCasesOf(precomputedCaseSets);
   if (labor.shiftPlacementEnabled && representativeCases) {
     const shiftLengthMinutes = labor.dailyProductiveHours * 60;
     // Capacity, not span — see Gap B comment in computeCandidatePlacementDistribution.

@@ -1476,3 +1476,51 @@ Tests (suite D85.g1-g5): summed parts ratio 2.0000000000000004 -> 2; same for k 
 - Plan challenge: fail → amendments M1–M7. Build e7d329e.
 - Auditor pass; tester pass 5/5 (Busy recomputed from slice export: 31/31 agents match; Idle equal to unfiltered; clear filter restores identical figures; siloed unchanged; samples 31/40, 28/35, 31/39; 0 console errors); user-side pass; final challenger pass (double export download: not caused by code — one link.click()).
 - Backlog (minor): "Pooled" appears as a dead category option on pooled runs (pre-existing; now shows dashes); note shown twice (header + chart panel); Busy/Idle headers could name the filter while masked; single-category pooled run filtered on its only category shows dashes; panel subtitle still says "occupancy and utilisation" while masked.
+
+---
+
+## Item 7 measurements (volume variability OFF vs ON), 2026-10-17
+Idle machine, one job at a time, `searchOptimalHC`, pooled, defaults (R = 30, seed 42), worktree `item7-poisson` at the Item 7 commit. Samples ran twice per mode (identical results both times); AJM_Only and EGS_Only once. "SLA %" is the final audit run's primary SLA; "cases" is the audit run's case count (ON draws counts, OFF rounds the forecast).
+
+| Dataset | OFF HC / gross | ON HC / gross | OFF SLA % | ON SLA % | OFF s | ON s | ON / OFF time |
+|---|---|---|---|---|---|---|---|
+| claims | 31 / 40 | 31 / 40 | 100 | 100 | 5.3, 4.5 | 6.2, 6.2 | 1.2x, 1.4x |
+| support | 28 / 35 | 28 / 35 | 89.5 | 89.5 | 16.0, 14.6 | 13.1, 12.8 | 0.8x, 0.9x |
+| healthcare | 31 / 39 | 32 / 40 | 86.7 | 87.9 | 36.2, 34.9 | 37.9, 37.4 | 1.0x, 1.1x |
+| AJM_Only | 16 / 20 | 17 / 21 | 90.1 | 92.4 | 31.9 | 97.4 | **3.1x (flag)** |
+| EGS_Only | 100 / 125 | 101 / 126 | 92.7 | 92.9 | 1376 | 1466 | 1.1x |
+
+Reading:
+- OFF reproduces main exactly (31/40, 28/35, 31/39; AJM_Only 16/20 and EGS_Only 100/125 equal the 2026-10-15 audit baseline).
+- ON raised the answer by one seat on 3 of 5 datasets (healthcare, AJM_Only, EGS_Only) and left two unchanged. The extra staff is small, as expected for per-interval Poisson noise averaged over a multi-week plan (PRD L39).
+- Runtime: within 10 % except claims (1.2-1.4x, a 5 s run, noise-sized) and **AJM_Only at 3.1x, above the 1.5x flag**. Cause (rework 1, re-verified from the search history): OFF evaluates N = [10, 15, 16, 17] and stops at 16; ON evaluates [10, 16, 17, 18, ..., 25]: candidate 16 now fails the SLA gate, the search leaps to 25 and walks down eight extra full-replication candidates to 17. Case generation (the second forecast case set per replication) adds under 10 %. Cost per candidate is unchanged. Recorded as PRD L39 caveat 5.
+- ON audit-run case counts differ from OFF by under 2 % (claims 1358 vs 1380, healthcare 2215 vs 2190, AJM_Only 3079 vs 3119): Poisson noise plus the mean-versus-round difference on fractional volumes (PRD L39 point 3).
+
+## Item 7 mutation proofs (rework 1), 2026-10-17
+Each mutation applied alone to the Item 7 code, D86 run as a trimmed copy (the full suite is unchanged), then restored byte-identical. Every one fails D86.
+
+| # | Mutation | D86 result |
+|---|---|---|
+| M1 | sync search `representativeCases` reverted to `precomputedCaseSets[0]?.cases` (`hc-search.ts` sync site) | D86.e5a fails (32 passed, 1 failed) |
+| M2 | async search site reverted the same way | D86.e5b fails (32 / 1) |
+| M3 | `representativeCasesOf` returns the noisy set (both sites) | D86.e2b, e5a, e5b fail (30 / 3) |
+| M4 | count stream seeded with the unmixed seed (`createPrng(seed)`) | D86.d4 fails: pinned first counts for seed 12345 are `[5,7,0,12,23,41,391,4]` for means `[3.4,2.5,0.4,12,29,45.5,400,7.6]` (32 / 1) |
+| M5 | counts drawn from the arrival stream (`prng()`) | D86.d1 and d3 fail (31 / 2) |
+| M6 | siloed seats from the noisy set | D86.e4 fails (32 / 1) |
+| M7 | async search ignores the flag when building replication sets | D86.e1 fails (32 / 1) |
+
+D86.e5 is the search-level roster test: a peaky one-category fixture (loose SLA, shift placement on, 5 replications) where ON recommends 11 and the chosen roster is `0x1 30x4 60x2 120x4` for each of seeds 1-5 in BOTH `searchOptimalHC` and `searchOptimalHCAsync`; with either site reverted the roster moves with the noisy draw (e.g. `30x3 60x2 120x5`).
+
+## Item 7 rework 2: ON mean = rounded forecast (R1) and re-measurement, 2026-10-17
+Change: ON draws Poisson with mean `Math.round(volume)` (the figure Off uses), skipping intervals that round to 0 or less. With the earlier raw mean, volumes of 0.5-0.99 gave ON about 40 % less expected demand than Off, so ON could recommend fewer staff. Test D86.h (fractional fixture 0.6 / 1.4 / 2.5 / 0.9 / 3.6; 300 seeds; ON mean case total 68 within 4 sigma of Off's sum of rounded volumes, 68): red before (ON mean 58.84, tolerance 1.90), green after; with the raw mean put back it fails again (also D86.d1). D86.d4 (pinned stream counts) is unchanged because it tests the stream, not the volume path.
+
+ON re-measured after the change (single run each; machine otherwise idle; OFF figures from the table above are unaffected):
+
+| Dataset | ON HC / gross | ON SLA % | ON s | candidate history (ON) |
+|---|---|---|---|---|
+| claims | 31 / 40 | 100 | 8.5 | 31 |
+| support | 28 / 35 | 89.5 | 18.1 | 21, 27, 28 |
+| healthcare | 32 / 40 | 87.9 | 47.9 | 19, 31, 32, 33, 34 |
+| AJM_Only | 17 / 21 | 92.4 | 118.5 | 10, 16, 17, 18, ..., 25 |
+
+Results equal the round-1 ON figures exactly: these data sets carry whole-number volumes, so rounding the mean changes nothing for them (it matters for fractional volumes, covered by D86.h). Timings are within run-to-run noise of round 1 (AJM_Only 118 s against 32 s Off is 3.7x, same cause as above). EGS_Only was not re-measured (Off alone takes about 23 minutes); its round-1 ON result (101 / 126) stands only if its volumes are whole numbers, which was not checked.

@@ -32,6 +32,7 @@ import {
   effectivePrimaryTarget,
   evaluateCandidateStatistical,
   findPlacementFeasibleFloor,
+  representativeCasesOf,
   resolveAgentHoursForNMin,
   searchOptimalHC,
   searchOptimalHCAsync,
@@ -8210,6 +8211,190 @@ console.log('\n--- Suite D85: rounding ties (Gross HC .5 and N_min exact ratio) 
     const r = searchOptimalHC({ intervals: ivs, openingWIP: [], categories: cats, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, seed: DEFAULT_SIM_PARAMS.seed, userMaxHC: DEFAULT_SIM_PARAMS.maxHCSearch, replications: DEFAULT_SIM_PARAMS.replications, queueArchitecture: 'pooled', dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness });
     assert(r.recommendedHC === hc && r.staffing.grossHCTotal === gross, `D85.e sample ${type}: HC ${hc} / gross ${gross} unchanged`, `got ${r.recommendedHC}/${r.staffing.grossHCTotal}`);
   }
+}
+
+// ---------------------------------------------------------------
+// Suite D86 — Volume variability (Item 7; opt-in sla.volumeVariability, default OFF; PRD 1.28.0)
+// ON: each interval's case count ~ Poisson(raw forecast volume) from a separate seeded stream (mixed seed, drawn in
+// interval order, exact Knuth below 30, rounded normal above), so planners see the staff needed when volumes wobble.
+// OFF is untouched (Math.round(volume), no extra PRNG call). Roster design and siloed seats read the forecast
+// (replay) case set, so they do not move with the noisy draw. N_min / N_occ / Gross stay on forecast volume.
+// ---------------------------------------------------------------
+console.log('\n--- Suite D86: volume variability (opt-in Poisson arrival counts) ---');
+{
+  const createVolumeCountStream = (desNs as any).createVolumeCountStream as (seed: number) => (mean: number) => number;
+  const OFF86: SLAPolicyConfig = { ...DEFAULT_SLA, volumeVariability: false };
+  const ON86: SLAPolicyConfig = { ...DEFAULT_SLA, volumeVariability: true };
+  const dig86 = (x: unknown) => createHash('sha1').update(JSON.stringify(x)).digest('hex').slice(0, 16);
+  const caseDigest86 = (cs: ReadonlyArray<any>) => dig86(cs.map((c) => [c.id, c.category, c.arrival.getTime(), c.clockStart.getTime(), c.primaryDeadline.getTime(), c.latestSafeStart.getTime(), c.totalAhtMinutes]));
+  // Fixture: A first (fractional, zero and negative volumes), B after it.
+  const mkIv86 = (bVol: number): StandardInterval[] => {
+    const out: StandardInterval[] = [];
+    const aVols = [3.4, 2.5, 0.4, 0, -1, 12, 45.5, 7.6];
+    for (let day = 0; day < 3; day++) {
+      aVols.forEach((v, i) => out.push({ intervalIndex: out.length, start: new Date(2026, 9, 5 + day, 9 + i, 0), end: new Date(2026, 9, 5 + day, 9 + i, 30), volume: v, category: 'A' }));
+    }
+    for (let day = 0; day < 3; day++) {
+      for (let i = 0; i < 8; i++) out.push({ intervalIndex: out.length, start: new Date(2026, 9, 5 + day, 9 + i, 30), end: new Date(2026, 9, 5 + day, 10 + i, 0), volume: bVol, category: 'B' });
+    }
+    return out;
+  };
+  const cats86: CategoryConfig[] = [
+    { id: 'a', name: 'A', ahtMinutes: 20, shrinkagePct: 0.2, priority: 1 },
+    { id: 'b', name: 'B', ahtMinutes: 40, shrinkagePct: 0.2, priority: 1 },
+  ];
+  const gen86 = (sla: SLAPolicyConfig, ivs: StandardInterval[], seed = 4242) => generateCaseEntities({ intervals: ivs, openingWIP: [], categories: cats86, calendar: BIZ_CAL, sla, seed });
+  const perInterval86 = (cs: ReadonlyArray<any>, ivs: StandardInterval[], cat: string) =>
+    ivs.map((iv) => cs.filter((c) => c.category === cat && c.arrival.getTime() >= iv.start.getTime() && c.arrival.getTime() < iv.end.getTime()).length);
+
+  // ---- a: OFF is byte-identical to main (digests recorded from the pre-change code) ----
+  const fx86 = mkIv86(8);
+  const OFF_FIXTURE_DIGEST = '83370ed630827a38';
+  const OFF_SAMPLES_DIGEST = '6b3507943c808676';
+  const sampleIvs86 = (['claims', 'support', 'healthcare'] as const).map((type) => {
+    const { rows } = buildSampleDataset(type, new Date(2026, 9, 5, 8, 0, 0, 0));
+    return mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+  });
+  const fxDig = caseDigest86(gen86(OFF86, fx86).cases);
+  const fxDigDefault = caseDigest86(gen86({ ...DEFAULT_SLA }, fx86).cases);
+  const smDig = dig86(sampleIvs86.map((ivs) => caseDigest86(generateCaseEntities({ intervals: ivs, openingWIP: [], categories: discoverAndSyncCategories(ivs, DEFAULT_CATEGORIES, DEFAULT_SLA), calendar: DEFAULT_CALENDAR, sla: OFF86, seed: 4242 }).cases)));
+  console.log(`  [D86 digests] fixture=${fxDig} samples=${smDig}`);
+  assert(fxDig === OFF_FIXTURE_DIGEST && fxDigDefault === OFF_FIXTURE_DIGEST, 'D86.a1 OFF (flag false or absent): fractional-volume fixture case set (ids, arrivals, deadlines) identical to main', `got ${fxDig}/${fxDigDefault}`);
+  assert(smDig === OFF_SAMPLES_DIGEST, 'D86.a2 OFF: the three built-in samples produce the identical case sets as main', `got ${smDig}`);
+  assert((gen86(OFF86, fx86) as any).forecastCases === undefined, 'D86.a3 OFF builds no forecast copy (no extra work, no extra field)');
+  for (const [i, [type, hc, gross]] of ([['claims', 31, 40], ['support', 28, 35], ['healthcare', 31, 39]] as Array<['claims' | 'support' | 'healthcare', number, number]>).entries()) {
+    const ivs = sampleIvs86[i];
+    const r = searchOptimalHC({ intervals: ivs, openingWIP: [], categories: discoverAndSyncCategories(ivs, DEFAULT_CATEGORIES, DEFAULT_SLA), calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, seed: DEFAULT_SIM_PARAMS.seed, userMaxHC: DEFAULT_SIM_PARAMS.maxHCSearch, replications: DEFAULT_SIM_PARAMS.replications, queueArchitecture: 'pooled', dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness });
+    assert(r.recommendedHC === hc && r.staffing.grossHCTotal === gross, `D86.a4 OFF sample ${type}: HC ${hc} / gross ${gross} unchanged`, `got ${r.recommendedHC}/${r.staffing.grossHCTotal}`);
+  }
+
+  // ---- b: ON is deterministic and actually different from OFF ----
+  const on1 = gen86(ON86, fx86);
+  const on2 = gen86(ON86, fx86);
+  assert(caseDigest86(on1.cases) === caseDigest86(on2.cases) && on1.cases.length > 0, 'D86.b1 ON: same seed -> identical case set', `${on1.cases.length} cases`);
+  assert(caseDigest86(on1.cases) !== fxDig && caseDigest86(gen86(ON86, fx86, 4243).cases) !== caseDigest86(on1.cases), 'D86.b2 ON differs from OFF and from another seed');
+  assert((on1 as any).forecastCases !== undefined && caseDigest86((on1 as any).forecastCases) === fxDig, 'D86.b3 ON carries the forecast (replay) case set, identical to the OFF set for the same seed');
+
+  // ---- c: Poisson statistics of the count stream ----
+  for (const lam of [0.4, 3, 29, 31, 400]) {
+    const n = 20000;
+    const draw = createVolumeCountStream(7 + Math.round(lam * 10));
+    let sum = 0;
+    let sumSq = 0;
+    for (let i = 0; i < n; i++) {
+      const k = draw(lam);
+      sum += k;
+      sumSq += k * k;
+    }
+    const mean = sum / n;
+    const variance = sumSq / n - mean * mean;
+    const wantVar = lam >= 30 ? lam + 1 / 12 : lam;
+    const tol = lam >= 30 ? 0.1 : 0.15;
+    assert(Math.abs(mean - lam) <= 4 * Math.sqrt(lam / n), `D86.c1 lambda ${lam}: mean ${mean.toFixed(3)} within 4 sigma of ${lam}`, `|diff|=${Math.abs(mean - lam).toFixed(4)} limit ${(4 * Math.sqrt(lam / n)).toFixed(4)}`);
+    assert(Math.abs(variance / wantVar - 1) <= tol, `D86.c2 lambda ${lam}: variance ${variance.toFixed(3)} ~ ${wantVar.toFixed(3)} (Poisson)`, `ratio ${(variance / wantVar).toFixed(3)}`);
+  }
+  assert(createVolumeCountStream(1)(0) === 0 && createVolumeCountStream(1)(-5) === 0 && createVolumeCountStream(1)(NaN) === 0, 'D86.c3 mean <= 0 or NaN draws zero');
+
+  // ---- d: counts come from the separate stream, in interval order ----
+  const ivsD = mkIv86(8);
+  const onD = gen86(ON86, ivsD, 99).cases;
+  const stream = createVolumeCountStream(99);
+  const expectD = ivsD.map((iv) => (Math.round(iv.volume) > 0 ? stream(Math.round(iv.volume)) : 0)); // mean = the rounded forecast volume, the same basis Off uses
+  const gotD = ivsD.map((iv) => perInterval86(onD, [iv], iv.category)[0]);
+  assert(JSON.stringify(gotD) === JSON.stringify(expectD), 'D86.d1 per-interval counts equal a standalone count stream for the same seed (rounded volume <= 0 draws nothing)', `got ${gotD.slice(0, 12)} want ${expectD.slice(0, 12)}`);
+  const aIdx = ivsD.map((iv, i) => (iv.category === 'A' ? i : -1)).filter((i) => i >= 0);
+  const ivsD40 = mkIv86(40);
+  const gotD2 = perInterval86(gen86(ON86, ivsD40, 99).cases, ivsD40, 'A');
+  const gotD1A = perInterval86(onD, ivsD, 'A');
+  assert(aIdx.every((i) => gotD1A[i] === gotD2[i]), 'D86.d2 category A counts unchanged when the later category B volume changes (8 -> 40)');
+  // Pinned stream: first counts for seed 12345 (a stream seeded with the unmixed seed, or any other draw order, gives different numbers).
+  const pinned86 = createVolumeCountStream(12345);
+  assert(JSON.stringify([3.4, 2.5, 0.4, 12, 29, 45.5, 400, 7.6].map((m) => pinned86(m))) === '[5,7,0,12,23,41,391,4]', 'D86.d4 count stream for seed 12345 matches the pinned values (mixed seed, Knuth below 30, normal from 30)');
+  // The arrival-time stream is untouched: the first arrivals match the OFF stream draw by draw.
+  const ivsE = [{ intervalIndex: 0, start: new Date(2026, 9, 5, 9, 0), end: new Date(2026, 9, 5, 10, 0), volume: 6, category: 'A' }] as StandardInterval[];
+  const offE = gen86(OFF86, ivsE, 5).cases.map((c) => c.arrival.getTime());
+  const onE = gen86(ON86, ivsE, 5).cases.map((c) => c.arrival.getTime());
+  const kE = Math.min(offE.length, onE.length);
+  assert(kE > 0 && JSON.stringify(offE.slice(0, kE)) === JSON.stringify(onE.slice(0, kE)), 'D86.d3 arrival-time stream is not shifted: the first arrivals match the OFF run', `off ${offE.length} on ${onE.length}`);
+
+  // ---- e: sync == async ON; roster and seats follow the forecast ----
+  const ivsS = mkIv86(8);
+  const laborS: LaborConfig = { ...LABOR, shiftPlacementEnabled: true };
+  const argsS = (sla: SLAPolicyConfig, arch: 'pooled' | 'siloed') => ({ intervals: ivsS, openingWIP: [], categories: cats86, calendar: BIZ_CAL, labor: laborS, sla, seed: 42, userMaxHC: 60, replications: 5, queueArchitecture: arch });
+  const slaS = (v: boolean): SLAPolicyConfig => ({ ...DEFAULT_SLA, volumeVariability: v, minCoverageEnabled: false });
+  const syncOn = searchOptimalHC(argsS(slaS(true), 'pooled'));
+  const asyncOn = await searchOptimalHCAsync(argsS(slaS(true), 'pooled'));
+  const syncOff = searchOptimalHC(argsS(slaS(false), 'pooled'));
+  const hist86 = (r: any) => dig86(r.searchHistory);
+  assert(syncOn.recommendedHC === asyncOn.recommendedHC && syncOn.staffing.grossHCTotal === asyncOn.staffing.grossHCTotal && hist86(syncOn) === hist86(asyncOn), 'D86.e1 ON: sync search == async search (HC, gross and the whole search history)', `sync ${syncOn.recommendedHC}/${syncOn.staffing.grossHCTotal}/${hist86(syncOn)} async ${asyncOn.recommendedHC}/${asyncOn.staffing.grossHCTotal}/${hist86(asyncOn)}`);
+  assert(hist86(syncOn) !== hist86(syncOff), 'D86.e1b ON really changes the simulated results (search history differs from OFF)');
+  assert(syncOn.nMinAnalytical === syncOff.nMinAnalytical, 'D86.e2 N_min is computed from forecast volume: equal to OFF', `on ${syncOn.nMinAnalytical} off ${syncOff.nMinAnalytical}`);
+  const setsOn86 = [1, 2, 3].map((sd) => gen86(ON86, ivsS, sd));
+  const setsOff86 = [1, 2, 3].map((sd) => gen86(OFF86, ivsS, sd));
+  assert(caseDigest86(representativeCasesOf(setsOn86 as any) as any[]) === caseDigest86(setsOff86[0].cases) && caseDigest86(setsOn86[0].cases) !== caseDigest86(setsOff86[0].cases) && caseDigest86(representativeCasesOf(setsOff86 as any) as any[]) === caseDigest86(setsOff86[0].cases), 'D86.e2b roster design reads the forecast (replay) set when ON (not the noisy draw), and the ordinary set when OFF');
+  const asyncOnSiloed = await searchOptimalHCAsync(argsS(slaS(true), 'siloed'));
+  const syncOnSiloed = searchOptimalHC(argsS(slaS(true), 'siloed'));
+  assert(asyncOnSiloed.recommendedHC === syncOnSiloed.recommendedHC, 'D86.e3 ON siloed: sync == async', `sync ${syncOnSiloed.recommendedHC} async ${asyncOnSiloed.recommendedHC}`);
+  // Seat fixture: two categories with equal handling time and equal forecast, small volumes (noisy draws would tip a 5/5 split).
+  const catsSeat86: CategoryConfig[] = [
+    { id: 'a', name: 'A', ahtMinutes: 30, shrinkagePct: 0.2, priority: 1 },
+    { id: 'b', name: 'B', ahtMinutes: 30, shrinkagePct: 0.2, priority: 1 },
+  ];
+  const ivsSeat86: StandardInterval[] = [];
+  for (const cat of ['A', 'B']) {
+    for (let day = 0; day < 3; day++) for (let i = 0; i < 8; i++) ivsSeat86.push({ intervalIndex: ivsSeat86.length, start: new Date(2026, 9, 5 + day, 9 + i, 0), end: new Date(2026, 9, 5 + day, 9 + i, 30), volume: 1.5, category: cat });
+  }
+  const seatsOf86 = (sla: SLAPolicyConfig, seed: number) => {
+    const set = generateCaseEntities({ intervals: ivsSeat86, openingWIP: [], categories: catsSeat86, calendar: BIZ_CAL, sla, seed });
+    const res = runBackofficeDES({ operationalHC: 10, intervals: ivsSeat86, openingWIP: [], categories: catsSeat86, calendar: BIZ_CAL, labor: LABOR, sla, seed, queueArchitecture: 'siloed', precomputedCases: set });
+    const m = new Map<string, number>();
+    for (const row of res.agentFairness?.perAgent ?? []) m.set(row.category ?? '?', (m.get(row.category ?? '?') ?? 0) + 1);
+    return JSON.stringify([...m.entries()].sort());
+  };
+  const offSeats = seatsOf86(OFF86, 1);
+  const seeds86 = Array.from({ length: 12 }, (_, i) => i + 1);
+  const onSeats = seeds86.map((s) => seatsOf86(ON86, s));
+  assert(new Set(onSeats).size === 1 && onSeats[0] === offSeats && offSeats === '[["A",5],["B",5]]', 'D86.e4 siloed ON: per-category seats identical across 12 replications and equal to the OFF seats (5/5)', `on ${[...new Set(onSeats)].join(' | ')} off ${offSeats}`);
+
+  // ---- e5: search level P1 - the roster chosen by BOTH searches is built from the forecast set ----
+  // Peaky one-category fixture, loose SLA so the roster is decided by demand placement; ON recommends 11 and
+  // the roster must not move with the noisy draw (it did when a call site read precomputedCaseSets[0].cases).
+  const volsR86 = [3, 5, 14, 9, 4, 7, 16, 3, 6, 11, 2, 8, 15, 5, 3, 9];
+  const ivsR86: StandardInterval[] = [];
+  for (let day = 0; day < 5; day++) volsR86.forEach((v, i) => ivsR86.push({ intervalIndex: ivsR86.length, start: new Date(2026, 9, 5 + day, 9, i * 30), end: new Date(2026, 9, 5 + day, 9, i * 30 + 30), volume: v, category: 'A' }));
+  const catsR86: CategoryConfig[] = [{ id: 'a', name: 'A', ahtMinutes: 30, shrinkagePct: 0.2, priority: 1 }];
+  const laborR86: LaborConfig = { ...LABOR, dailyProductiveHours: 6, shiftPlacementEnabled: true, shiftSlapMinutes: 30 };
+  const argsR86 = (seed: number) => ({ intervals: ivsR86, openingWIP: [], categories: catsR86, calendar: BIZ_CAL, labor: laborR86, sla: { ...DEFAULT_SLA, primaryPct: 50, primaryWindow: 48, primaryUnit: 'hours' as const, volumeVariability: true }, seed, userMaxHC: 60, replications: 5, queueArchitecture: 'pooled' as const });
+  const rosterOf86 = (r: any) => r.recommendedHC + ':' + JSON.stringify(r.finalDESResult?.shiftDistributionUsed?.__POOLED__?.slaps?.map((x: any) => `${x.startMinutesFromOpen}x${x.agentCount}`));
+  const WANT_ROSTER86 = '11:["0x1","30x4","60x2","120x4"]';
+  const syncRosters86: string[] = [];
+  const asyncRosters86: string[] = [];
+  for (const sd of [1, 2, 3, 4, 5]) {
+    syncRosters86.push(rosterOf86(searchOptimalHC(argsR86(sd))));
+    asyncRosters86.push(rosterOf86(await searchOptimalHCAsync(argsR86(sd))));
+  }
+  assert(syncRosters86.every((x) => x === WANT_ROSTER86), 'D86.e5a sync search, ON: roster (11 agents: 0x1 30x4 60x2 120x4) is the same for 5 seeds, i.e. built from the forecast set', syncRosters86.join(' | '));
+  assert(asyncRosters86.every((x) => x === WANT_ROSTER86), 'D86.e5b async search, ON: same roster for 5 seeds', asyncRosters86.join(' | '));
+
+  // ---- h: ON mean = OFF's rounding basis (ON = OFF + noise only, never less demand) ----
+  // 0.6 rounds to 1 case per interval Off; a raw mean of 0.6 would give ON about 40 % less demand and could recommend fewer staff.
+  const fracVols86 = [0.6, 1.4, 2.5, 0.6, 0.9, 3.6, 0.6, 1.4, 2.5, 0.6];
+  const ivsH86: StandardInterval[] = [];
+  for (let day = 0; day < 4; day++) fracVols86.forEach((v, i) => ivsH86.push({ intervalIndex: ivsH86.length, start: new Date(2026, 9, 5 + day, 9, i * 30), end: new Date(2026, 9, 5 + day, 9, i * 30 + 30), volume: v, category: 'A' }));
+  const offTotalH86 = gen86(OFF86, ivsH86).cases.length;
+  const wantTotalH86 = ivsH86.reduce((a, iv) => a + Math.max(0, Math.round(iv.volume)), 0);
+  const nRepH86 = 300;
+  let onSumH86 = 0;
+  for (let sd = 1; sd <= nRepH86; sd++) onSumH86 += gen86(ON86, ivsH86, sd).cases.length;
+  const onMeanH86 = onSumH86 / nRepH86;
+  const tolH86 = 4 * Math.sqrt(wantTotalH86 / nRepH86); // sum of independent Poissons: variance = total mean
+  assert(offTotalH86 === wantTotalH86 && Math.abs(onMeanH86 - wantTotalH86) <= tolH86, 'D86.h fractional volumes: ON mean case total equals OFF (sum of rounded volumes) within 4 sigma', `off ${offTotalH86} want ${wantTotalH86} on mean ${onMeanH86.toFixed(2)} tol ${tolH86.toFixed(2)}`);
+
+  // ---- f: report only ----
+  console.log(`  [D86.f report] fixture HC off=${syncOff.recommendedHC} on=${syncOn.recommendedHC} (no assertion)`);
+
+  // ---- g: the flag lives on sla, so the run-inputs fingerprint (stringified sla) sees it ----
+  assert(JSON.stringify(ON86) !== JSON.stringify(OFF86), 'D86.g flag changes the stringified sla section the run fingerprint is built from');
 }
 
 console.log('\n==================================================');

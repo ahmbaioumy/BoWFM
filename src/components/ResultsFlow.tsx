@@ -670,6 +670,15 @@ function ResultsFlowBody({
             </div>
           </div>
 
+          {sla.volumeVariability === true && (
+            <div
+              className="text-xs text-indigo-900 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2.5 leading-relaxed"
+              data-testid="volume-variability-note"
+            >
+              <strong>Volume variability on:</strong> each interval's case count was drawn at random around your forecast. The recommended headcount includes a small buffer for this random variation (not for heavy days or forecast error). The baseline figures still use your forecast. Do not compare with runs where this is Off — run both if you want to see the size of the buffer.
+            </div>
+          )}
+
           {singleShiftNoLateStarts && !searchOutput.isInfeasible && (
             <div
               className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 leading-relaxed"
@@ -2518,6 +2527,7 @@ function ResultsFlowBody({
                 <div>confidence_level_pct: {sla.confidenceLevelPct ?? 95}%</div>
                 <div>n_min_floor_enabled: {sla.nMinFloorEnabled !== false ? 'true' : 'false'}</div>
                 <div>below_workload_floor: {searchOutput.belowWorkloadFloor ? 'true' : 'false'}</div>
+                <div>volume_variability: {sla.volumeVariability === true ? 'true (random day-to-day volume swings)' : 'false'}</div>
                 <div>n_min_analytical: {rosterFloor} agents{searchOutput.nMinBeforeReduction !== undefined && ` (before reduction: ${searchOutput.nMinBeforeReduction})`}</div>
                 <div>primary_driven_hc: {primaryHC} agents</div>
                 <div>prng_seed: {simParams.seed}</div>
