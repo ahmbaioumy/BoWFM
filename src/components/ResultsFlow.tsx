@@ -18,7 +18,7 @@ import {
   SLAPolicyConfig,
   StandardInterval,
 } from '../types/wfm';
-import { exportToExcelCSV } from '../utils/csv-parser';
+import { exportWithOutdatedNote } from '../utils/export-notes';
 import { idleAgentCategoryLabel } from '../utils/results-display';
 import { AgentAnalyticsPanel } from './AgentAnalyticsPanel';
 import { formatDateTime24, getCalendarWorkingDaysInHorizon, getDailyWindowLengthHours } from '../utils/calendar';
@@ -480,16 +480,19 @@ function ResultsFlowBody({
     return verifyAgentTimelineInvariants(des, labor, calendar);
   }, [currentTab, des, labor, calendar]);
 
+  // What changed since the run, handed to every export so a stale file says so (trailing NOTE section).
+  const outdatedNote = { settings: settingsChangedSinceRun, data: dataChangedSinceRun };
+
   function handleExportCasesCSV() {
-    exportToExcelCSV(buildCaseExportRows(des.caseResults), 'wfm_simulated_cases.csv');
+    exportWithOutdatedNote(buildCaseExportRows(des.caseResults), 'wfm_simulated_cases.csv', outdatedNote);
   }
 
   function handleExportBreachedCasesCSV() {
-    exportToExcelCSV(buildBreachExportRows(breachedCases), 'wfm_sla_breach_cases.csv');
+    exportWithOutdatedNote(buildBreachExportRows(breachedCases), 'wfm_sla_breach_cases.csv', outdatedNote);
   }
 
   function handleExportQueueWipCSV() {
-    exportToExcelCSV(
+    exportWithOutdatedNote(
       des.intervalsTimeline.map((it) => ({
         'Interval Time': formatSafeDateTime(it.time),
         'Queued WIP': it.queuedWIP,
@@ -498,16 +501,17 @@ function ResultsFlowBody({
         'Cumulative Completed': it.completedCum,
         'Available Agents': it.availableAgents,
       })),
-      'wfm_queue_wip_timeline.csv'
+      'wfm_queue_wip_timeline.csv',
+      outdatedNote
     );
   }
 
   function handleExportAgentSlicesCSV() {
-    exportToExcelCSV(buildSliceExportRows(rawAgentSlices, rosterFloor), 'wfm_simulated_agent_slices.csv');
+    exportWithOutdatedNote(buildSliceExportRows(rawAgentSlices, rosterFloor), 'wfm_simulated_agent_slices.csv', outdatedNote);
   }
 
   function handleExportAgentSummaryCSV() {
-    exportToExcelCSV(
+    exportWithOutdatedNote(
       agentSummaries.map((a) => ({
         Agent: a.agentLabel,
         Source: a.rosterSource.toUpperCase(),
@@ -522,7 +526,8 @@ function ResultsFlowBody({
         'Daily Budget (min)': Math.round(a.dailyBudgetMinutes * 10) / 10,
         'Budget Compliant': a.hasBudgetViolation ? 'VIOLATION' : 'PASS',
       })),
-      'wfm_simulated_agent_summaries.csv'
+      'wfm_simulated_agent_summaries.csv',
+      outdatedNote
     );
   }
 
@@ -2028,7 +2033,7 @@ function ResultsFlowBody({
           })()}
 
           {/* 1c. Agent analytics (audit run) */}
-          <AgentAnalyticsPanel des={des} calendar={calendar} labor={labor} />
+          <AgentAnalyticsPanel des={des} calendar={calendar} labor={labor} outdatedNote={outdatedNote} />
 
           {/* 2. Secondary View: Slice Drill Down */}
           <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4">

@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Draft — as-built specification |
-| **Version** | 1.28.0 |
+| **Version** | 1.28.1 (lane B) |
 | **Date** | 2026-10-17 |
 | **Owner** | _(unassigned)_ |
 | **Product** | Backoffice WFM Sizing Engine |
@@ -663,6 +663,8 @@ category filter and status filter (`Completed Only` / `Breached SLA Only` / `Unf
 Remainder Only`); paginate at 50 rows. Cases that were overdue at start (rule D4) show an
 amber `OVERDUE AT START` marker instead of PASS/BREACH and are left out of `Breached SLA Only`
 and the Audit breach list.
+
+**FR-9.3b — Outdated-results note on exports (1.28.1, lane B; P2-13, display/export only).** When the settings or data changed after the run on screen (the same lists the red "Settings changed since this run" / "Data changed since this run" banner shows), each CSV export from Results ends with one extra trailing NOTE section: `NOTE: Exported from outdated results - settings changed (...), data changed (...). Re-run to refresh.` (only the parts that changed are named). Covers the cases, breached cases, queue/WIP, agent slices, agent summary and agent analytics exports. It is a trailing block only: the real tables, their headers and columns are unchanged, and tools that read by header ignore it. Nothing changed -> no note, file identical to before. An export with no rows is still skipped (no note-only file). Code: `utils/export-notes.ts` (`withOutdatedNote`, `exportWithOutdatedNote`), `ResultsFlow.tsx`, `AgentAnalyticsPanel.tsx` (`outdatedNote` prop); suite D88. No headcount changes. The Config JSON export carries no such flag from Results.
 
 **FR-9.3a — Export timestamps.** Every Results CSV export (cases, breaches, slices, queue/WIP, agent analytics) writes Date cells with the same formatter as the screen (`formatDateTime24`: local business time, `YYYY-MM-DD HH:mm`, no `Z`), UTF-8 BOM, CRLF, quoted cells. (Fixed 1.11.0: exports used UTC ISO strings, e.g. 08:18 on screen vs 04:18Z in the file at UTC+4; the slice CSV's `From ISO`/`To ISO` UTC columns were removed.)
 
@@ -1502,7 +1504,7 @@ Behaviours a user must understand to interpret results correctly.
 | **L29** | **Agent Analytics with a category filter on a shared pool does not show occupancy, available or scheduled time** (UI-2; resolved in 1.27.4, owner decision: dash plus a short note). Pooled agents serve every category, so their idle time cannot be split by category. With a category selected on a pooled team (including the "Pooled" option, and a pooled team that has only one category), Available, Scheduled, Occupancy % and Utilisation % show a dash in the table and the team row; the occupancy chart is replaced by the note; the occupancy ranking, utilisation comparison and utilisation fairness lines are left out of the insights; and the CSV export writes those columns empty (not 0). Busy (the selected category's handling) and Idle (the agent's full idle time) stay. Clear the filter to see occupancy. Siloed runs (dedicated queues) and the unfiltered pooled view are unchanged. | Display and export only; headcount unaffected. Read per-category occupancy from siloed runs. |
 | **L30** | **Per-category answer-time targets: what to expect** (Item 3, 1.26.0; replaces the old L30 "not used by the sizing", H4 / UI-40 / P1-10). (1) With answer time ON every category is judged alone, so recommended headcounts are higher than before 1.26.0 wherever one category was hiding behind the pooled mean (healthcare + 60: 42 -> 52, support + 60: 43 -> 62, AJM_Only + 60: 28 -> 41; claims unchanged); answer time OFF is unchanged. (2) The engine's per-run `passesBOASA`, the history table's BO ASA column and the Results card figure stay pooled over all categories (information only); the gate, the "fell slightly below target" warning, the binding label and the Results per-category verdict use the per-category targets. (3) A thin category is judged on its own, so the check is as seed-sensitive as the category SLA gate; L35 applies. (4) A category with no cases in any replication is not checked (note only). | Set the global answer-time target for what every category must meet; tick a category only when it has a different promise. |
 | **L31** | **Some input and navigation guards are missing** (H10, H8, F5; §11 P1-11, P1-12; IS3-a, §11 P2-12). Settings import does not validate the file shape; no error boundary; no leave-page warning; the Sensitivity matrix is lost on leaving the tab; the Calendar tab does not block impossible calendars; balanced mid-cell quotes in a CSV can merge two cells. | Lost work or a late error message, not a changed headcount. Export config JSON before leaving; keep calendar and CSV input clean. |
-| **L32** | **Exports made from outdated results carry no "outdated" note** (SR-a; §11 P2-13). | Display only. Re-run before exporting. |
+| **L32** | **The outdated-results note is a trailing text row, CSV only.** (P2-13 resolved in 1.28.1.) Excel shows it as one extra row under the tables; it names the changed sections in plain words, not the old and new values. The config JSON export carries no such flag. | Display only. Re-run before exporting to get a clean file. |
 | **L33** | **With Minimum Coverage OFF the search does not try the even-spread layout, so it can return MORE staff than with Minimum Coverage ON** (Item 1, 1.24.0). The spread layout is a second layout tried only when the coverage-repair roster fails, so it exists only when a repair roster exists (coverage ON, floor above zero). Example: support sample + answer-time 60 min: ON 43, OFF 46; D33 fixture (14 h window, 9 h shift): ON 21, OFF 28. | Affects headcount (OFF can be higher than ON). The OFF figure is still a valid answer under its own rules; extending the spread layout to OFF is an owner decision, not built. Since 1.24.1 the Coverage-floor-OFF note in Labor & Config and the Results start-time block say so on screen. |
 | **L34** | **Sensitivity cells can use different start-time layouts and the grid does not label them** (Item 1 rework 2, 1.24.2). Every Sensitivity cell runs its own full search, so one cell may be sized with the even-spread layout, another with the coverage-repair roster or all agents at opening. The headcounts in the grid are each valid under their own search, but differences between cells mix demand change and layout change. | Affects how the grid reads (a step between cells can partly be a layout switch); no headcount changes. Display/labelling only; not built. |
 | **L37** | **A manual backlog row left blank is now sized at the full handling time, so headcount can rise.** (Item 5, 1.27.2; closes G10 / DES-7.) The "Remaining Work" box of the manual Opening WIP form used to start at 30 minutes, which is below the default handling times (35 / 45 / 60), so every manual row counted as part-worked and was served before newer cases with earlier deadlines. Blank now means not started: the row is stored without a remaining value and the engine uses the category's current handling time (same as a file import without a remaining column; later edits of the handling time are followed). Because the workload counted for such a row is the full handling time instead of 30 minutes, the baseline `N_min` and the recommended headcount can go up where the handling time is above 30. Measured on the audit probe (1 agent, 30 backlog cases, 45-minute handling time): new-case SLA 51.7 % before (30 typed) versus 91.7 % after (blank). An explicitly typed value below the handling time still keeps in-progress priority (owner decision 2026-10-15); 0, negative or non-numeric input is flagged in the form with an amber message and the row is stored as blank. Scenario export never contained Opening WIP, so no saved scenario changes. | Leave the box blank for work not yet started; type a value only for work already part-done. | |
@@ -1647,12 +1649,11 @@ compliance reviewer reading the manifest would reasonably conclude the product c
 
 ### P2 — Polish and technical debt
 
-**P2-1 — Resolve 671 lines of dead code.** `DataTable.tsx` (308 lines: sorting, page-size
-selection, filtered export) and `NativeCharts.tsx` (363 lines: a staffing-search curve and a
-queue/WIP timeline chart) are referenced nowhere and do not reach the bundle. **The shipped
+**P2-1 — Resolve 363 lines of dead code.** `NativeCharts.tsx` (363 lines: a staffing-search curve and a
+queue/WIP timeline chart) is referenced nowhere and does not reach the bundle (`DataTable.tsx`, 308 lines, was deleted in 1.28.1). **The shipped
 app has no charts at all** — the "Staffing Path" and "Queue / WIP" tabs are table-only despite
-purpose-built chart components existing for exactly those views. Either wire them up or delete
-them.
+a purpose-built chart component existing for exactly those views. Either wire it up or delete
+it.
 
 **P2-2 — Make sensitivity analysis configurable and exportable.** The 5×5 grid and the five
 named comparison scenarios are hardcoded constants; results are component-local and are lost
@@ -1688,8 +1689,6 @@ the retained code (`utilisationPct`, `utilCv`, `utilJain`, `utilisationReadsLowB
 panel and export branches, and the tests that cover them).
 
 **P2-12 — Balanced quotes inside a CSV cell can merge two cells (IS3-a).** A cell with a balanced mid-cell quote pair is not split where the file intends (§10 L31). Rare input case. Fix: follow the standard CSV quoting rule or raise a data-quality error.
-
-**P2-13 — Mark exports made from outdated results (SR-a).** When inputs change after a run, the screen shows an outdated banner but CSV/JSON exports carry no note (§10 L32). Display only.
 
 
 **P2-14 — Move build tooling out of `dependencies` (G13).** `vite`, `@vitejs/plugin-react` and `@tailwindcss/vite` are listed under `dependencies` in `package.json`, contrary to the project rule and NFR-2.2. Internal only: they do not reach the artifact. Needs owner approval and a check that `npm run build:standalone` still passes.

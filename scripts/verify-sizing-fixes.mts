@@ -8396,6 +8396,69 @@ console.log('\n--- Suite D86: volume variability (opt-in Poisson arrival counts)
   // ---- g: the flag lives on sla, so the run-inputs fingerprint (stringified sla) sees it ----
   assert(JSON.stringify(ON86) !== JSON.stringify(OFF86), 'D86.g flag changes the stringified sla section the run fingerprint is built from');
 }
+// ============================================================================
+// D88: "outdated results" note on CSV exports (P2-13); DataTable.tsx removed
+// ============================================================================
+{
+  console.log('\n--- D88: outdated-results note on exports ---');
+  const en: any = await import('../src/utils/export-notes').catch(() => ({}));
+  const { buildExcelCSV } = await import('../src/utils/csv-parser');
+  const root88 = resolve(import.meta.dirname, '..');
+  const has = typeof en.withOutdatedNote === 'function';
+  assert(has, 'D88.a withOutdatedNote exists in src/utils/export-notes.ts');
+  if (has) {
+    const base = [{ title: 'Sec A', rows: [{ x: 1, y: 'a' }] }];
+    const rows = [{ Agent: 'A1', Cases: 3 }, { Agent: 'A2', Cases: 4 }];
+    const fresh = en.withOutdatedNote(base, [], []);
+    assert(JSON.stringify(fresh) === JSON.stringify(base), 'D88.b nothing changed: sections returned unchanged (no note)');
+    assert(buildExcelCSV(rows, fresh) === buildExcelCSV(rows, base), 'D88.b2 nothing changed: CSV text identical to the plain export');
+    const input = [{ title: 'Sec A', rows: [{ x: 1 }] }];
+    en.withOutdatedNote(input, ['Labor'], []);
+    assert(input.length === 1, 'D88.c input array is not mutated');
+    const s = en.withOutdatedNote(base, ['Labor', 'SLA policy'], []);
+    assert(s.length === 2 && s[0] === base[0] && s[1].rows.length === 0, 'D88.d settings only: one trailing note section appended after the real sections, no rows');
+    assert(s[1].title === 'NOTE: Exported from outdated results - settings changed (Labor, SLA policy). Re-run to refresh.', 'D88.d2 settings-only wording', s[1].title);
+    const d = en.withOutdatedNote([], [], ['demand data']);
+    assert(d.length === 1 && d[0].title === 'NOTE: Exported from outdated results - data changed (demand data). Re-run to refresh.', 'D88.e data-only wording', d[0]?.title);
+    const b = en.withOutdatedNote(base, ['Labor'], ['opening backlog']);
+    assert(b[1].title === 'NOTE: Exported from outdated results - settings changed (Labor), data changed (opening backlog). Re-run to refresh.', 'D88.f both: wording', b[1].title);
+    const csvNoted = buildExcelCSV(rows, s);
+    const csvPlain = buildExcelCSV(rows, base);
+    assert(csvNoted.startsWith(csvPlain) && csvNoted.slice(csvPlain.length).split('\r\n').filter((l) => l !== '').length === 1, 'D88.g note is only a trailing block: the plain export is an exact prefix, one extra line');
+    assert(csvNoted.split('\r\n')[0] === '\uFEFF"Agent","Cases"', 'D88.g2 header row and columns unchanged');
+    assert(buildExcelCSV(rows, d).startsWith(buildExcelCSV(rows, [])), 'D88.g3 plain rows export keeps rows first, note after');
+    // empty-data guard: a note alone must never produce a file
+    assert(typeof en.prepareNotedExport === 'function' ? en.prepareNotedExport([], [], ['Labor'], []) === null : false, 'D88.h empty export (no rows, no sections) returns null even when stale: no note-only file');
+    const ne = typeof en.prepareNotedExport === 'function' ? en.prepareNotedExport(rows, [], ['Labor'], []) : null;
+    assert(ne !== null && ne.sections.length === 1, 'D88.h2 non-empty export gets the note section');
+  }
+  // source checks: every export path goes through the helper
+  const rf = readFileSync(join(root88, 'src/components/ResultsFlow.tsx'), 'utf8').replace(/\r\n/g, '\n');
+  const ap = readFileSync(join(root88, 'src/components/AgentAnalyticsPanel.tsx'), 'utf8');
+  const handlers = ['handleExportCasesCSV', 'handleExportBreachedCasesCSV', 'handleExportQueueWipCSV', 'handleExportAgentSlicesCSV', 'handleExportAgentSummaryCSV'];
+  for (const h of handlers) {
+    const i = rf.indexOf(`function ${h}(`);
+    const j = rf.indexOf('\n  }\n', i);
+    const body = i >= 0 && j > i ? rf.slice(i, j) : '';
+    assert(body.length > 0 && !/exportToExcelCSV\(/.test(body) && /exportWithOutdatedNote\(/.test(body), `D88.i ${h} exports through exportWithOutdatedNote (not plain exportToExcelCSV)`);
+  }
+  assert(/withOutdatedNote\(/.test(ap) && /outdatedNote/.test(ap), 'D88.j AgentAnalyticsPanel export appends the note via withOutdatedNote');
+  assert(/outdatedNote=\{/.test(rf), 'D88.k ResultsFlow passes outdatedNote to AgentAnalyticsPanel');
+  assert(!existsSync(join(root88, 'src/components/DataTable.tsx')), 'D88.l dead src/components/DataTable.tsx is deleted');
+  const dtRefs = walkSrc88(join(root88, 'src')).filter((f) => /DataTable/.test(readFileSync(f, 'utf8')));
+  assert(dtRefs.length === 0, 'D88.m no source file mentions DataTable', dtRefs.join(','));
+}
+
+function walkSrc88(dir: string): string[] {
+  const out: string[] = [];
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) out.push(...walkSrc88(p));
+    else if (/\.(ts|tsx)$/.test(e.name)) out.push(p);
+  }
+  return out;
+}
+
 
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
