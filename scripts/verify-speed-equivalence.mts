@@ -52,7 +52,7 @@ if (!isChild) {
     const child = spawn(process.execPath, args, { cwd: root, env: { ...process.env, TZ: z.tz }, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '', err = '';
     child.stdout.on('data', (d) => { out += String(d); });
-    child.stderr.on('data', (d) => { err += String(d); });
+    child.stderr.on('data', (d) => { err += String(d); if (argv.includes('--verbose')) process.stderr.write(d); });
     child.on('close', (code) => {
       const last = out.trim().split('\n').filter((l) => l.startsWith('RESULT ')).pop();
       if (code !== 0 || !last) return done({ ok: false, line: `${z.tz}: FAILED (exit ${code})\n${out.trim().split('\n').slice(-12).join('\n')}\n${err.trim().split('\n').slice(-8).join('\n')}` });
@@ -71,6 +71,8 @@ if (!isChild) {
 // ------------------------------------------------------------------------------------------------ child
 const baseDir = flag('--base')!;
 const expectDst = argv.includes('--dst');
+const only = flag('--only'); // debug: run only search cells whose label contains this
+const engineOnly = flag('--engine'); // debug: 'old' | 'new' = run that engine alone, no comparison
 const t0 = Date.now();
 const oldDes: any = await import(pathToFileURL(join(baseDir, 'src/utils/des-engine.ts')).href);
 const oldSearch: any = await import(pathToFileURL(join(baseDir, 'src/utils/hc-search.ts')).href);
@@ -210,7 +212,7 @@ for (const w of wins) {
 }
 if (new Date(2026, 6, 1).getTimezoneOffset() === new Date(2026, 0, 1).getTimezoneOffset() === expectDst) throw new Error(`TZ ${process.env.TZ}: DST expectation (${expectDst}) contradicts the runtime offsets`);
 
-for (const w of wins) {
+for (const w of engineOnly ? [] : wins) {
   for (const specTemplate of calSpecs(w)) {
     for (const v of vars()) {
       // ---- runBackofficeDES (case generation inside; both dispatch paths; coverage sampling)
@@ -232,25 +234,34 @@ for (const w of wins) {
 }
 
 if (!quick) {
-  const w = wins[0], wf = wins[1];
-  for (const [win, specTemplate] of [[w, calSpecs(w)[0]], [w, calSpecs(w)[1]], [w, calSpecs(w)[2]], [wf, calSpecs(wf)[3]], [wf, calSpecs(wf)[4]], [wf, calSpecs(wf)[1]]] as Array<[Win, CalSpec]>) {
-    for (const v of vars().filter((x) => !x.dist)) {
-      for (const placement of [false, true]) {
-        if (placement && v.minCov === false) continue;
-        const mk = () => ({
-          intervals: makeIntervals(win, specTemplate), openingWIP: v.wip ? backlog(win) : [],
-          categories: DEFAULT_CATEGORIES.slice(0, 2).map((c) => ({ ...c })), calendar: specTemplate.cal(),
-          labor: { ...laborFor(specTemplate), ...(placement ? { shiftPlacementEnabled: true, shiftSlapMinutes: 30 } : {}) },
-          sla: slaFor(v), seed: 777, userMaxHC: 60, replications: 4, queueArchitecture: 'pooled' as const,
-        });
-        const ro = guarded(() => oldSearch.searchOptimalHC(mk()));
-        const rn = guarded(() => newSearch.searchOptimalHC(mk()));
-        searchCases++;
-        const label = `SEARCH ${win.name} ${specTemplate.name} ${v.name}${placement ? '/placement' : ''}`;
-        if (ro.ok !== rn.ok) { diffs++; firstDiffs.push(`  DIFF ${label}: threw in one engine only`); }
-        else if (!ro.ok && !rn.ok) { bothThrew++; if ((ro as any).e !== (rn as any).e) { diffs++; firstDiffs.push(`  DIFF ${label}: different errors`); } }
-        else { if ((ro as any).v.recommendedHC != null) nonTrivial++; compare(label, (ro as any).v, (rn as any).v); }
-      }
+  // searchOptimalHC is the expensive path (many DES runs per search): a trimmed 10-day horizon (still containing the DST day) and 4 variants.
+  const w = { ...wins[0], days: 10 }, wf = { ...wins[1], days: 10 };
+  for (const [win, specTemplate] of [[w, calSpecs(w)[0]], [w, calSpecs(w)[1]], [w, calSpecs(w)[2]], [wf, calSpecs(wf)[3]], [wf, calSpecs(wf)[4]]] as Array<[Win, CalSpec]>) {
+    if (expectDst && countOddDays(win) === 0) throw new Error(`TZ ${process.env.TZ}: trimmed search window ${win.name} has no 23h/25h day`);
+    const all = vars();
+    const pick = (basis: string, pol: string, minCov: boolean) => all.find((x) => x.clockBasis === basis && x.clockStartPolicy === pol && x.minCov === minCov && !x.dist)!;
+    const cells: Array<[Var, boolean]> = [[pick('business_time', 'arrival', true), false], [pick('business_time', 'next_open', true), false], [pick('wall_clock', 'next_open', false), false], [pick('business_time', 'next_open', true), true]];
+    for (const [v, placement] of cells) {
+      const mk = () => ({
+        intervals: makeIntervals(win, specTemplate), openingWIP: v.wip ? backlog(win) : [],
+        categories: DEFAULT_CATEGORIES.slice(0, 2).map((c) => ({ ...c })), calendar: specTemplate.cal(),
+        labor: { ...laborFor(specTemplate), ...(placement ? { shiftPlacementEnabled: true, shiftSlapMinutes: 30 } : {}) },
+        sla: slaFor(v), seed: 777, userMaxHC: 60, replications: 3, queueArchitecture: 'pooled' as const,
+      });
+      const label = `SEARCH ${win.name} ${specTemplate.name} ${v.name}${placement ? '/placement' : ''}`;
+      const tc = Date.now();
+      if (only && !label.includes(only)) continue;
+      if (engineOnly) { process.stderr.write(`[${engineOnly}] start ${label}
+`); const r = guarded(() => (engineOnly === 'old' ? oldSearch : newSearch).searchOptimalHC(mk())); process.stderr.write(`[${engineOnly}] done ${r.ok ? 'rec=' + (r as any).v.recommendedHC : (r as any).e} ${Date.now() - tc}ms
+`); continue; }
+      const ro = guarded(() => oldSearch.searchOptimalHC(mk()));
+      const rn = guarded(() => newSearch.searchOptimalHC(mk()));
+      searchCases++;
+      process.stderr.write(`[${process.env.TZ}] ${label} ${Math.round((Date.now() - tc) / 100) / 10}s
+`);
+      if (ro.ok !== rn.ok) { diffs++; firstDiffs.push(`  DIFF ${label}: threw in one engine only`); }
+      else if (!ro.ok && !rn.ok) { bothThrew++; if ((ro as any).e !== (rn as any).e) { diffs++; firstDiffs.push(`  DIFF ${label}: different errors`); } }
+      else { if ((ro as any).v.recommendedHC != null) nonTrivial++; compare(label, (ro as any).v, (rn as any).v); }
     }
   }
 }
