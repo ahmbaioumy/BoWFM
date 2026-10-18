@@ -38,14 +38,21 @@ LSS = primaryDeadline − remaining AHT     (walked backwards through the busine
 ```
 
 Lowest LSS goes first: **Earliest Deadline First**, which is optimal for maximising on-time
-completions under deadline scheduling. Ordering (`CaseMinHeap.compare`):
+completions under deadline scheduling. The case actually served is chosen by `pickNextCase`
+(`des-engine.ts`), a linear scan of the queue:
 
 1. Parked/partially-worked cases first (finish what is started; avoids a pile of
-   half-done work)
-2. Latest Safe Start ascending (EDF — the urgency signal)
-3. Category priority
-4. Arrival time (FIFO)
-5. Synthetic id (deterministic final tie-break)
+   half-done work). This is a rule of the scan itself: the best parked case is taken if
+   there is any, otherwise the best new case.
+2. Within each group, `compareByUrgency` orders by:
+   1. Latest Safe Start ascending (EDF — the urgency signal)
+   2. Category priority
+   3. Arrival time (FIFO)
+   4. Synthetic id (deterministic final tie-break)
+
+`CaseMinHeap.compare` mirrors the same order but only decides heap push/pop order; it does
+not decide which case is served. The two must stay in agreement (suite D80). Edit dispatch
+in `pickNextCase` / `compareByUrgency`, and keep the heap comparator in step.
 
 Note LSS must be computed through the *business* calendar, not by wall-clock subtraction: a
 case needing 4 hours against a 09:00-tomorrow deadline cannot start at 23:00 tonight.
@@ -118,9 +125,38 @@ Direction matters, and differs per constraint:
 This is deliberately conservative: it accepts a headcount only when the evidence supports
 the claim, rather than when a single lucky run happened to clear it.
 
+### Independent confirmation block
+
+A candidate that passes the gate on the search's own R replications must also pass the same,
+unchanged gate on a second, disjoint block of R case sets (the confirmation block). Its seed
+is derived from the run seed by pure arithmetic (`deriveConfirmationBaseSeed`,
+`createConfirmationBlock`), so the two blocks never share a replication, and Common Random
+Numbers still hold inside the block. A candidate that clears the main days but not the second
+set is a non-passing result and the search continues as for any failure; the history row shows
+"N=… passed on the main simulated days but not on a second, independent set (…)". One state
+machine (`createPassConfirmation`) is shared by `searchOptimalHC` and `searchOptimalHCAsync`.
+Every evaluation at the full R is confirmed; the 5-replication leap probes of a larger R stay
+primary-only (runs with R of 5 or fewer confirm every evaluation). One confirmation set lowers,
+but does not remove, the chance of adopting a lucky headcount (PRD L35); it can only raise the
+answer, never lower it.
+
+### Roster layouts tried at each candidate
+
+At each candidate N the search tries rosters in a fixed order, each judged by the same
+primary-plus-confirmation gate: repair-first or uniform-first (the coverage-repair roster,
+Minimum Coverage ON, default, goes first when the shift is shorter than the open day, because
+uniform cannot cover the tail then; otherwise uniform goes first), the even-spread layout of the repair roster
+(`buildCoverageSpreadDistribution`), and, only with Shift Placement ON (opt-in), the analytic
+placement roster and finally the rescue ladder (`buildRescueLadder`, late-start shares
+`RESCUE_LATE_SHARES`), which is also confirmed on the second block. The roster polish chain (opt-in Shift Placement) runs only after
+the headcount is decided and does not change it.
+
 ## The search, and the property it depends on
 
-1. Start at `N_min`.
+1. Start at `max(N_min, N_occ)`, where `N_occ` is the smallest headcount whose occupancy can
+   clear the cap on the simulator's own hours basis (`resolveSearchBounds`,
+   `computeOccupancyFloor`). With the Workload Floor ON (default) the search never walks below
+   this start; with it OFF the same start is used but the walk-down may go as low as N = 1.
 2. **Leap** upward in doubling steps until a candidate passes (cheap probes at
    `min(R,5)` replications, confirmed at full R).
 3. **Walk down** by −1 from that ceiling, re-testing at full R, **stopping at the first

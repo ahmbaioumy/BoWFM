@@ -20,7 +20,7 @@ Workload_hours = Σ_intervals (volume × AHT_category / 60)
 
 **Stage 2 — Workload → analytical baseline `N_min`** (operational HC)
 ```
-N_min = ceil( Workload_hours / (OccCap × DailyProductiveHours × Adherence × WorkingDays) )
+N_min = floor( Workload_hours / (OccCap × DailyProductiveHours × Adherence × WorkingDays) )
 ```
 Shrinkage is deliberately **absent** here. `N_min` is *operational* (on-duty) headcount;
 shrinkage is applied later, in Stage 4.
@@ -34,7 +34,7 @@ candidate under Common Random Numbers.
 ```
 opHC_c    = operationalHC × share_c
 grossHC_c = opHC_c / (1 − shrinkage_c)
-GrossHC   = ceil( Σ grossHC_c )
+GrossHC   = round( Σ grossHC_c )    // nearest whole, exact .5 rounds up
 effShrink = 1 − 1 / Σ( share_c / (1 − shrinkage_c) )      // harmonic
 ```
 
@@ -73,8 +73,8 @@ requires explicit human approval.
 6. **Harmonic (not arithmetic) effective-shrinkage blend.** Workload-weighted arithmetic
    mean of shrinkage rates is mathematically wrong here.
 
-7. **Per-category gross-up, then sum, then a single `ceil`.** Not blended-then-grossed,
-   and not per-category ceilings (which over-round systematically).
+7. **Per-category gross-up, then sum, then a single `round`.** Not blended-then-grossed,
+   and not per-category rounding (which drifts systematically).
 
 8. **CI-gated acceptance, not single-run.** A candidate passes only if the 95% CI bound
    clears the target — lower bound for SLA attainment, upper bound for occupancy/ASA caps.

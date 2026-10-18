@@ -13,7 +13,11 @@ Cells: BA/BN = Business Time + Arrival / Next Open · WA/WN = Wall Clock + Arriv
 PON = placement ON · FOFF = Workload Floor OFF (compared with BA). "Tail" = agents on shift in
 the last half-hour (17:30).
 
-## Verdict
+## Verdict (2026-09-30 comparison, historical)
+
+> This Verdict and the Detail table below describe the original 2026-09-30 before/after
+> comparison and are kept as a record. The current regression baseline is
+> `sample-hc-after-2026-10-15.jsonl` (see the header above for what changed).
 - **Default settings: zero change** — every field (N_min, N_occ, Req HC, Gross HC, binding, SLA,
   occupancy, min coverage) identical in all 16 non-placement cells.
 - **Clock wiring:** Business + Arrival = Business + Next Open on every file (now forced to Next Open);
@@ -24,7 +28,7 @@ the last half-hour (17:30).
   agents on three files (SLA −0.1 to −0.2 pt, still passing the CI gate); AJM_Only kept as is —
   moving one agent later drops category Tech HVC below its 80% CI target.
 
-## Detail
+## Detail (2026-09-30 comparison, historical)
 
 | File | Cell | Req HC | Gross HC | SLA % | Tail | Roster polish | Fields changed |
 |---|---|---|---|---|---|---|---|

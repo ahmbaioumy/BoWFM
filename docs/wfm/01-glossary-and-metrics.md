@@ -67,6 +67,11 @@ and silently break the identity. Document such cancellations explicitly.
   ("90% of claims closed within 2 business days"). This is the engine's `primaryAchievedPct`.
 - **Backoffice ASA** — here, time from SLA clock start to *first touch*. Distinct from
   TAT, which runs to *completion*. A case can be picked up quickly and still breach TAT.
+  The gate judges each category on its own answer-time target (its own if the category's
+  "Own target" is ticked, otherwise the global one) against the upper 95% CI bound of that
+  category's mean; there is no pooled gate. The wait is measured from
+  `max(clockStart, horizonStart)`, so backlog that arrived before the plan starts only counts
+  the time since the plan began.
 - **Backlog / WIP age** — distribution of how long open items have been waiting. The
   metric TAT attainment alone hides: attainment can look fine while a tail of very old
   cases quietly accumulates.
@@ -106,7 +111,10 @@ different denominators:**
 This engine deliberately uses **planned capacity** for the sizing constraint, so
 `rawOccupancyPct` above 100% is a meaningful overload signal ("you need 43% more
 capacity"), not a bug. `ResultsFlow.tsx` separately reports the per-agent realised figure.
-Both are correct; they are not interchangeable.
+Both are correct; they are not interchangeable. On a shared (pooled) team, Agent Analytics with
+a category filter shows a dash instead of occupancy: pooled agents serve every category, so
+their idle time cannot be split by category (PRD L29). Read per-category occupancy from a
+siloed run.
 
 **Sustainable ceiling:** roughly **85%** for backoffice. Above that, small demand variances
 turn into large backlogs, and quality and attrition degrade. An occupancy cap alongside the

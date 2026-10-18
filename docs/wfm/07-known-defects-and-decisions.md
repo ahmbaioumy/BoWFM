@@ -1050,16 +1050,14 @@ questions. Establish which question is being asked before calling one wrong.
 | **D14** | Censored ASA for never-started cases measured only to `horizonEnd`, not the true simulation end, understating backlog age for badly undersized candidates. | Low |
 | **D15** | *(resolved 2026-10-06 by the G1 fix)* `primaryEligible` is now false for opening backlog already overdue at horizon start (rule D4). | — |
 | **D18** | Two priority orderings still exist by design (`CaseMinHeap.compare` governs heap push/pop; `pickNextCase`/`compareByUrgency` governs dispatch selection — see fixed `D16` above, which only corrected which one ships). They independently re-implement the same parked-first tiering — drift risk, not a current bug. Since 2026-10-14 suite D80 compares them on 2,016 deterministic pairs (0 disagree), so a future drift now fails a test. | Low — same root cause as D11 |
-| **G1** | **No backlog-ageing report** (>24h/48h/72h buckets). COPC-style backoffice reporting expects it alongside TAT attainment; data already exists in `CaseRunResult`. | Gap — worth building |
-| **G2** | **Quality/rework not modelled.** Rework is real workload; sizing against clean volume understates. | Gap — inflate input volume meanwhile |
-| **G3** | **Resumption overhead assumed zero.** Parked-and-resumed cases pay no context-switching cost. | Gap — inflate AHT meanwhile |
+| **GAP-1** | **No backlog-ageing report** (>24h/48h/72h buckets). COPC-style backoffice reporting expects it alongside TAT attainment; data already exists in `CaseRunResult`. | Gap — worth building |
+| **GAP-2** | **Quality/rework not modelled.** Rework is real workload; sizing against clean volume understates. | Gap — inflate input volume meanwhile |
+| **GAP-3** | **Resumption overhead assumed zero.** Parked-and-resumed cases pay no context-switching cost. | Gap — inflate AHT meanwhile |
 
 ---
 
 ## E. Environment notes
 
-- **The project is not under version control.** No `.git`. Changes have no safety net —
-  consider `git init`.
 - **Platform:** development machine is win32-**arm64**; `node_modules` initially shipped
   only the win32-**x64** esbuild binary, so `tsx` could not run at all. Fixed by installing
   `@esbuild/win32-arm64`. If `tsx` fails with a `TransformError` about platform binaries,
@@ -1094,3 +1092,15 @@ Before: the manual form defaulted remaining work to 30 minutes, so with default 
 
 ### 2026-10-16 — Item 6: exact half-seat rounds up; exact whole ratio gives the whole N_min (PRD 1.27.3; closes F4 / HC-1 / HC-5, adds L38)
 Before: the pooled Gross HC was `Math.round` of a sum of per-category gross-ups added in list order, so an exact .5 total could arrive as 12.499999999999998 and round down: 10 seats over five categories with workloads 10:20:30:40:50 at 20 % shrinkage gave 12 in 64 of the 120 category orders and 13 in 56 (50 seats: 62 in 28 orders, 63 in 92). The baseline `N_min` is a `floor`, and 123.75 h / (7.5 h x 15 days x 0.55) = 1.9999999999999998 floored to 1 instead of 2. After (owner decision 2026-10-16: nearest whole HC, an exact half rounds up): `Math.round(sumGrossHC + 1e-9)` and `Math.floor(ratio + 1e-9)` (`HEADCOUNT_TIE_EPSILON`, `hc-search.ts`; the sync and async search share both). Absolute 1e-9 because double error is about 2e-16 x value while any real difference is at least 0.01; 12.5 - 1e-7 still gives 12, 12.49 gives 12, 1.9999 gives 1. The N_occ ceiling (`computeOccupancyFloor`) takes the same tolerance, `Math.ceil(ratio - 1e-9)`: the first build left it bare on the strength of "0 mismatches measured", but that probe used a single workload figure; a workload summed from category parts can land one ulp above a whole ratio (7 h x 0.55 x 15 days: 0.1+0.2+0.3+0.4 of 2 seats = 2.0000000000000004 -> 3), and a challenger probe found 2,290 of 2,999 such whole-ratio cases one seat too high. So all three headcount boundaries (N_min floor, N_occ ceil, Gross round) use the same 1e-9 tolerance; 2.0001 still gives 3 and 2 + 1e-7 still gives 3 (suite D85.g). Not changed: the OFF-adjusted seat count (`operationalHCWithOff`, integer division, exact), the late-starter split `Math.round(share*seats)`. Per-category Gross is displayed to two decimals so the rows may not add up to the total at a tie (display only, pre-existing). Pinned by suite D85; frozen decision 7 (per-category gross-up, sum, single round) is unchanged.
+
+### 2026-10-17 — Item 7: opt-in volume variability (PRD 1.28.0; FR-5.14, adds L39)
+Before: each interval brought its forecast volume (rounded) and only arrival times were random. After: `sla.volumeVariability` (default Off) makes the per-interval count random too: Poisson around the rounded interval volume, from a separate seeded stream per replication, so Common Random Numbers hold and the arrival-time stream is not shifted (`des-engine.ts`). Off is unchanged. Roster design and siloed seats stay on the forecast. Results show a notice and an Assumptions line when On. Caveats: PRD L39. Suite D86.
+
+### 2026-10-17 — G7 / F7: category filter on a pooled team no longer shows a misleading occupancy (PRD 1.27.4; closes L29 / P2-11)
+Before: Agent Analytics with a category filter on a shared pool showed an occupancy figure that could not be attributed to the category (pooled agents serve every category). After (owner decision: dash plus a short note): Available, Scheduled, Occupancy % and Utilisation % show a dash for a category filter on a pooled team; the occupancy chart is replaced by the note; the CSV export writes those columns empty. Siloed runs and the unfiltered pooled view are unchanged. Display and export only; headcount unchanged.
+
+### 2026-10-17 — Lanes A + B: input safety, calendar guards, outdated note on exports (PRD 1.29.0; P1-11, P1-12, P2-13)
+P1-11: `validateImportedConfig` checks a settings file before applying it (the five core sections are all-or-nothing, every problem listed in plain words); crash screen (`ErrorBoundary`); leave-page warning while data is loaded or results exist; the Sensitivity matrix survives switching screens. P1-12: `getCalendarIssues` blocks a calendar with no working day, a zero-length window or productive hours above the window, and warns about a holiday on a closed weekday (DQ row 28). P2-13: CSV exports from Results end with a trailing NOTE row when the settings or data changed after the run. No engine change; headcount unchanged. Suites D87, D88.
+
+### 2026-10-17 — Housekeeping (PRD 1.29.1)
+`vite`, `@vitejs/plugin-react` and `@tailwindcss/vite` moved to `devDependencies` (`dependencies` is exactly `react`, `react-dom`, `lucide-react`; suite D9.5b pins it); the unused `test_files/UAT_BO.xlsx` and `test_files/test_breaks.xlsx` removed. The built `BoWFM.html` is byte-identical.

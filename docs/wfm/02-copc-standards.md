@@ -96,5 +96,5 @@ volume (or AHT) to compensate, and record that you have done so — otherwise th
 adjustment will silently be applied twice.
 
 **Backlog ageing is not reported.** The data exists in `CaseRunResult` (`arrival`,
-`clockStart`, `completeTime`) but no aged-backlog view is surfaced. See
+`clockStart`, `completeTime`) but no aged-backlog view is surfaced. See open gap GAP-1 in
 `07-known-defects-and-decisions.md`.
