@@ -8762,6 +8762,7 @@ console.log('\n--- Suite D90: backlog input safety + results wording ---');
     assert(l3 === 'Optimal Staffing: 31 Operational HC (primary search result 28; binding: X).', 'D90.c3b a differing primary-loop value is still shown, labelled neutrally', l3);
   }
   assert(/buildStaffingLine\(/.test(res90) && /buildStaffingLine\(/.test(src90('src/utils/hc-search.ts')), 'D90.c4 Results and the async search final message both call buildStaffingLine');
+  assert(!/primary SLA alone needs/.test(res90 + src90('src/utils/hc-search.ts')), 'D90.c6 no progress or Results text claims the primary SLA alone needs M (hc-search audit-phase message included)');
   assert(!/Primary-Driven:/.test(res90 + src90('src/utils/hc-search.ts')), 'D90.c5 no hand-built "Primary-Driven:" text left');
 }
 

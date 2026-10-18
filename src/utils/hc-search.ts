@@ -4645,7 +4645,7 @@ export async function searchOptimalHCAsync(params: {
     evaluatedHistory: buildHistorySnapshot(),
     currentMessage: isInfeasible
       ? `Audit at cap N = ${evalN}: Constraints breached. Generating diagnostic evidence...`
-      : `Running full DES audit at recommended N = ${evalN} (primary SLA alone needs ${primaryDrivenHC})...`,
+      : `Running full DES audit at recommended N = ${evalN}...`,
   });
 
   await new Promise((r) => setTimeout(r, 40));

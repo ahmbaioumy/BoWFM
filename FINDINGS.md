@@ -1570,5 +1570,5 @@ Tests: suite D89 (26 checks), red first (helper missing, markup absent), green a
 
 ## Polish build: input safety + results wording (branch polish-input-wording, PRD 1.29.3, 2026-10-18)
 - Resolved the backlog items above: "1,000" as 1.0 / no upper cap / inputMode (backlog form); "Primary-Driven" progress text; "Unfinished by horizon end" strings (export-rows.ts, hc-search.ts x2); cap-cut rows labelled "deadline missed".
-- Tests: suite D90 (32 checks), red first (14 failing: reason missing, two helper files absent, old strings present), green after. No existing test pinned the old strings; `verify-agent-analytics.mts` call updated for the new `buildBreachExportRows` argument.
+- Tests: suite D90 (33 checks), red first (14 failing: reason missing, two helper files absent, old strings present), green after. No existing test pinned the old strings; `verify-agent-analytics.mts` call updated for the new `buildBreachExportRows` argument.
 - Still open (minor): hint text size; value >= AHT shown plain without a note; "1.000" is read as 1 (documented, a dot is always decimal).
