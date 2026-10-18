@@ -1552,3 +1552,18 @@ Fail-first: suite D87 written before the guards were wired (validator and calend
 | Sensitivity (claims, 149 s for 25 cells) | matrix identical after Config -> Sensitivity; Outdated note after prod hours 7.5 -> 7 (both tabs), gone after reverting; Reset + sample clears it; leaving mid-run cancels with the Stopped note and no unhandled error; 0 console errors |
 
 Pre-existing defect fixed on the way: pressing Stop on a running Sensitivity grid made the search throw SIMULATION_CANCELLED inside an un-awaited click handler (unhandled rejection); now caught.
+
+## Lane E - reset dialog and Demand leftover state (2026-10-18, PRD 1.29.2)
+
+From the never-reviewed audit, Area 2 (S-1 to S-5). Product change, no headcount effect.
+
+| Item | Result |
+|---|---|
+| S-1 dialog semantics | Fixed: alertdialog, aria-modal, labelled/described, focus to Cancel, Tab trapped, Escape cancels, focus returned, aria-label Close |
+| S-2 wording | Fixed: "unsaved sizing runs" removed; Sensitivity matrix listed; "Export JSON saves settings only"; upload/sample variant says the new data loads after confirming |
+| S-3 leftover state | Fixed: Demand screen remounts on confirmed Reset (`resetEpoch`); a staged backlog CSV cannot be applied afterwards (browser-proved) |
+| S-4 Sidebar | Fixed: aria-current, aria-expanded, ON/OFF label. Not changed: first-tab jump when clicking the active flow, 9-10 px text contrast (not measured) |
+| S-5 Import tooltip | Fixed: says it replaces the current settings |
+| Open, out of scope | SimulationProgressModal has the same missing dialog semantics |
+
+Tests: suite D89 (26 checks), red first (helper missing, markup absent), green after. Browser (file://, headless): see report.

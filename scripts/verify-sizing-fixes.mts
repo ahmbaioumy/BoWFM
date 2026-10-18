@@ -8650,6 +8650,47 @@ console.log('\n--- Suite D87: import validator, calendar guards, crash/leave/Sen
   }
 }
 
+// ---------------------------------------------------------------
+// Suite D89 — Lane E reset dialog: wording by trigger, dialog accessibility, DemandFlow remount on reset,
+// Sidebar state cues. Fail-first: the helper getResetDialogContent did not exist before.
+// ---------------------------------------------------------------
+console.log('\n--- Suite D89: reset dialog wording/a11y, DemandFlow remount, Sidebar cues ---');
+{
+  const root89 = resolve(import.meta.dirname, '..');
+  const src89 = (p: string) => (existsSync(join(root89, p)) ? readFileSync(join(root89, p), 'utf8').replace(/\r\n/g, '\n') : '');
+  let content89: ((t: string) => any) | undefined;
+  try { content89 = ((await import('../src/components/ResetConfirmModal')) as any).getResetDialogContent; } catch { content89 = undefined; }
+  assert(typeof content89 === 'function', 'D89.a0 getResetDialogContent is exported from ResetConfirmModal.tsx');
+  if (typeof content89 === 'function') {
+    const r = content89('reset'), u = content89('upload'), s = content89('sample');
+    const all = (c: any) => JSON.stringify(c);
+    for (const [k, c] of [['reset', r], ['upload', u], ['sample', s]] as const) {
+      assert(!/unsaved/i.test(all(c)), `D89.a1 ${k}: no "unsaved sizing runs" wording`, all(c));
+      assert(c.items.some((i: string) => /sensitivity/i.test(i)), `D89.a2 ${k}: item list includes the Sensitivity matrix`);
+      assert(/Export JSON/.test(c.exportNote) && /settings only/i.test(c.exportNote) && /not (the )?data/i.test(c.exportNote) && /results/i.test(c.exportNote), `D89.a3 ${k}: says Export JSON saves settings only, not data or results`, c.exportNote);
+    }
+    assert(r.title === 'Reset All Data & Parameters' && r.confirmLabel === 'Yes, Reset Everything' && r.afterNote === null, 'D89.b1 plain reset keeps its title/button and has no "new file loads" note');
+    assert(/Load new data/.test(u.title) && /replaces everything/i.test(u.title + u.body), 'D89.b2 upload: title says Load new data and that it replaces everything', u.title);
+    assert(/Load new data/.test(s.title) && /replaces everything/i.test(s.title + s.body), 'D89.b3 sample: title says Load new data and that it replaces everything', s.title);
+    assert(/new file/i.test(u.afterNote ?? '') && /after you confirm/i.test(u.afterNote ?? ''), 'D89.b4 upload: says the new file loads after confirming', String(u.afterNote));
+    assert(/sample/i.test(s.afterNote ?? '') && /after you confirm/i.test(s.afterNote ?? ''), 'D89.b5 sample: says the sample loads after confirming', String(s.afterNote));
+    assert(/Cancel/.test(u.afterNote ?? '') && /Cancel/.test(s.afterNote ?? ''), 'D89.b6 upload/sample: says Cancel keeps current work and drops the pick');
+    assert(u.confirmLabel !== r.confirmLabel && /Replace|Load/.test(u.confirmLabel), 'D89.b7 upload confirm button names the action', u.confirmLabel);
+  }
+  const modal89 = src89('src/components/ResetConfirmModal.tsx');
+  assert(/role="alertdialog"/.test(modal89) && /aria-modal="true"/.test(modal89) && /aria-labelledby=/.test(modal89) && /aria-describedby=/.test(modal89), 'D89.c1 dialog has alertdialog role, aria-modal, labelledby and describedby');
+  assert(/aria-label="Close"/.test(modal89), 'D89.c2 icon close button has aria-label="Close"');
+  assert(/key !== 'Tab'/.test(modal89) && /\.focus\(\)/.test(modal89) && /key === 'Escape'/.test(modal89), 'D89.c3 Tab is trapped, focus is moved in, Escape cancels');
+  assert(/document\.activeElement/.test(modal89) && /isConnected/.test(modal89), 'D89.c4 focus is remembered on open and returned to the trigger on close');
+  const app89 = src89('src/App.tsx');
+  assert(/<React\.Fragment key=\{resetEpoch\}>\s*<DemandFlow\b/.test(app89) && /setResetEpoch\(/.test(app89), 'D89.d1 DemandFlow is keyed on a reset counter bumped by handleConfirmResetAll (staged backlog CSV is cleared)');
+  assert(/trigger=\{/.test(app89), 'D89.d2 App passes the pending-action trigger to the modal');
+  const side89 = src89('src/components/Sidebar.tsx');
+  assert(/aria-current=\{isActive \? 'page' : undefined\}/.test(side89) && /aria-current=\{isTabActive \? 'page' : undefined\}/.test(side89), 'D89.e1 active flow and active tab carry aria-current');
+  assert(!/'OPEN' : 'HIDE'/.test(side89) && /aria-expanded=\{paramsPanelOpen\}/.test(side89), 'D89.e2 inspector toggle label matches state (no OPEN/HIDE mismatch) and has aria-expanded');
+  assert(/title="Import[^"]*replaces[^"]*"/i.test(side89), 'D89.e3 Import JSON tooltip says it replaces current settings');
+}
+
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');
