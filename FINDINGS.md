@@ -1572,3 +1572,10 @@ Tests: suite D89 (26 checks), red first (helper missing, markup absent), green a
 - Resolved the backlog items above: "1,000" as 1.0 / no upper cap / inputMode (backlog form); "Primary-Driven" progress text; "Unfinished by horizon end" strings (export-rows.ts, hc-search.ts x2); cap-cut rows labelled "deadline missed".
 - Tests: suite D90 (33 checks), red first (14 failing: reason missing, two helper files absent, old strings present), green after. No existing test pinned the old strings; `verify-agent-analytics.mts` call updated for the new `buildBreachExportRows` argument.
 - Still open (minor): hint text size; value >= AHT shown plain without a note; "1.000" is read as 1 (documented, a dot is always decimal).
+
+## Screen polish (branch polish-screens, PRD 1.29.4, 2026-10-18)
+- Agent table on a pooled run: dead "Pooled" filter option removed (real case categories only; a case category named "Pooled" stays); full note shown once (header + export), chart shows a short pointer; masked headers "Busy (<category>, min)" / "Idle (all work, min)" and subtitle; export column names unchanged on purpose.
+- Reset dialog: `keepHint` for Upload/sample, heading "Will be cleared:" (plain Reset keeps "Items to be reset:"). Progress modal: labelled modal dialog, focus on title, Tab trapped, Escape ignored while running, = View Results when finished, focus returns to the opener. Closes the "Open, out of scope" line of Lane E.
+- "1.000"/"2.500": owner decision (a) warn only: value kept, hint "Did you mean 1000? A dot is read as a decimal point.". File import not changed (reads "1.000" as 1 in a comma-delimited file); noted in docs/wfm/07.
+- Tests: suite D91 (36 checks), red first (16 failing), green after. No existing test needed re-pinning.
+- Browser proof of the progress modal (file://, headless Chrome, 0 console errors): role=dialog + aria-modal + label; focus on open = title (H3), not Stop; Tab, Tab, Shift+Tab all stay on Stop; Escape while running leaves the dialog open and the search running; after finish focus is on View Results and Escape then opens Results; pressing Stop closes the dialog and focus returns to the Run button.
