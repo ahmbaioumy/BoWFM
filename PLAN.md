@@ -2416,3 +2416,24 @@ Fix in `docs/wfm/*`: (1) Gross HC is `round(sum + 1e-9)` not `ceil` (04:86,90,92
 4. Sidebar minors: inspector toggle label matches state; `aria-current` on active flow/tab; Import JSON tooltip says it replaces current settings.
 - Tests: a pure helper for dialog text by trigger (D89) if extracted; otherwise browser proof. Browser: keyboard-only reset flow (Tab/Escape/Enter), focus trap, upload-triggered wording, staged backlog cleared after Reset, samples 31/40, 28/35, 31/39, 0 console errors.
 - Scope: `src/components/ResetConfirmModal.tsx`, `src/components/Sidebar.tsx`, `src/components/DemandFlow.tsx`, `src/App.tsx` (key/trigger prop only), `scripts/verify-sizing-fixes.mts` (D89), `PRD.md`, `project_context.md`, `FINDINGS.md`, `BoWFM.html` at merge. Reviewers: tester + user-side.
+
+---
+
+# BUILD PLAN — input safety + results wording (backlog), 2026-10-18. Branch `polish-input-wording`. Tier 2 (no headcount change).
+
+## A. Manual backlog "Remaining Work" input (`src/utils/wip-row.ts` parseRemainingText, `src/components/DemandFlow.tsx`)
+1. "1,000" / "2,500" (comma followed by exactly three digits) → invalid (amber message), not 1.0 / 2.5. A single comma decimal like "12,5" stays valid.
+2. Upper cap = the file-import cap `WIP_MAX_REMAINING_MINUTES` (100000, `wip-import.ts`) — reuse the constant; above it → invalid with message "more than 100,000 minutes".
+3. `inputMode="decimal"` instead of `"numeric"`.
+4. Tests D90 (fail-first): "1,000", "2,500", "12,5", "100001", "100000", "99999.5".
+
+## B. Results wording
+1. Unfinished reason strings "Unfinished by horizon end" → "Not finished by end of simulation (deadline missed)" in `src/utils/export-rows.ts:~49` and `src/utils/hc-search.ts:~3799, ~4762` (string change only — no logic), matching the on-screen label.
+2. When `drainCapped === true`, a case cut at the 366-day cap before its deadline is labelled "Not finished — simulation stopped at the 366-day limit before its deadline" (screen row label in `ResultsFlow.tsx` and export reason), not "deadline missed". Determine per case: unfinished AND primaryDeadline > simulation end.
+3. Run-progress text "Primary-Driven: N with 95% CI" (find source: RunFlow / hc-search progress callback) names the binding constraint: e.g. "Answer-time-driven" when the ASA gate binds, consistent with Results' binding label; if the binding constraint is not known during the search, use neutral wording "Candidate N passes all targets (95% CI)".
+4. Tests in D90: export reason strings; drainCapped label helper; progress wording helper (extract pure helpers where needed). Any existing test pinning the old strings: update with reason.
+
+## Scope
+`src/utils/wip-row.ts`, `src/components/DemandFlow.tsx`, `src/utils/export-rows.ts`, `src/utils/hc-search.ts` (strings / progress text only), `src/components/ResultsFlow.tsx`, `src/components/RunFlow.tsx` (if progress text lives there), `scripts/verify-sizing-fixes.mts` (D90 + string re-pins), `scripts/verify-*.mts` only for old-string re-pins, `PRD.md` (1.29.3), `project_context.md`, `FINDINGS.md`, `BoWFM.html`.
+## Proof
+D90 red→green; full `npm test` once; browser: type "1,000" → amber; samples 31/40, 28/35, 31/39 unchanged; breach export wording; 0 console errors; check:artifact.
