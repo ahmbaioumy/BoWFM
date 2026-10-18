@@ -2443,3 +2443,33 @@ Q1. **B3:** M ("Primary-Driven: M") stays labelled as the primary-SLA-only headc
 Q2. **B2:** cap-cut check derived, no new type field: `isCapCut(case, result) = result.drainCapped === true && !completed && Number.isFinite(case.primaryDeadline) && case.primaryDeadline > result.horizonEnd + 366 days` (helper beside `computeDrainEnd` semantics, exported from a util used by export-rows and ResultsFlow; constant shared with des-engine, not duplicated — import the existing cap constant if exported, else export it). Under-cap unfinished rows keep "deadline missed". `buildBreachExportRows` gets the result context as a new parameter (all callers updated). Confirm overdue-at-start rows are excluded by the caller as today.
 Q3. **A1:** `parseRemainingText` returns `{ value, invalid, reason? }` with reason ∈ {'format', 'thousands', 'over_cap'}; DemandFlow shows a reason-specific amber message: format → existing text; thousands → "Looks like a thousands separator — type 1000 without the comma."; over_cap → "More than 100,000 minutes — this row will use the full handling time." (same Add behaviour as today: invalid → row added at full handling time). "1.000" stays 1 (documented); "100,000" → 'thousands'.
 Q4. Scope adds `src/utils/staffing-summary.ts` (new), the cap-cut util location, `docs/wfm/07-known-defects-and-decisions.md` (resolve the backlog line), PRD §11 entries resolved. `inputMode="decimal"` kept as planned (text input stays).
+
+---
+
+# BUILD PLAN — screen polish round (agent table + reset dialog + "1.000"), 2026-10-18. Branch `polish-screens`. Tier 1/2, no headcount change.
+
+## A. Agent table (pooled run)
+1. Hide the dead "Pooled" option from the category filter dropdown on pooled runs (`AgentAnalyticsPanel.tsx` ~:354, `agent-analytics.ts` categories list ~:233-250); real case categories only. If a stale selection equals 'Pooled', fall back to "All categories".
+2. Show the masked-filter note once (header), the chart panel shows only a short "Not shown while a category is selected on a pooled team — see note above."
+3. While masked, column headers read "Busy (<category>, min)" and "Idle (all work, min)".
+4. Panel subtitle while masked: "Per-agent workload for the selected category" (no "occupancy and utilisation").
+## B. Reset dialog (`ResetConfirmModal.tsx` getResetDialogContent)
+1. Upload/sample variants: export hint becomes "To keep your settings: Cancel, use Export JSON, then load the file again."
+2. List heading: "Will be cleared:" for all variants.
+3. `SimulationProgressModal`: `role="dialog"`, `aria-modal`, `aria-labelledby`, focus on its Cancel/Stop button, Escape = same as Cancel (only if a cancel action exists).
+## C. Backlog input "1.000"
+1. `parseRemainingText`: a dot followed by exactly three digits and no other decimals ("1.000", "2.500") → reason 'thousands' (same message as "1,000"); "12.5", "0.125"? → define: only when integer part 1–3 digits and exactly 3 fraction digits all forming a thousands pattern; "0.125" stays valid (leading 0). Document.
+## Tests
+D91 (fail-first): pooled categories exclude 'Pooled'; masked header/subtitle helper text; dialog content strings per trigger; progress modal markup (source grep); parseRemainingText "1.000"/"2.500" → thousands, "0.125"/"12.5" valid. Existing AA/D89/D90 checks that pin old strings updated with reason.
+## Proof
+Full `npm test` once; browser: pooled filter list, masked headers, single note; dialog texts; progress modal keyboard (Tab/Escape); "1.000" warning; samples 31/40, 28/35, 31/39; 0 console errors; check:artifact.
+## Scope
+`src/components/AgentAnalyticsPanel.tsx`, `src/utils/agent-analytics.ts`, `src/components/ResetConfirmModal.tsx`, `src/components/SimulationProgressModal.tsx`, `src/utils/wip-row.ts`, `src/components/DemandFlow.tsx` (message only if needed), `scripts/verify-sizing-fixes.mts` (D91 + re-pins), `scripts/verify-agent-analytics.mts` (re-pins), `PRD.md` (1.29.4), `project_context.md`, `docs/wfm/07`, `FINDINGS.md`, `BoWFM.html`.
+
+## Screen polish — amendments after challenge (2026-10-18). OVERRIDE the text above.
+R1. **A1:** remove only the synthetic agent label 'Pooled' from the dropdown, inside `computeAgentAnalytics` when building `categories` (agent fallbacks ~:246/:248); a real case category literally named "Pooled" stays. Masked predicate, POOLED_CATEGORY, compute filter untouched; AA.48 unchanged. Check siloed runs whose agents span categories still offer every real category.
+R2. **A2:** POOLED_FILTER_NOTE unchanged (header + export); only the chart body/aria-label shortened.
+R3. **A3:** screen headers renamed while masked; export column names unchanged (deliberate; documented). Subtitle masked branch.
+R4. **B1:** new `keepHint` field (exportNote kept, D89.a3 intact): "To keep your settings: Cancel, Export JSON, load the file (or sample), then Import JSON." Heading stays "Items to be reset:" for reset, "Will be cleared:" for upload/sample (pinned in D91).
+R5. **B3 progress modal:** role=dialog, aria-modal, aria-labelledby; focus trap; default focus on a safe element (the dialog title / "View Results" once finished) — never on Stop; Escape does nothing while running (no unconfirmed stop); after finish Escape = View Results only if that is non-destructive; focus returns to the Run button; hooks above the early return. Browser-tested behaviour, not only source grep.
+R6. **C "1.000": OWNER DECISION** — options: (a) warn only (value kept, hint "Did you mean 1000? A dot is read as a decimal point."); (b) hard reject only "N.000" (all-zero fraction); (c) leave as is. Recommended (a). Message names the separator correctly. Note in docs/wfm/07 that file import reads "1.000" as 1.
