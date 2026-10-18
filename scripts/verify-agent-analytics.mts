@@ -89,7 +89,7 @@ console.log('\n--- Suite EX: export timestamps match the screen ---');
   assert(des.caseResults.length > 100 && mismatches === 0, `EX.6 all ${des.caseResults.length} exported case rows match the screen formatter`, `${mismatches} mismatches`);
   const sample = des.caseResults[0];
   assert(caseRows[0]['Arrival Time'] === formatDateTime24(sample.arrival) && !String(caseRows[0]['Arrival Time']).includes('Z'), `EX.6b case ${sample.caseId}: export "${caseRows[0]['Arrival Time']}" == screen "${formatDateTime24(sample.arrival)}" (UTC would be ${sample.arrival.toISOString()})`);
-  const breachRows = buildBreachExportRows(des.caseResults.slice(0, 50));
+  const breachRows = buildBreachExportRows(des.caseResults.slice(0, 50), des);
   assert(breachRows.every((r, i) => r['Arrival Time'] === formatDateTime24(des.caseResults[i].arrival)), 'EX.7 breach export uses the same formatter');
   const sliceRows = buildSliceExportRows(des.agentTimeline.slice(0, 500), 10);
   assert(sliceRows.every((r, i) => r.From === formatDateTime24(des.agentTimeline[i].from) && r.To === formatDateTime24(des.agentTimeline[i].to) && !('From ISO' in r)), 'EX.8 slice export From/To == screen formatter; UTC "ISO" columns removed');

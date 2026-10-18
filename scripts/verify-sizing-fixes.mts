@@ -8691,6 +8691,81 @@ console.log('\n--- Suite D89: reset dialog wording/a11y, DemandFlow remount, Sid
   assert(/title="Import[^"]*replaces[^"]*"/i.test(side89), 'D89.e3 Import JSON tooltip says it replaces current settings');
 }
 
+// ---------------------------------------------------------------
+// Suite D90 — input safety + results wording: manual backlog "Remaining Work" parsing (thousands separator,
+// 100,000 cap, reasons), breach reason strings (incl. 366-day cap cut), shared staffing line.
+// Fail-first: parseRemainingText had no reason, breach-reason.ts and staffing-summary.ts did not exist.
+// ---------------------------------------------------------------
+console.log('\n--- Suite D90: backlog input safety + results wording ---');
+{
+  const root90 = resolve(import.meta.dirname, '..');
+  const src90 = (p: string) => (existsSync(join(root90, p)) ? readFileSync(join(root90, p), 'utf8').replace(/\r\n/g, '\n') : '');
+  const { parseRemainingText } = await import('../src/utils/wip-row');
+  const P = (t: string) => parseRemainingText(t) as { value: number | undefined; invalid: boolean; reason?: string };
+  assert(P('1,000').invalid === true && P('1,000').reason === 'thousands' && P('1,000').value === undefined, 'D90.a1 "1,000" is invalid with reason thousands (not 1.0)', JSON.stringify(P('1,000')));
+  assert(P('2,500').invalid === true && P('2,500').reason === 'thousands', 'D90.a2 "2,500" is invalid with reason thousands (not 2.5)', JSON.stringify(P('2,500')));
+  assert(P('100,000').reason === 'thousands', 'D90.a2b "100,000" is reason thousands', JSON.stringify(P('100,000')));
+  assert(P('12,5').invalid === false && P('12,5').value === 12.5, 'D90.a3 "12,5" stays valid 12.5', JSON.stringify(P('12,5')));
+  assert(P('100001').invalid === true && P('100001').reason === 'over_cap' && P('100001').value === undefined, 'D90.a4 "100001" is invalid, reason over_cap', JSON.stringify(P('100001')));
+  assert(P('100000').invalid === false && P('100000').value === 100000, 'D90.a5 "100000" is valid (cap inclusive)', JSON.stringify(P('100000')));
+  assert(P('99999.5').invalid === false && P('99999.5').value === 99999.5, 'D90.a6 "99999.5" is valid', JSON.stringify(P('99999.5')));
+  assert(P('1.000').invalid === false && P('1.000').value === 1, 'D90.a7 "1.000" stays 1 (documented)', JSON.stringify(P('1.000')));
+  assert(P('abc').reason === 'format' && P('0').reason === 'format' && P('-5').reason === 'format', 'D90.a8 text/zero/negative keep reason format');
+  assert(P('').invalid === false && P('').value === undefined && P('').reason === undefined, 'D90.a9 blank is not invalid');
+  const imp90 = await import('../src/utils/wip-import');
+  assert(/WIP_MAX_REMAINING_MINUTES/.test(src90('src/utils/wip-row.ts')) && imp90.WIP_MAX_REMAINING_MINUTES === 100000, 'D90.a10 manual cap reuses WIP_MAX_REMAINING_MINUTES (100000)');
+  const dem90 = src90('src/components/DemandFlow.tsx');
+  assert(/inputMode="decimal"/.test(dem90) && !/inputMode="numeric"[\s\S]{0,80}Blank = full/.test(dem90), 'D90.a11 Remaining Work input uses inputMode decimal');
+  assert(/thousands separator/.test(dem90) && /More than 100,000 minutes/.test(dem90), 'D90.a12 DemandFlow shows reason-specific thousands and over-cap messages');
+
+  // B2: breach reasons
+  let br90: any; try { br90 = await import('../src/utils/breach-reason'); } catch { br90 = undefined; }
+  assert(!!br90 && typeof br90.breachReason === 'function' && typeof br90.isCapCut === 'function', 'D90.b0 breach-reason util exports breachReason and isCapCut');
+  if (br90) {
+    const hEnd = new Date('2026-01-31T17:00:00Z');
+    const day = 86400000;
+    const mk = (done: boolean, dl: Date) => ({ isCompleted: done, primaryDeadline: dl }) as any;
+    const resCap = { drainCapped: true, horizonEnd: hEnd } as any;
+    const resNo = { horizonEnd: hEnd } as any;
+    const far = new Date(hEnd.getTime() + 400 * day);
+    const near = new Date(hEnd.getTime() + 5 * day);
+    assert(br90.breachReason(mk(true, near), resCap) === 'Completed after primary deadline', 'D90.b1 completed late keeps its reason');
+    assert(br90.breachReason(mk(false, near), resNo) === 'Not finished by end of simulation (deadline missed)', 'D90.b2 unfinished under the cap says deadline missed');
+    assert(br90.breachReason(mk(false, near), resCap) === 'Not finished by end of simulation (deadline missed)', 'D90.b3 capped run but deadline within cap still says deadline missed');
+    assert(br90.breachReason(mk(false, far), resCap) === 'Not finished — simulation stopped at the 366-day limit before its deadline', 'D90.b4 capped run, deadline beyond cap: stopped-at-limit wording');
+    assert(br90.breachReason(mk(false, far), resNo) === 'Not finished by end of simulation (deadline missed)', 'D90.b5 no drainCapped flag: never the cap wording');
+    assert(br90.breachReason(mk(true, far), resCap) === 'Completed after primary deadline', 'D90.b6 a completed case is never cap-cut');
+    assert(br90.isCapCut(mk(false, new Date(NaN)), resCap) === false, 'D90.b7 non-finite deadline is not cap-cut');
+    const { buildBreachExportRows } = await import('../src/utils/export-rows');
+    const row = (buildBreachExportRows as any)([{ ...mk(false, far), caseId: 'X', category: 'c', arrival: near, latestSafeStart: near, firstStartTime: null, completeTime: null, parkCount: 0 }], resCap)[0];
+    assert(row['Breach Reason'] === 'Not finished — simulation stopped at the 366-day limit before its deadline', 'D90.b8 breach export uses the cap-cut wording', String(row['Breach Reason']));
+    const row2 = (buildBreachExportRows as any)([{ ...mk(false, near), caseId: 'Y', category: 'c', arrival: near, latestSafeStart: near, firstStartTime: null, completeTime: null, parkCount: 0 }], resNo)[0];
+    assert(row2['Breach Reason'] === 'Not finished by end of simulation (deadline missed)', 'D90.b9 breach export unfinished wording matches the screen', String(row2['Breach Reason']));
+  }
+  const allSrc90 = ['src/utils/export-rows.ts', 'src/utils/hc-search.ts', 'src/components/ResultsFlow.tsx'].map(src90).join('\n');
+  assert(!/Unfinished by horizon end/.test(allSrc90), 'D90.b10 old "Unfinished by horizon end" string is gone from src');
+  const res90 = src90('src/components/ResultsFlow.tsx');
+  assert(/breachReason\(/.test(res90) && /breachReason\(/.test(src90('src/utils/export-rows.ts')) && (src90('src/utils/hc-search.ts').match(/breachReason\(/g) || []).length >= 2, 'D90.b11 Results, export and both searches use the one breachReason helper');
+
+  // B3: staffing line
+  let ss90: any; try { ss90 = await import('../src/utils/staffing-summary'); } catch { ss90 = undefined; }
+  assert(!!ss90 && typeof ss90.buildStaffingLine === 'function', 'D90.c0 staffing-summary util exports buildStaffingLine');
+  if (ss90) {
+    // primaryDrivenHC is the primary-loop result under ALL targets (= the recommendation in every feasible run),
+    // so the line must not claim "the primary SLA alone needs M" (found in the browser: support + 60 min answer time).
+    const l1 = ss90.buildStaffingLine({ recommendedN: 31, primaryDrivenHC: 31, bindingDescription: 'Backoffice ASA Target (≤ 30 min)' });
+    assert(l1 === 'Optimal Staffing: 31 Operational HC (binding: Backoffice ASA Target (≤ 30 min)).', 'D90.c1 line names the binding constraint and does not claim the primary SLA alone decided it', l1);
+    assert(!/Primary-Driven/.test(l1) && !/primary SLA alone/.test(l1), 'D90.c2 old "Primary-Driven" wording and the false "primary SLA alone needs" claim are absent');
+    const l2 = ss90.buildStaffingLine({ recommendedN: 31, primaryDrivenHC: 31, bindingDescription: undefined });
+    assert(l2 === 'Optimal Staffing: 31 Operational HC.', 'D90.c3 no binding text -> no parenthesis', l2);
+    const l3 = ss90.buildStaffingLine({ recommendedN: 31, primaryDrivenHC: 28, bindingDescription: 'X' });
+    assert(l3 === 'Optimal Staffing: 31 Operational HC (primary search result 28; binding: X).', 'D90.c3b a differing primary-loop value is still shown, labelled neutrally', l3);
+  }
+  assert(/buildStaffingLine\(/.test(res90) && /buildStaffingLine\(/.test(src90('src/utils/hc-search.ts')), 'D90.c4 Results and the async search final message both call buildStaffingLine');
+  assert(!/primary SLA alone needs/.test(res90 + src90('src/utils/hc-search.ts')), 'D90.c6 no progress or Results text claims the primary SLA alone needs M (hc-search audit-phase message included)');
+  assert(!/Primary-Driven:/.test(res90 + src90('src/utils/hc-search.ts')), 'D90.c5 no hand-built "Primary-Driven:" text left');
+}
+
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');

@@ -8,6 +8,7 @@
  */
 import type { CategoryConfig, OpeningWIPCase } from '../types/wfm';
 import { categoryKey } from './csv-parser';
+import { WIP_MAX_REMAINING_MINUTES } from './wip-import';
 
 /** Same fallback handling time the engine and the data-quality workload check use for an unknown category. */
 const UNKNOWN_CATEGORY_AHT_MINUTES = 30;
@@ -51,11 +52,21 @@ export function totalPendingWorkMinutes(wip: ReadonlyArray<OpeningWIPCase>, cate
  * Raw typed text -> stored value. Strict decimal only (comma accepted as decimal separator).
  * Blank -> not set (not invalid). 0, negative, text, exponent, multiple dots -> not set AND invalid.
  */
-export function parseRemainingText(text: string): { value: number | undefined; invalid: boolean } {
+export type RemainingInvalidReason = 'format' | 'thousands' | 'over_cap';
+
+/**
+ * Also rejected: a comma followed by exactly three digits ("1,000" -> reason 'thousands': read as 1.0 it would
+ * silently undercount) and anything above the file-import cap WIP_MAX_REMAINING_MINUTES ('over_cap').
+ * A dot is always a decimal point, so "1.000" is 1. Invalid rows are still added at full handling time.
+ */
+export function parseRemainingText(text: string): { value: number | undefined; invalid: boolean; reason?: RemainingInvalidReason } {
   if (text.trim() === '') return { value: undefined, invalid: false };
-  if (!/^\s*\d+([.,]\d+)?\s*$/.test(text)) return { value: undefined, invalid: true };
+  if (!/^\s*\d+([.,]\d+)?\s*$/.test(text)) return { value: undefined, invalid: true, reason: 'format' };
+  if (/^\s*\d+,\d{3}\s*$/.test(text)) return { value: undefined, invalid: true, reason: 'thousands' };
   const n = Number(text.trim().replace(',', '.'));
-  return Number.isFinite(n) && n > 0 ? { value: n, invalid: false } : { value: undefined, invalid: true };
+  if (!(Number.isFinite(n) && n > 0)) return { value: undefined, invalid: true, reason: 'format' };
+  if (n > WIP_MAX_REMAINING_MINUTES) return { value: undefined, invalid: true, reason: 'over_cap' };
+  return { value: n, invalid: false };
 }
 
 /** Table label: "full (35m)" when blank, "10m (in progress)" when below the category handling time, else "Nm". */
