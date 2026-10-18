@@ -27,7 +27,9 @@ looks flat.
   monthly (billing cycles, month-end), weekly (Monday peaks), intraday.
 - **Special events** — campaigns, outages, regulatory deadlines, price changes. These are
   *known* and should be added explicitly, not left for the model to discover.
-- **Noise** — irreducible random variation. This is what the DES replications sample.
+- **Noise** — irreducible random variation. The DES replications sample arrival *timing*
+  within each interval; arrival *counts* equal the forecast unless the opt-in Volume
+  Variability switch is on (then counts are random too, see `06-simulation-des.md`).
 
 ### Deferred demand differs from real-time demand
 

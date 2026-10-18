@@ -3,17 +3,21 @@
 Changes audited: Workload Floor toggle (FR-5.13), clock-start derivation (FR-5.2), roster polish
 (Stage 3b). Inputs: `test_files/*.csv`, app defaults (pooled, 08:00–18:00 Mon–Fri, 7.5h shift,
 6h / 80% SLA, seed 12345, R=30). Before = frozen snapshot of `main` @ 50d2745
-(`sample-hc-baseline-2026-09-30.jsonl`); after = this branch (`sample-hc-after-2026-09-30.jsonl`).
+(`sample-hc-baseline-2026-09-30.jsonl`); after = this branch (`sample-hc-after-2026-09-30.jsonl`; superseded as the regression baseline by `sample-hc-after-2026-10-15.jsonl`).
 Regenerate: `npx tsx scripts/audit-sample-hc.mts <out.jsonl> <csv> BA,BN,WA,WN,PON,FOFF`.
-Guard: `npm run test:audit` re-runs all 24 cells and fails on any difference from the after file
+Guard: `npm run test:audit` re-runs all 24 cells and fails on any difference from `sample-hc-after-2026-10-15.jsonl`
 (options `--jobs`, `--files`, `--cells`); suite D49 in `npm test` pins AJM_Only on every run.
-Known difference (2026-10-08, 1.21.0, P2-9): since 1.21.0 the baseline `docs/audit/sample-hc-after-2026-09-30.jsonl` differs in the 4 infeasible Wall Clock + Arrival (WA) cells, `slaPct` only (AJM_Only 46 -> 32.6, AJM_Simu 45.4 -> 30.2, EGS_Only - With Reduction 45.3 -> 29.9, EGS_Only 45.4 -> 29.8), because the failing uniform audit run now has a shift end. The baseline has not been regenerated pending owner approval, so `npm run test:audit` exits 1 on those 4 cells; no recommended headcount differs. Re-run 2026-10-08 after 1.22.0 (P1-6, rescue ladder): the same 4 WA cells differ by the same `slaPct` values and nothing else; all 4 Shift-Placement-ON (PON) cells are identical to the baseline (AJM_Only 16 kept_current_failed_gate, AJM_Simu 123 / EGS_Only - With Reduction 80 / EGS_Only 100 adopted_partial, same SLA and tail), i.e. the ladder moved no audit cell (20/24 identical, exit 1 from the 4 WA cells only; about 1 h with 6 parallel jobs).
+Baseline regenerated 2026-10-15 (HEAD 33228ef, tests only, owner-approved): 16 of 24 cells were unchanged; the 4 infeasible Wall Clock + Arrival (WA) cells differ in `slaPct` only (AJM_Only 46 -> 32.6, AJM_Simu 45.4 -> 30.2, EGS_Only - With Reduction 45.3 -> 29.9, EGS_Only 45.4 -> 29.8) from the shift end on failing uniform runs (1.21.0, P2-9, e2a6dda); the 4 Wall Clock + Next Open (WN) cells changed because the spread layout (1.24.x item 1, L28 / P1-9, bd2a20a) now repairs the coverage-repair roster (Req HC / Gross HC AJM_Only 22 / 28 -> 20 / 25, AJM_Simu 178 / 223 -> 151 / 189, EGS_Only - With Reduction 111 / 139 -> 95 / 119, EGS_Only 140 / 175 -> 119 / 149; roster 0:N-1 150:1 -> about half at 0 and half at 150; min coverage 1 -> 10 / 75 / 47 / 59). The old file `sample-hc-after-2026-09-30.jsonl` is kept. `npm run test:audit` now passes against `docs/audit/sample-hc-after-2026-10-15.jsonl`.
 
 Cells: BA/BN = Business Time + Arrival / Next Open · WA/WN = Wall Clock + Arrival / Next Open ·
 PON = placement ON · FOFF = Workload Floor OFF (compared with BA). "Tail" = agents on shift in
 the last half-hour (17:30).
 
-## Verdict
+## Verdict (2026-09-30 comparison, historical)
+
+> This Verdict and the Detail table below describe the original 2026-09-30 before/after
+> comparison and are kept as a record. The current regression baseline is
+> `sample-hc-after-2026-10-15.jsonl` (see the header above for what changed).
 - **Default settings: zero change** — every field (N_min, N_occ, Req HC, Gross HC, binding, SLA,
   occupancy, min coverage) identical in all 16 non-placement cells.
 - **Clock wiring:** Business + Arrival = Business + Next Open on every file (now forced to Next Open);
@@ -24,7 +28,7 @@ the last half-hour (17:30).
   agents on three files (SLA −0.1 to −0.2 pt, still passing the CI gate); AJM_Only kept as is —
   moving one agent later drops category Tech HVC below its 80% CI target.
 
-## Detail
+## Detail (2026-09-30 comparison, historical)
 
 | File | Cell | Req HC | Gross HC | SLA % | Tail | Roster polish | Fields changed |
 |---|---|---|---|---|---|---|---|

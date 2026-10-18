@@ -637,6 +637,7 @@ export function ConfigFlow({
                         primaryWindowMinutes: primaryWinMin,
                         boAsaTarget: sla.boAsaTarget,
                         boAsaUnit: sla.boAsaUnit,
+                        boAsaOwn: false,
                       }))
                     );
                   }}
@@ -733,6 +734,11 @@ export function ConfigFlow({
                   <p className="text-[11px] text-slate-500">
                     Each identified category has its own distinct Primary % target, Primary window, Absolute 100% window{sla.boAsaEnabled ? ', and BO ASA target' : ''}.
                   </p>
+                  {sla.boAsaEnabled && (
+                    <p className="text-[11px] text-purple-700" data-testid="asa-own-rule">
+                      Each category must meet its answer-time target on its own (its own target if ticked, otherwise the global target).
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -757,6 +763,7 @@ export function ConfigFlow({
                         const targetPct = c.primaryPct !== undefined ? c.primaryPct : sla.primaryPct;
                         const priWinVal = c.primaryWindow !== undefined ? c.primaryWindow : (c.primaryWindowMinutes ? c.primaryWindowMinutes / 60 : sla.primaryWindow);
                         const priUnit = c.primaryUnit || 'hours';
+                        const asaOwn = c.boAsaOwn === true;
                         const asaTargetVal = c.boAsaTarget !== undefined ? c.boAsaTarget : sla.boAsaTarget;
                         const asaUnit = c.boAsaUnit || sla.boAsaUnit;
 
@@ -832,6 +839,31 @@ export function ConfigFlow({
                             {/* BO ASA Target (Conditional) */}
                             {sla.boAsaEnabled && (
                               <td className="py-2.5 px-3">
+                                <label className="mb-1 inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-700 cursor-pointer" title="Ticking without changing the value has no effect: the category is then held to the same number as the global target.">
+                                  <input
+                                    type="checkbox"
+                                    checked={asaOwn}
+                                    data-testid={`asa-own-${c.id}`}
+                                    onChange={(e) => {
+                                      const on = e.target.checked;
+                                      onUpdateCategories(
+                                        categories.map((cat) =>
+                                          cat.id === c.id
+                                            ? { ...cat, boAsaOwn: on, boAsaTarget: sla.boAsaTarget, boAsaUnit: sla.boAsaUnit }
+                                            : cat
+                                        )
+                                      );
+                                    }}
+                                  />
+                                  Own target
+                                </label>
+                                {!asaOwn && (
+                                  <div className="flex items-center gap-1.5 text-[11px] font-mono text-slate-400" data-testid={`asa-follows-${c.id}`}>
+                                    <span>≤ {sla.boAsaTarget} {sla.boAsaUnit}</span>
+                                    <span className="font-sans italic">follows global</span>
+                                  </div>
+                                )}
+                                {asaOwn && (
                                 <div className="flex items-center gap-1.5">
                                   <span className="text-slate-400">≤</span>
                                   <NumberField
@@ -868,6 +900,7 @@ export function ConfigFlow({
                                     <option value="days">Days</option>
                                   </select>
                                 </div>
+                                )}
                               </td>
                             )}
 
@@ -1151,6 +1184,38 @@ export function ConfigFlow({
                 </span>
               </div>
             </div>
+            {/* Volume variability (Item 7) */}
+            <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+                    Volume Variability
+                  </span>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      data-testid="volume-variability-toggle"
+                      checked={sla.volumeVariability === true}
+                      onChange={(e) =>
+                        onUpdateSLA({
+                          ...sla,
+                          volumeVariability: e.target.checked,
+                        })
+                      }
+                      className="sr-only peer"
+                    />
+                    <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600"></div>
+                  </label>
+                </div>
+                <span className="text-[11px] text-slate-500">
+                  Adds small random variation to each interval's case count around your forecast (Off, the
+                  default, uses the forecast exactly). It does not model heavy days or forecast error — for that,
+                  raise the volume in Sensitivity or the forecast itself. The recommended headcount may rise by
+                  about a seat; on long plans the variation averages out and it may not change. Runs can take
+                  several times longer on some data. Results are not comparable with runs where this is Off.
+                </span>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1195,8 +1260,8 @@ export function ConfigFlow({
                       const targetPct = c.primaryPct !== undefined ? c.primaryPct : sla.primaryPct;
                       const priWinVal = c.primaryWindow !== undefined ? c.primaryWindow : (c.primaryWindowMinutes ? c.primaryWindowMinutes / 60 : sla.primaryWindow);
                       const priUnit = c.primaryUnit || sla.primaryUnit || 'hours';
-                      const asaTargetVal = c.boAsaTarget !== undefined ? c.boAsaTarget : sla.boAsaTarget;
-                      const asaUnit = c.boAsaUnit || sla.boAsaUnit || 'minutes';
+                      const asaTargetVal = c.boAsaOwn === true && c.boAsaTarget !== undefined ? c.boAsaTarget : sla.boAsaTarget;
+                      const asaUnit = c.boAsaOwn === true ? (c.boAsaUnit || sla.boAsaUnit || 'minutes') : (sla.boAsaUnit || 'minutes');
 
                       return (
                         <tr key={c.id} className="hover:bg-slate-50/80 transition">
@@ -1265,7 +1330,7 @@ export function ConfigFlow({
                               <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-purple-50/70 border border-purple-200/80 rounded-md text-purple-800" title="Centrally managed in SLA Policy tab">
                                 <Lock className="w-3 h-3 text-purple-400 shrink-0" />
                                 <span className="font-mono text-xs font-semibold">
-                                  ≤ {asaTargetVal} {asaUnit}
+                                  ≤ {asaTargetVal} {asaUnit}{c.boAsaOwn === true ? ' (own)' : ''}
                                 </span>
                               </div>
                             </td>

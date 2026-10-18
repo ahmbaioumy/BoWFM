@@ -88,7 +88,7 @@ Not covered: `UAT_BO.xlsx`, `test_breaks.xlsx` (no cheap loader).
 |---|---|---|---|---|
 | HC-3 | **major — owner decision** (tests currently assert the floor as intended: D40.2b, `verify-sizing-fixes.mts:449`, `:2501`, `:2508`) | Extra-OFF uplift is floored **before** the shrinkage gross-up. HC 10, calendar open 5 days, team works 4, shrinkage 20%: floor(12.5) = 12 → Gross HC 15; unfloored 12.5 / 0.8 = 15.625 → 16. 12 heads × 4 days = 48 seat-days against 50 needed. | **Yes — Gross HC up to ~1 seat low** whenever the team works fewer days than the calendar is open. Reachable from normal UI (`ConfigFlow.tsx:180`). Related to L14 but L14 does not mention the floor. | `hc-search.ts:1585-1587` |
 | HC-4 | **major** (import path only) | Imported config is loaded without per-field checks (`App.tsx:450`), bypassing the UI's 0–99 clamp. Shrinkage 1.0 → clamped to 0.99 → Gross HC ×100 (10 → 1000). Shrinkage NaN/missing → shrinkage silently dropped (Gross HC 10), row shows NaN while effective shows 0. | **Yes**, for a bad/hand-edited config file: over- or under-staff with no warning. Not reachable by typing in the UI. Full check belongs to phase 3. | `hc-search.ts:1626-1632`; `ConfigFlow.tsx:1236-1239` |
-| HC-5 | minor (same family as HC-1 — fix together) | `computeAnalyticalNMin` loses a seat to float noise when workload ÷ capacity is an exact integer (7.5 h, adherence 0.55, 15 days, 123.75 h → 1, expected 2). 236 of 4,800 grid cases. `computeOccupancyFloor` (ceil): 0 mismatches. | Rarely: `N_min` 1 low; matters mainly with Workload Floor OFF. | `hc-search.ts:130-131` |
+| HC-5 | minor (same family as HC-1 — fix together) | `computeAnalyticalNMin` loses a seat to float noise when workload ÷ capacity is an exact integer (7.5 h, adherence 0.55, 15 days, 123.75 h → 1, expected 2). 236 of 4,800 grid cases. `computeOccupancyFloor` (ceil): 0 mismatches on a single workload figure; later found to mis-ceil workloads summed from category parts (see Item 6 rework 1). | Rarely: `N_min` 1 low; matters mainly with Workload Floor OFF. | `hc-search.ts:130-131` |
 | HC-6 | minor (import only) | Duplicate category names double-count workload share (A,A → Gross HC 25, expected 13). No UI path to create duplicates. | Only via imported config. | `hc-search.ts:1605`, `:1618-1620` |
 | HC-7 | minor | `calculateStaffingRequirement` does not clamp negative opening-WIP minutes; the search path (`:2456`) and parser (`csv-parser.ts:1017`) do. Two paths differ. | Not from UI. | `hc-search.ts:1559-1563` |
 | HC-8 | minor | Empty demand: workload silently replaced by 1 h; Gross HC 0 while operational HC shows 10. | Edge case only. | `hc-search.ts:1568` |
@@ -1286,3 +1286,289 @@ Idle machine apart from other sessions' light load, one job at a time, sync sear
 - Challenger PASS: memory major resolved by code reading (lazy view, no retained references, one read per replication); seed formula identical; async same shape.
 - Backlog (minor): mixed case (uniform fails confirmation, repair fails main days) — `reportedDist = confirmationFailure.roster ?? reportedDist` can pair uniform figures with the repair roster in the N−1 evidence / final audit runs (display only, untested; `hc-search.ts:3259`, `:4133`); infeasible run's "RECOMMENDED HC" card shows N = cap; browser heap +38 % vs 4dc1c8c (likely uncollected garbage); runtime 1.8–2.3x on large files (owner waived; speed item for the backlog).
 - Supervisor verdict: ready for owner approval.
+
+# Item 3 build — measurements (2026-10-15)
+
+Built per PLAN.md "BUILD PLAN — Item 3" + amendments E1-E8 (explicit `boAsaOwn` switch). Base commit 24c21f2. Node, `searchOptimalHC` pooled, default calendar / labor / R = 30 / seed 12345. "Before" = a copy of the tree at 24c21f2 run from a scratch directory; "after" = the worktree. Machine shared with another job, so times vary 10-30%.
+
+Nothing ticked (must be identical):
+
+| Case | Before: HC / gross / ASA mean | After | sha256 of the full result | Time before / after |
+|---|---|---|---|---|
+| claims (default categories, Claims_Life holds 90), ASA off | 31 / 40 / 32.3 | same | equal (5,088,244 B) | 15.7 s / 14.9 s |
+| claims, ASA on 60 | 31 / 40 / 32.3 | same | equal (5,088,245 B) | 19.7 s / 18.4 s |
+| support, ASA on 60 | 43 / 54 / 59.5 | same | equal (7,026,784 B) | 156 s / 127 s |
+| healthcare, ASA on 60 | 42 / 53 / 59.3 | same | equal (9,752,898 B) | 180 s / 169 s |
+| AJM_Only, ASA on 60 | 28 / 35 / 58.1 | same | equal (13,332,165 B) | 265 s / 297 s |
+| healthcare ASA off, support ASA off, AJM_Only ASA off | 31 / 39, 28 / 35, 16 / 20 | same | (HC / gross / ASA compared, no hash) | |
+
+Ticked (after only; before the tick is ignored, so the before answer is the unticked row above):
+
+| Case | HC / gross | Binding label | Note |
+|---|---|---|---|
+| claims, Claims_Life ticked own 90 (global 60) | 31 / 40 | analytical baseline (floor) | unchanged: the floor binds, Life is looser than the global |
+| claims, Claims_Life ticked own 30 | 32 / 41 | "Backoffice ASA Target for category 'Claims_Life' (own target ≤ 30 minutes)" | N-1 row: "BO ASA (category 'Claims_Life') 95% CI [31.2m, 32.4m] upper bound > own target 30minutes (30m)" |
+| support, ASA 60, Billing_Support ticked own 30 | **62 / 78** (from 43 / 54) | "Backoffice ASA Target (≤ 60 minutes) for the categories without their own target" (after the label extension; the measured run predates it and read the Primary SLA label) | N-1 = 61 fails on the followers: Technical_Escalations alone 62.4 min > 60. Billing_Support left the pool, whose mean (59.5 at 43) was held down by it |
+
+Findings worth the owner's eye:
+- A tick on a fast category can RAISE the headcount a lot (support 43 -> 62) because the remaining categories lose the averaging benefit; [WITHDRAWN: the claim that a looser tick can only keep or lower the answer was false and the follower-pool design is replaced, see rework F below]. Written into PRD §6 and L30.
+- The existing binding label never named the answer-time gate on N-1 (AJM_Only + 60: N-1 = 27 fails BO ASA, label still "Primary SLA"). Left as is when nothing is ticked (identical output); with a tick the label now names the own category or the sharing categories.
+
+Tests: new suite D82 (52 checks) fails 33 of 51 on the unchanged engine (fail-first run of D82 alone, 18 passed = the "nothing ticked is identical" controls), 52 / 52 after. Mutations (D82 alone, scratch copies): copies treated as own (flag ignored) 16 fail (D82.a1, a1b, a4, b1d-f, b2a/b, b5b, b10, d3, d4, d6 claims / support / healthcare ASA on, e1); own loop skipped 13 fail (b1a-d, b3a, b8, b9, c1, c3, c4, c7a/b, f); followers pooled over all categories 9 fail (b1d/e, b2a, b5b, b6, c4, c6a/b, e1). Full results: see the test totals in the commit message / report.
+
+# Item 3 rework F — every category judged on its own (2026-10-15, after review round 1)
+
+Supersedes the follower-pool design measured in "Item 3 build" above (its ticked rows and the claim that a looser tick can only keep or lower the answer are withdrawn). Base: c218d39 merged into the item 3 branch. Node, default calendar / labor / R = 30 / seed 12345; before = 24c21f2 snapshot (answer-time-ON numbers from the first build's "before" runs on the same snapshot), after = new code.
+
+Answer time ON, nothing ticked (pins may only move UP):
+
+| Case | Before HC / gross | After HC / gross | Category that binds at N-1 | Time after |
+|---|---|---|---|---|
+| claims, ASA 60 | 31 / 40 | 31 / 40 | none (floor) | 4.5 s |
+| healthcare, ASA 60 | 42 / 53 | **52 / 65** | Provider_Inquiries 60.1 min at 51 | 175 s |
+| support, ASA 60 | 43 / 54 | **62 / 78** | Technical_Escalations 62.4 at 61 | 101 s |
+| AJM_Only, ASA 60 | 28 / 35 | **41 / 51** | Tech HVC 78.2 at 40 | 216 s |
+
+Ticked: claims with Claims_Life 90: 31 / 40 (unchanged). Support + 60 with Billing_Support ticked 30: 62 / 78; ticked 120: 62 / 78 (Technical_Escalations at the global 60 binds in all three).
+
+Answer time OFF (must be byte-identical to 24c21f2): sha256 of the full result equal for claims (5,088,244 B), support (6,615,310 B), healthcare (9,151,188 B), AJM_Only (12,192,681 B).
+
+Mutation (scratch copy, D82 alone): pooled gate restored in place of the per-category gate -> 18 of 55 D82 checks fail (b1a, b1c, b2a, b3a, b5b, b6, b8, b9, b11, c1, c3, c4, c6a-c, c7a/b, c8).
+
+# Item 3 review round 2 (2026-10-16) — rework F commit edf7d9c
+
+- Tester PASS (browser: ASA off 31/40, 28/35, 31/39; support ASA 60 → 62/78, binding Technical_Escalations; own 30 on Billing_Support → 62, column shows own target; independent re-check 61 fails / 62 passes). Challenger PASS. User-side PASS.
+- Owner approved 2026-10-16; merged into main (fast-forward).
+- Backlog (minor): run-progress text says "Primary-Driven" when an answer-time target binds; upper bound shown in minutes even for hour/day targets; mean vs upper-bound verdict note; stale "follower" comments (hc-search.ts:2468, 2848, 2937; D82 test comments); unused `_sla` parameter; CI bound rounded to 0.1 before comparison (same as before).
+
+# Item 4 build — drain runs until the last deadline (2026-10-16, branch item4-drain)
+
+Change: drain end = min( max(horizon end + 14 calendar days, latest finite `primaryDeadline`), horizon end + 366 days ), one `computeDrainEnd` call per `runBackofficeDES` (same for every candidate N, CRN kept). Drives the day-open/close scheduling, `SimulationEnd` and the unfinished count. `drainCapped: true` on `DESResult` when the cap bit. Occupancy denominator, N_min, N_occ, Gross HC untouched. DES-10 / G9 resolved. Base 5f5029b, node, idle machine except where noted.
+
+## Item 4 measurements
+
+Default settings (before = 5f5029b snapshot, after = item4-drain):
+
+| Case | HC / gross before | HC / gross after | SLA % before / after | Occupancy % before / after | Time before / after | Ratio |
+|---|---|---|---|---|---|---|
+| Repro vol 20, no holidays | 8 / 10 | 8 / 10 | 94.9 / 94.9 | 73.4 / 73.4 | 2.6 s / 2.3 s | 0.9 |
+| Repro vol 20, 8 holidays after horizon | **12 / 15** | **8 / 10** | 81.5 / 94.9 | 39.9 / 69.9 | 3.0 s / 2.9 s | 1.0 |
+| claims sample | 31 / 40 | 31 / 40 | 100 / 100 | 99.1 / 99.1 | 4.1 s / 4.8 s | 1.2 |
+| support sample | 28 / 35 | 28 / 35 | 89.5 / 89.5 | 74.9 / 74.9 | 12.9 s / 14.3 s | 1.1 |
+| healthcare sample | 31 / 39 | 31 / 39 | 86.7 / 86.7 | 58.9 / 58.9 | 54.9 s / 38.1 s | 0.7 |
+| AJM_Only.csv | 16 / 20 | 16 / 20 | 90.1 / 90.1 | 59.1 / 59.1 | 26.7 s / 33.5 s | 1.3 |
+| EGS_Only.csv | 100 / 125 | 100 / 125 | 92.7 / 92.7 | 53.4 / 53.4 | 1703 s / 1555 s | 0.9 |
+
+The plan's "31 / 27 / 31 HC, gross 40 / 34 / 39" is stale: since Item 2 the support sample is 28 / 35 (D81.a1). Nothing slower than 1.5x. The 1.2-1.3x readings for claims / support / AJM_Only were taken while other tools were running on the machine (the same runs went the other way for healthcare / EGS); no systematic slowdown. The holiday repro now equals the no-holiday answer in headcount, gross and SLA %; its occupancy differs (69.9 vs 73.4) only because 37 cases that are still open at their own deadline are unfinished and do not add handling minutes.
+
+Answer time ON, 60 minutes (item 3 figures: claims 31, healthcare 52, support 62, AJM_Only 41):
+
+| Case | HC / gross before | HC / gross after | ASA mean min before / after | Time before / after | Ratio |
+|---|---|---|---|---|---|
+| claims | 31 / 40 | 31 / 40 | 32.3 / 32.3 | 7.1 s / 5.5 s | 0.8 |
+| support | 62 / 78 | 62 / 78 | 45.7 / 45.7 | 135 s / 108 s | 0.8 |
+| healthcare | 52 / 65 | 52 / 65 | 44.1 / 44.1 | 268 s / 226 s | 0.8 |
+| AJM_Only | 41 / 51 | 41 / 51 | 38.8 / 38.8 | 364 s / 287 s | 0.8 |
+
+Multi-week answer window (support sample, primary window on every category and the global setting):
+
+| Case | HC / gross before | HC / gross after | Time before / after | Ratio |
+|---|---|---|---|---|
+| 15 working days | 21 / 26 | 21 / 26 | 18.2 s / 13.8 s | 0.8 |
+| 15 working days + ASA 60 | 62 / 78 | 62 / 78 | 243 s / 207 s | 0.9 |
+| 30 working days | 21 / 26 | 21 / 26 | 31.0 s / 21.6 s | 0.7 |
+| 30 working days + ASA 60 | 62 / 78 | 62 / 78 | 361 s / 311 s | 0.9 |
+
+(Occupancy 99.8 % in the 15 / 30-day rows is the occupancy floor binding, identical before and after.)
+
+- Nothing reached a deadline beyond the 366-day cap: no `drainCapped` on any sample, test fixture or measured run (only the 2030-deadline fixtures D83.i1 / i3 set it).
+- Not run: runtime of a deliberately undersized candidate with a very long window beyond what the searches evaluate (the search still ran 15 / 30-day windows without slowdown; lazy day scheduling not added, per G5).
+- G3: on all measured runs the final recommended result finishes every case, so answer-time figures and HC are unchanged. The effect shows only in runs that do not finish (undersized): fixture 10 x 1100 min, 1 agent, due Fri 30 Oct, ASA on: censored cases 5 -> 3, ASA mean 1340 -> 2454 min (more cases start, their real wait is counted), completed 4 -> 6, SLA 40 -> 60 %.
+- G6 (per-agent figures, same fixture): available minutes (planned-horizon denominator) 480 -> 480; handling minutes 5280 -> 7200, so rawOccupancyPct 1100 % -> 1500 % (the agent keeps working to the later drain end; the overload signal gets stronger, not weaker); agent busy / (busy + idle) 100 % -> 100 %; timeline slices 39 -> 53; `verifyAgentTimelineInvariants` valid before and after. Fixture 10 x 800 min due Fri 20 Nov: raw occupancy 1100 % -> 1667 %, agent utilisation 100 % -> 98 % (the agent runs out of work at the end), invariants valid. AA.41 / AA.45d (Agent Analytics) did not move.
+- Sizing effect on real input: only runs whose deadlines fall beyond horizon end + 14 days (long answer windows, post-horizon holidays) can change; all three samples, AJM_Only and EGS_Only did not.
+
+## Tests
+
+`npm test`: 174 + 1,343 + 97 + 164 (trusted-source) = 1,780 checks, 0 failed, artifact fresh (was 1,756; +24 = D83; rework 1 added D83.k1-k2: the cap flag reaches the search output, sync and async). Lint clean. Only D59.1-3 changed (redesign, below); no other existing test moved; every hand-built `precomputedCases` test passed unchanged (9 in verify-sizing-fixes.mts, 2 in verify-fixes.mts, none in verify-agent-analytics.mts).
+
+| Test | Old | New | Reason |
+|---|---|---|---|
+| D59.1-3 | 10 x 800 min, due Fri 30 Oct: 6 done / 4 unfinished, 60 % | 10 x 1100 min, due Fri 30 Oct: 6 / 4, 60 % | The old deadline (30 Oct) now lies inside the drain (to 30 Oct 17:00 = 15 days x 480 = 7200 min); at 800 min the team would finish 9. At 1100 min the agent is too slow to finish before the new drain end, so the "unfinished stay in the denominator" proof and the 6 / 10 / 60 % numbers are kept. Not a silent re-pin: the fixture changed, the claim did not. |
+
+Fail-first (D83 + redesigned D59 on the 5f5029b engine): 15 failed, 10 passed — D59.1-3, D83.a1, a2, d, b1-b3, g1, g2, h1, i1, i3, j2. After: 25 / 25 pass (D59 3 + D83 22).
+
+Mutations (temporary edit of `des-engine.ts`, D59 + D83 only, source restored with `git checkout` after each):
+
+| Mutation | Result |
+|---|---|
+| M1 drain end back to horizon + 14 days only | 14 failed incl. D83.a1, a2, b1-b3 |
+| M2 max in the day-scheduling loop, SimulationEnd at +14 days | 14 failed (same set) |
+| M3 max at SimulationEnd, day-scheduling loop at +14 days | 14 failed (same set) |
+| Non-finite deadline not skipped | D83.h2 fails |
+| 366-day cap removed | D83.i1, i3 fail |
+
+## Item 4 review (2026-10-16) — supervisor verdicts
+- Round 1: tester pass (11/11; samples 31/40, 28/35, 31/39; repro 12→8; drain formula recomputed 10/10), auditor pass, user-side pass with 2 majors (stale "Unfinished by horizon end" label; silent 366-day cap) → fixed in rework 1 (652be8d).
+- Final challenger: pass. Major (owner info): long answer windows run slower than short ones (claims: default 6.1 s, 60-day window 39.6 s, 300-day 171 s) — the run now simulates until the last deadline; before the change those runs stopped at 14 days and wrongly failed cases. Builder's before/after on support 15/30-day windows was not slower (18.2→13.8 s, 31.0→21.6 s).
+- Backlog (minor): case-row "(deadline missed)" wording is wrong for rows cut by the 366-day cap; export CSV / hc-search reason strings still "Unfinished by horizon end" (export-rows.ts:49, hc-search.ts:3799/:4762); ASA censoring mixes horizon-end and real waits (documented); stale +14 comment fixed; drainCapped sync/async check added (D83.k2).
+
+## Item 5 measurements (2026-10-16) - manual backlog form default (G10 / DES-7)
+Probe `r3/q_p4.mts` (VOL=1, 30 backlog cases, N=1, new-case SLA; engine untouched so the numbers match the 2026-10-15 investigation):
+
+| Case | New-case SLA |
+|---|---|
+| Part-worked (old: every manual row counted as in-progress) | 51.7 % (31/60) |
+| Full handling time (new: blank row) | 91.7 % (55/60) |
+
+Through the real form path (`buildManualWipCase`; 30 rows, category handling time 45, new-case handling time 10, 1 agent):
+
+| Stored remaining | New-case SLA | Backlog workload counted |
+|---|---|---|
+| 30 typed (old form default) | 0.0 % (0/60) | 900 min |
+| blank (undefined, new default) | 85.0 % (51/60) | 1350 min (30 x 45) |
+
+Headcount effect (expected, documented in PRD L37): blank rows now count the full handling time, so N_min and the recommendation can rise where handling time is above 30. Browser (headless, file://): Financial Claims sample, blank row shows "full (35m)", typed 10 shows "10m", second category blank shows "full (45m)", Total Pending Work 35 -> 45 -> 90 min; typed 0 clears back to blank; sizing run completed (N = 31) with 0 console errors, 0 failed requests.
+Tests: suite D84 (9 checks), fail-first 8 of 9 failed against the old-behaviour stub, 9/9 after.
+
+
+### Item 5 rework round 1 (2026-10-16)
+- K1: the Remaining Work box no longer strips characters ("-5" became 5, "12.5" became 125, "1e2" became 12). It keeps the raw text; `parseRemainingText` (wip-row.ts) reads a plain decimal (comma accepted: "12,5" = 12.5). Blank = not started, not an error. 0, negative, text, "1e2", "12.5.3" show an amber message "Not a valid number of minutes - this row will use the full handling time." and the row is added as blank. Draft cleared after Add.
+- K2: hint now says to enter minutes only for part-worked cases, handled before new work. Both tables use `remainingWorkLabel`: "10m (in progress)" below the category handling time, "full (45m)" blank, plain "Nm" at or above.
+- K3: typed 0 goes through K1 (message), no silent clearing.
+- Tests: D84 now 14 checks (5 added: e1-e4 parsing, f1 label); trimmed run 14/14; D54 trimmed run 23/23 (D54.7 type="number" rule passes). Suite totals 1785 = 174 + 1350 + 97 + 164.
+
+## Item 5 review (2026-10-16) — supervisor verdicts
+- Round 1: auditor pass; tester fail + user-side fail (digits-only input turned "-5" into 5 and "12.5" into 125 silently; no on-screen explanation of in-progress priority; typed 0 cleared silently) → fixed in rework 1 (80168d2: strict decimal parse, amber invalid message, hint explains priority, "(in progress)" row label).
+- Round 2: tester pass 9/9 (labels, totals recomputed incl. decimals, samples 31/40, 28/35, 31/39, 0 console errors), user-side pass, final challenger pass.
+- Backlog (minor): "1,000" read as 1.0 minute (comma = decimal); no upper cap in the form (import caps at 100000); inputMode="numeric" may hide the decimal key on mobile → use "decimal"; hint is small grey text; value ≥ AHT shown plain with no note; backlog fingerprint shows "undefined" for blank rows (stale warning still fires via categories); project_context §9 line ~953 sizing count 1343 stale.
+
+## Item 6 build — rounding ties (HC-1 + HC-5), 2026-10-16, branch `item6-rounding`
+Change (`src/utils/hc-search.ts`): `HEADCOUNT_TIE_EPSILON = 1e-9` added in exactly two places, `Math.round(sumGrossHC + eps)` (Stage 4 Gross) and `Math.floor(ratio + eps)` (`computeAnalyticalNMin`). Per J2, no change to the OFF-adjusted floor (integer division). The N_occ ceil was first left bare (superseded by rework 1 below: now `Math.ceil(ratio - eps)`, three sites in total).
+
+Fixture (J3, red first): 10 seats, five categories with workloads 10:20:30:40:50 (equal handling time), 20 % shrinkage, real `calculateStaffingRequirement`. Sum is 12.5 exactly. Before the fix: gross 12 in 64 of the 120 category orders, 13 in 56. 50 seats (62.5): 62 in 28 orders, 63 in 92. Also `[7,13,11,17,19]` and `[120,80,50,30,20]` split by order. Equal workloads never split (identical addends).
+Red run (before code change): D85.a10, a50, b1, b2, b4, d1 failed; b3, d2, d3, f, e passed (controls). Green after: all 13 D85 checks pass.
+Mutation proof: removing the Gross tolerance fails D85.a10, a50, d1; removing the N_min tolerance fails D85.b1, b2, b4.
+
+| Fixture | N_min | Recommended HC | Gross before | Gross after |
+|---|---|---|---|---|
+| sample claims | 30 | 31 | 40 | 40 |
+| sample support | 20 | 28 | 35 | 35 |
+| sample healthcare | 18 | 31 | 39 | 39 |
+| AJM_Only | 9 | 16 | 20 | 20 |
+| EGS_Only | 53 | 100 | 125 (sum 124.99999999999999) | 125 |
+
+All numbers identical before and after (before = checkpoint 2f50a89 source). AJM_Simu and EGS With Reduction were not re-measured (not requested; the AJM_Simu search was still running after 30 minutes). Moved checks in the full suite: none (D10, D11, D12, D60 unchanged). No true-tie fixture exists in the shipped files, so J5 "intended movement" is limited to the D85 fixture. Per-category Gross is shown to two decimals, so at a tie the rows may not add to the total (pre-existing display). Not touched: late-starter split `Math.round(share*seats)` (hc-search.ts ~:1011).
+
+### Item 6 rework 1 — N_occ ceiling tolerance (final challenger), 2026-10-16
+Finding: "0 mismatches" for `computeOccupancyFloor` was measured on single workload figures. A workload summed from category parts can be 1 ulp above an exact whole ratio (7 h x 0.55 x 15 days, 0.1+0.2+0.3+0.4 of 2 seats = 2.0000000000000004), and bare `Math.ceil` gave 3. Challenger probe: 2,290 of 2,999 whole-ratio cases one seat too high.
+Change (`src/utils/hc-search.ts`, `computeOccupancyFloor`): `Math.ceil(ratio - HEADCOUNT_TIE_EPSILON)` (same 1e-9). All three headcount boundaries (N_min floor, N_occ ceil, Gross round) now use it.
+Tests (suite D85.g1-g5): summed parts ratio 2.0000000000000004 -> 2; same for k = 1 and 7.5 h x 22 days k = 19; 2.0001 -> 3; 2 + 5e-10 -> 2; 2 + 1e-7 -> 3. Red before the change: g1, g2, g4 failed (g3, g5 controls passed). Mutation (epsilon removed again): g1, g2, g4 fail; restored: all 18 D85 checks pass.
+
+---
+
+# G7 (UI-2 / L29 / P2-11) - CLOSED 2026-10-17 (`g7-pooled-filter`, PRD 1.27.4); F7 recorded
+
+- UI-2 resolved by masking (owner decision: dash plus a short note). On a pooled run with a category filter, Available, Scheduled, Occupancy % and Utilisation % are not shown: dash in the table and team row, chart body replaced by the note, occupancy / utilisation insight lines left out, utilisation fairness metrics "-", CSV columns empty (not 0). Busy and Idle stay. One predicate: `maskedForPooledFilter` (model keeps raw values). Siloed and unfiltered pooled views unchanged. Headcount unchanged (samples 31/40, 28/35, 31/39).
+- Tests: AA.48-AA.51 added; AA.44d and AA.44f rewritten (the old note claimed Available smaller / occupancy reads lower; the new M5 note replaces it); AA.38 unchanged (model keeps raw values).
+- F7 (floor of the team total before gross-up, L14): decided, keep the floor (owner 2026-10-15). Worked example added to PRD section 6 Stage 4 (10 / 5 open days / 4 worked / 20 % shrinkage: floor(12.5) = 12 -> 15, not 16).
+
+## F7 + G7 review (2026-10-17) — supervisor verdicts
+- Plan challenge: fail → amendments M1–M7. Build e7d329e.
+- Auditor pass; tester pass 5/5 (Busy recomputed from slice export: 31/31 agents match; Idle equal to unfiltered; clear filter restores identical figures; siloed unchanged; samples 31/40, 28/35, 31/39; 0 console errors); user-side pass; final challenger pass (double export download: not caused by code — one link.click()).
+- Backlog (minor): "Pooled" appears as a dead category option on pooled runs (pre-existing; now shows dashes); note shown twice (header + chart panel); Busy/Idle headers could name the filter while masked; single-category pooled run filtered on its only category shows dashes; panel subtitle still says "occupancy and utilisation" while masked.
+
+---
+
+## Item 7 measurements (volume variability OFF vs ON), 2026-10-17
+Idle machine, one job at a time, `searchOptimalHC`, pooled, defaults (R = 30, seed 42), worktree `item7-poisson` at the Item 7 commit. Samples ran twice per mode (identical results both times); AJM_Only and EGS_Only once. "SLA %" is the final audit run's primary SLA; "cases" is the audit run's case count (ON draws counts, OFF rounds the forecast).
+
+| Dataset | OFF HC / gross | ON HC / gross | OFF SLA % | ON SLA % | OFF s | ON s | ON / OFF time |
+|---|---|---|---|---|---|---|---|
+| claims | 31 / 40 | 31 / 40 | 100 | 100 | 5.3, 4.5 | 6.2, 6.2 | 1.2x, 1.4x |
+| support | 28 / 35 | 28 / 35 | 89.5 | 89.5 | 16.0, 14.6 | 13.1, 12.8 | 0.8x, 0.9x |
+| healthcare | 31 / 39 | 32 / 40 | 86.7 | 87.9 | 36.2, 34.9 | 37.9, 37.4 | 1.0x, 1.1x |
+| AJM_Only | 16 / 20 | 17 / 21 | 90.1 | 92.4 | 31.9 | 97.4 | **3.1x (flag)** |
+| EGS_Only | 100 / 125 | 101 / 126 | 92.7 | 92.9 | 1376 | 1466 | 1.1x |
+
+Reading:
+- OFF reproduces main exactly (31/40, 28/35, 31/39; AJM_Only 16/20 and EGS_Only 100/125 equal the 2026-10-15 audit baseline).
+- ON raised the answer by one seat on 3 of 5 datasets (healthcare, AJM_Only, EGS_Only) and left two unchanged. The extra staff is small, as expected for per-interval Poisson noise averaged over a multi-week plan (PRD L39).
+- Runtime: within 10 % except claims (1.2-1.4x, a 5 s run, noise-sized) and **AJM_Only at 3.1x, above the 1.5x flag**. Cause (rework 1, re-verified from the search history): OFF evaluates N = [10, 15, 16, 17] and stops at 16; ON evaluates [10, 16, 17, 18, ..., 25]: candidate 16 now fails the SLA gate, the search leaps to 25 and walks down eight extra full-replication candidates to 17. Case generation (the second forecast case set per replication) adds under 10 %. Cost per candidate is unchanged. Recorded as PRD L39 caveat 5.
+- ON audit-run case counts differ from OFF by under 2 % (claims 1358 vs 1380, healthcare 2215 vs 2190, AJM_Only 3079 vs 3119): Poisson noise plus the mean-versus-round difference on fractional volumes (PRD L39 point 3).
+
+## Item 7 mutation proofs (rework 1), 2026-10-17
+Each mutation applied alone to the Item 7 code, D86 run as a trimmed copy (the full suite is unchanged), then restored byte-identical. Every one fails D86.
+
+| # | Mutation | D86 result |
+|---|---|---|
+| M1 | sync search `representativeCases` reverted to `precomputedCaseSets[0]?.cases` (`hc-search.ts` sync site) | D86.e5a fails (32 passed, 1 failed) |
+| M2 | async search site reverted the same way | D86.e5b fails (32 / 1) |
+| M3 | `representativeCasesOf` returns the noisy set (both sites) | D86.e2b, e5a, e5b fail (30 / 3) |
+| M4 | count stream seeded with the unmixed seed (`createPrng(seed)`) | D86.d4 fails: pinned first counts for seed 12345 are `[5,7,0,12,23,41,391,4]` for means `[3.4,2.5,0.4,12,29,45.5,400,7.6]` (32 / 1) |
+| M5 | counts drawn from the arrival stream (`prng()`) | D86.d1 and d3 fail (31 / 2) |
+| M6 | siloed seats from the noisy set | D86.e4 fails (32 / 1) |
+| M7 | async search ignores the flag when building replication sets | D86.e1 fails (32 / 1) |
+
+D86.e5 is the search-level roster test: a peaky one-category fixture (loose SLA, shift placement on, 5 replications) where ON recommends 11 and the chosen roster is `0x1 30x4 60x2 120x4` for each of seeds 1-5 in BOTH `searchOptimalHC` and `searchOptimalHCAsync`; with either site reverted the roster moves with the noisy draw (e.g. `30x3 60x2 120x5`).
+
+## Item 7 rework 2: ON mean = rounded forecast (R1) and re-measurement, 2026-10-17
+Change: ON draws Poisson with mean `Math.round(volume)` (the figure Off uses), skipping intervals that round to 0 or less. With the earlier raw mean, volumes of 0.5-0.99 gave ON about 40 % less expected demand than Off, so ON could recommend fewer staff. Test D86.h (fractional fixture 0.6 / 1.4 / 2.5 / 0.9 / 3.6; 300 seeds; ON mean case total 68 within 4 sigma of Off's sum of rounded volumes, 68): red before (ON mean 58.84, tolerance 1.90), green after; with the raw mean put back it fails again (also D86.d1). D86.d4 (pinned stream counts) is unchanged because it tests the stream, not the volume path.
+
+ON re-measured after the change (single run each; machine otherwise idle; OFF figures from the table above are unaffected):
+
+| Dataset | ON HC / gross | ON SLA % | ON s | candidate history (ON) |
+|---|---|---|---|---|
+| claims | 31 / 40 | 100 | 8.5 | 31 |
+| support | 28 / 35 | 89.5 | 18.1 | 21, 27, 28 |
+| healthcare | 32 / 40 | 87.9 | 47.9 | 19, 31, 32, 33, 34 |
+| AJM_Only | 17 / 21 | 92.4 | 118.5 | 10, 16, 17, 18, ..., 25 |
+
+Results equal the round-1 ON figures exactly: these data sets carry whole-number volumes, so rounding the mean changes nothing for them (it matters for fractional volumes, covered by D86.h). Timings are within run-to-run noise of round 1 (AJM_Only 118 s against 32 s Off is 3.7x, same cause as above). EGS_Only was not re-measured (Off alone takes about 23 minutes); its round-1 ON result (101 / 126) stands only if its volumes are whole numbers, which was not checked.
+
+## Lane B - outdated-results note on exports + DataTable removal (2026-10-17, branch laneB-export-note)
+
+- P2-13 resolved: `src/utils/export-notes.ts` (`withOutdatedNote`, `prepareNotedExport`, `exportWithOutdatedNote`). Five `ResultsFlow` CSV handlers and the Agent Analytics export end with one trailing `NOTE: Exported from outdated results - settings changed (...), data changed (...). Re-run to refresh.` section when stale; fresh results give an unchanged file; empty exports still return early. Config JSON flag dropped (plan N6). Suite D88 (22 checks, red first: 10 failed before the change).
+- `DataTable.tsx` deleted (unreferenced); removed from the EX.9 file list in `scripts/verify-agent-analytics.mts`; PRD P2-1 and project_context updated (only `NativeCharts.tsx`, 363 lines, remains dead).
+- Browser (file://, headless Chrome, built BoWFM.html, not committed): claims 31/40, support 28/35, healthcare 31/39. Fresh exports: no note. After a data change: note names "data changed (opening backlog)". After a Labor change: "settings changed (Labor)". Both: both parts. After re-run: no note on any export. 0 console errors. Note is always the last line of the file.
+
+## Lane A: input safety (P1-11 + P1-12), 2026-10-17, branch laneA-input-safety
+No headcount effect: only the import path, the crash/leave guards, the Sensitivity matrix lifetime and the Calendar tab / DQ gate changed.
+
+Fail-first: suite D87 written before the guards were wired (validator and calendar helper hidden, `csv-parser.ts` reverted): 36 passed, 11 failed (D87.a0 validator missing, c0 helper missing, d2 empty weekdays passed the DQ gate - the only engine-side red, e1-e7 wiring). With everything in place: D87 67 passed, 0 failed (trimmed copy: header + D9 + D87, 96 checks including D9, 0 failed).
+
+| Check | Result |
+|---|---|
+| Broken import (3 bad sections, 4 problems) | red persistent banner lists each field path, still there after 6 s, no green text, labor unchanged |
+| Array / `{not json` file | red banner, nothing changed |
+| Export JSON -> Reset All -> Import | green banner, same file imported twice works (input reset) |
+| Invalid columnMapping only | amber banner with the note, core sections applied |
+| Forced render error (page-level patch of `Number.prototype.toFixed`) | inner crash screen with message and Reload, sidebar still present, switching flow clears it; exactly one console.error (React's) |
+| Forced App-level error (`Array.prototype.map`) | outer crash screen, Reload button; one console.error |
+| `beforeunload` listeners (CDP) | 0 on a fresh page, 1 after sample load, 0 after Reset All |
+| Calendar: all weekdays off | red banner; header pill DQ Gate Blocked; DQ lists the Working Days error |
+| Calendar: close = open | red zero-window banner; DQ Blocked (reported once) |
+| Calendar: holiday 2026-10-10 (Saturday) | amber note, gate unaffected |
+| Samples Net/Gross | claims 31/40, support 28/35, healthcare 31/39 (unchanged), 0 console errors |
+| Sensitivity (claims, 149 s for 25 cells) | matrix identical after Config -> Sensitivity; Outdated note after prod hours 7.5 -> 7 (both tabs), gone after reverting; Reset + sample clears it; leaving mid-run cancels with the Stopped note and no unhandled error; 0 console errors |
+
+Pre-existing defect fixed on the way: pressing Stop on a running Sensitivity grid made the search throw SIMULATION_CANCELLED inside an un-awaited click handler (unhandled rejection); now caught.
+
+## Lane E - reset dialog and Demand leftover state (2026-10-18, PRD 1.29.2)
+
+From the never-reviewed audit, Area 2 (S-1 to S-5). Product change, no headcount effect.
+
+| Item | Result |
+|---|---|
+| S-1 dialog semantics | Fixed: alertdialog, aria-modal, labelled/described, focus to Cancel, Tab trapped, Escape cancels, focus returned, aria-label Close |
+| S-2 wording | Fixed: "unsaved sizing runs" removed; Sensitivity matrix listed; "Export JSON saves settings only"; upload/sample variant says the new data loads after confirming |
+| S-3 leftover state | Fixed: Demand screen remounts on confirmed Reset (`resetEpoch`); a staged backlog CSV cannot be applied afterwards (browser-proved) |
+| S-4 Sidebar | Fixed: aria-current, aria-expanded, ON/OFF label. Not changed: first-tab jump when clicking the active flow, 9-10 px text contrast (not measured) |
+| S-5 Import tooltip | Fixed: says it replaces the current settings |
+| Open, out of scope | SimulationProgressModal has the same missing dialog semantics |
+
+Tests: suite D89 (26 checks), red first (helper missing, markup absent), green after. Browser (file://, headless): see report.
+
+## Polish build: input safety + results wording (branch polish-input-wording, PRD 1.29.3, 2026-10-18)
+- Resolved the backlog items above: "1,000" as 1.0 / no upper cap / inputMode (backlog form); "Primary-Driven" progress text; "Unfinished by horizon end" strings (export-rows.ts, hc-search.ts x2); cap-cut rows labelled "deadline missed".
+- Tests: suite D90 (33 checks), red first (14 failing: reason missing, two helper files absent, old strings present), green after. No existing test pinned the old strings; `verify-agent-analytics.mts` call updated for the new `buildBreachExportRows` argument.
+- Still open (minor): hint text size; value >= AHT shown plain without a note; "1.000" is read as 1 (documented, a dot is always decimal).

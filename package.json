@@ -15,22 +15,22 @@
     "test:sizing": "npx tsx scripts/verify-sizing-fixes.mts",
     "test:agents": "npx tsx scripts/verify-agent-analytics.mts",
     "test:trusted-source": "npx tsx scripts/verify-trusted-source.mts",
-    "test:audit": "npx tsx scripts/audit-compare.mts docs/audit/sample-hc-after-2026-09-30.jsonl"
+    "test:audit": "npx tsx scripts/audit-compare.mts docs/audit/sample-hc-after-2026-10-15.jsonl"
   },
   "dependencies": {
-    "@tailwindcss/vite": "^4.1.14",
-    "@vitejs/plugin-react": "^5.0.4",
     "lucide-react": "^0.546.0",
     "react": "^19.0.1",
-    "react-dom": "^19.0.1",
-    "vite": "^6.2.3"
+    "react-dom": "^19.0.1"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.1.14",
     "@types/node": "^22.14.0",
+    "@vitejs/plugin-react": "^5.0.4",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
-    "typescript": "~5.8.2"
+    "typescript": "~5.8.2",
+    "vite": "^6.2.3"
   }
 }

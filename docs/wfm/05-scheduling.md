@@ -5,6 +5,14 @@ full rostering (shift patterns, contractual limits, fairness, statutory rules; s
 still out of scope. It does now cross the line for one narrow, deliberate reason: **when**
 determines whether *how many* is even achievable at all, not just whether it's comfortable.
 
+Since the Minimum Coverage floor became the default (`minCoverageEnabled: true`,
+`default-config.ts`), this gap is already handled without placement: at each candidate headcount
+the search first tries the coverage-repair roster (the minimum number of agents on the late
+cover starts, the rest at opening; tried before the uniform layout when the shift is shorter than
+the open day), then an even-spread layout of the same agents over the same starts, each judged
+by the primary gate and the independent confirmation block (see `06-simulation-des.md`). The
+opt-in placement described next is an extra on top of that.
+
 If every agent starts one uniform shift at business open and `dailyProductiveHours` is
 shorter than the business window, every agent's shift ends at the same moment
 (`dailyProductiveHours` after open; since 2026-10-08 the simulator enforces that end on every

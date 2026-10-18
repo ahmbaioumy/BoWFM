@@ -170,12 +170,29 @@ export interface AgentAnalytics {
   drainDates: string[];
   /** A category filter is set AND the rows are the shared pool (Busy/Occupancy/Utilisation count only that category's work). */
   pooledCategoryFilter: boolean;
+  /**
+   * Same predicate as `pooledCategoryFilter`, named for what the views do with it: on a pooled run with a category filter the per-agent
+   * Available, Scheduled, Occupancy % and Utilisation % (and the team row, chart and insights built on them) are NOT shown, because pooled agents'
+   * idle time cannot be split by category. The model keeps the raw values; every view and the export honour this flag. Busy and Idle stay.
+   */
+  maskedForPooledFilter: boolean;
 }
 
 export const DEFAULT_LATE_WINDOW_MIN = 120;
 /** Category label of agents in the shared pool (pooled architecture). */
 const POOLED_CATEGORY = 'Pooled';
 const SOLO_MIN_MINUTES = 30;
+
+/** What the masked cells show on screen. */
+export const MASK_DASH = '—';
+/** Note shown (panel and export) when occupancy figures are masked. Single source of wording. */
+export const POOLED_FILTER_NOTE =
+  "Pooled team: agents serve every category, so their available time and occupancy cannot be split by category. Busy shows only the selected category's handling; Idle is each agent's full idle time. Clear the filter to see occupancy.";
+
+/** UI helper: the text to show for a masked figure (Available, Scheduled, Occupancy, Utilisation). */
+export function maskedCell(a: Pick<AgentAnalytics, 'maskedForPooledFilter'>, text: string): string {
+  return a.maskedForPooledFilter ? MASK_DASH : text;
+}
 
 interface Cell {
   busy: number;
@@ -578,6 +595,7 @@ export function computeAgentAnalytics(input: {
     staggered,
     drainDates,
     pooledCategoryFilter,
+    maskedForPooledFilter: pooledCategoryFilter,
   };
 }
 
@@ -625,7 +643,7 @@ export function buildAgentInsights(a: AgentAnalytics, opts: { bandPct?: number }
   }
 
   const occSorted = [...rows].sort((x, y) => y.occupancyPct - x.occupancyPct || x.agentId - y.agentId);
-  if (rows.length > 1 && occSorted[0].availableMin > 0) {
+  if (!a.maskedForPooledFilter && rows.length > 1 && occSorted[0].availableMin > 0) {
     out.push(
       `Occupancy ranges from ${r1(occSorted[occSorted.length - 1].occupancyPct)}% (${occSorted[occSorted.length - 1].agentLabel}) to ${r1(occSorted[0].occupancyPct)}% (${occSorted[0].agentLabel}); team ${r1(a.team.occupancyPct)}%.`
     );
@@ -643,7 +661,7 @@ export function buildAgentInsights(a: AgentAnalytics, opts: { bandPct?: number }
     const earlyUtil = pct(early.reduce((s, r) => s + r.busyMin, 0), early.reduce((s, r) => s + r.scheduledMin, 0));
     out.push(
       `${late.length} late-coverage agent${late.length === 1 ? '' : 's'} (start ${starts}; ${r1(shareHc)}% of headcount) did ${r1(shareBusy)}% of the team's work in the last ${a.lateWindowMin} minutes of the business day.` +
-        (showUtilisation ? ` Their utilisation is ${r1(lateUtil)}% vs ${r1(earlyUtil)}% for earlier-start agents.` : '')
+        (showUtilisation && !a.maskedForPooledFilter ? ` Their utilisation is ${r1(lateUtil)}% vs ${r1(earlyUtil)}% for earlier-start agents.` : '')
     );
   } else if (rows.length > 1) {
     out.push('All selected agents start at the same time, so there is no late-coverage cohort to compare.');
@@ -654,7 +672,9 @@ export function buildAgentInsights(a: AgentAnalytics, opts: { bandPct?: number }
     out.push(
       `Fairness over this range (on work share): cases max/min ${fm.casesMaxMinRatio === null ? 'n/a (an agent has 0)' : fm.casesMaxMinRatio.toFixed(2)}, ` +
         (showUtilisation
-          ? `cases CV ${fm.casesCv.toFixed(3)}, utilisation CV ${fm.utilCv.toFixed(3)}, Jain's index ${fm.utilJain.toFixed(3)} (1 = perfectly even).`
+          ? a.maskedForPooledFilter
+            ? `cases CV ${fm.casesCv.toFixed(3)}, utilisation CV ${MASK_DASH}, Jain's index ${MASK_DASH}.`
+            : `cases CV ${fm.casesCv.toFixed(3)}, utilisation CV ${fm.utilCv.toFixed(3)}, Jain's index ${fm.utilJain.toFixed(3)} (1 = perfectly even).`
           : `cases CV ${fm.casesCv.toFixed(3)}.`)
     );
   }
@@ -695,11 +715,8 @@ export function buildAgentAnalyticsNotes(a: AgentAnalytics, labor: LaborConfig, 
       Note: `${a.drainDates.join(', ')}: leftover work was cleared after the last day of data. The day counts as a day on shift with only the minutes actually on shift, which is why agents on shift that day show one more day, with fewer minutes than a full day on it.`,
     });
   }
-  if (a.pooledCategoryFilter) {
-    out.push({
-      Item: 'Category filter',
-      Note: `On a shared pool, Busy counts only the selected category's work. Idle is all of the agent's idle time, and Available is that Busy plus Idle, so it is smaller than the agent's full time on shift. ${showUtilisation ? 'Occupancy and Utilisation therefore read lower' : 'Occupancy therefore reads lower'} than the unfiltered figures, and per-category figures do not add up to them.`,
-    });
+  if (a.maskedForPooledFilter) {
+    out.push({ Item: 'Category filter', Note: POOLED_FILTER_NOTE });
   }
   return out;
 }
@@ -722,6 +739,8 @@ export function buildAgentAnalyticsExport(a: AgentAnalytics, labor: LaborConfig,
   const rd = (n: number | null) => (n === null ? '' : Math.round(n * 10) / 10);
   const range = `${a.dates[0] ?? '-'} to ${a.dates[a.dates.length - 1] ?? '-'}`;
   const scope = `audit run (single seed), ${range}, category ${a.filter.category ?? 'All'}, ${a.rows.length} agents`;
+  // Pooled run + category filter: the four figures that need the agent's full available time are written empty (not 0), see maskedForPooledFilter.
+  const m = a.maskedForPooledFilter;
   const summary = a.rows.map((r) => ({
     Agent: r.agentLabel,
     Category: r.category,
@@ -733,11 +752,11 @@ export function buildAgentAnalyticsExport(a: AgentAnalytics, labor: LaborConfig,
     'Cases Handed Over': r.casesHandedOver,
     Resumes: r.resumes,
     'Busy (min)': rd(r.busyMin),
-    'Available On-Shift (min)': rd(r.availableMin),
+    'Available On-Shift (min)': m ? '' : rd(r.availableMin),
     'Idle (min)': rd(r.idleMin),
-    'Scheduled (min)': rd(r.scheduledMin),
-    'Occupancy %': rd(r.occupancyPct),
-    ...(showUtilisation ? { 'Utilisation %': rd(r.utilisationPct) } : {}),
+    'Scheduled (min)': m ? '' : rd(r.scheduledMin),
+    'Occupancy %': m ? '' : rd(r.occupancyPct),
+    ...(showUtilisation ? { 'Utilisation %': m ? '' : rd(r.utilisationPct) } : {}),
     'Avg Handle (min per case of work share)': rd(r.avgHandleMin),
     'On-Shift Days': r.onShiftDays,
     'Cases per Day': rd(r.casesPerDay),

@@ -18,13 +18,15 @@ import {
   SLAPolicyConfig,
   StandardInterval,
 } from '../types/wfm';
-import { exportToExcelCSV } from '../utils/csv-parser';
+import { exportWithOutdatedNote } from '../utils/export-notes';
 import { idleAgentCategoryLabel } from '../utils/results-display';
 import { AgentAnalyticsPanel } from './AgentAnalyticsPanel';
 import { formatDateTime24, getCalendarWorkingDaysInHorizon, getDailyWindowLengthHours } from '../utils/calendar';
 import { resolveClockStartPolicy, verifyAgentTimelineInvariants } from '../utils/des-engine';
-import { buildBreachExportRows, buildCaseExportRows, buildSliceExportRows } from '../utils/export-rows';
-import { clampConfidenceLevelPct, effectivePrimaryTarget } from '../utils/hc-search';
+import { breachReason } from '../utils/breach-reason';
+import { buildStaffingLine } from '../utils/staffing-summary';
+import { buildBreachExportRows,buildCaseExportRows, buildSliceExportRows } from '../utils/export-rows';
+import { effectivePrimaryTarget, resolveCategoryAsaTargets } from '../utils/hc-search';
 import { CONFIRMED_TWO_SETS_TEXT, HISTORY_SECOND_SET_BADGE, historyPrimaryPasses, historyReasonText, representativeTone, startTimeSplitLines, startTimeSplitNotes } from '../utils/results-display';
 import {
   Users,
@@ -248,6 +250,9 @@ function ResultsFlowBody({
   const primarySizingFloor = effectivePrimaryTarget(sla.primaryPct, sla);
   const headlineTone = representativeTone(des.primaryAchievedPct, primarySizingFloor, !!searchOutput.infeasibleAdjacentWarning);
   const slackOn = sla.slaAcceptanceSlackEnabled === true;
+  // Item 3: the answer-time target each category is held to (own = ticked in Config; others use the global target).
+  const asaTargets = sla.boAsaEnabled ? resolveCategoryAsaTargets(categories, sla, calendar) : {};
+  const asaVerdicts = searchOutput.categoryAsa ?? {};
   const primaryTargetLabel = slackOn
     ? `sizing floor ${primarySizingFloor}% (policy ${sla.primaryPct}%)`
     : `${sla.primaryPct}%`;
@@ -477,16 +482,19 @@ function ResultsFlowBody({
     return verifyAgentTimelineInvariants(des, labor, calendar);
   }, [currentTab, des, labor, calendar]);
 
+  // What changed since the run, handed to every export so a stale file says so (trailing NOTE section).
+  const outdatedNote = { settings: settingsChangedSinceRun, data: dataChangedSinceRun };
+
   function handleExportCasesCSV() {
-    exportToExcelCSV(buildCaseExportRows(des.caseResults), 'wfm_simulated_cases.csv');
+    exportWithOutdatedNote(buildCaseExportRows(des.caseResults), 'wfm_simulated_cases.csv', outdatedNote);
   }
 
   function handleExportBreachedCasesCSV() {
-    exportToExcelCSV(buildBreachExportRows(breachedCases), 'wfm_sla_breach_cases.csv');
+    exportWithOutdatedNote(buildBreachExportRows(breachedCases, des), 'wfm_sla_breach_cases.csv', outdatedNote);
   }
 
   function handleExportQueueWipCSV() {
-    exportToExcelCSV(
+    exportWithOutdatedNote(
       des.intervalsTimeline.map((it) => ({
         'Interval Time': formatSafeDateTime(it.time),
         'Queued WIP': it.queuedWIP,
@@ -495,16 +503,17 @@ function ResultsFlowBody({
         'Cumulative Completed': it.completedCum,
         'Available Agents': it.availableAgents,
       })),
-      'wfm_queue_wip_timeline.csv'
+      'wfm_queue_wip_timeline.csv',
+      outdatedNote
     );
   }
 
   function handleExportAgentSlicesCSV() {
-    exportToExcelCSV(buildSliceExportRows(rawAgentSlices, rosterFloor), 'wfm_simulated_agent_slices.csv');
+    exportWithOutdatedNote(buildSliceExportRows(rawAgentSlices, rosterFloor), 'wfm_simulated_agent_slices.csv', outdatedNote);
   }
 
   function handleExportAgentSummaryCSV() {
-    exportToExcelCSV(
+    exportWithOutdatedNote(
       agentSummaries.map((a) => ({
         Agent: a.agentLabel,
         Source: a.rosterSource.toUpperCase(),
@@ -519,7 +528,8 @@ function ResultsFlowBody({
         'Daily Budget (min)': Math.round(a.dailyBudgetMinutes * 10) / 10,
         'Budget Compliant': a.hasBudgetViolation ? 'VIOLATION' : 'PASS',
       })),
-      'wfm_simulated_agent_summaries.csv'
+      'wfm_simulated_agent_summaries.csv',
+      outdatedNote
     );
   }
 
@@ -667,6 +677,15 @@ function ResultsFlowBody({
             </div>
           </div>
 
+          {sla.volumeVariability === true && (
+            <div
+              className="text-xs text-indigo-900 bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2.5 leading-relaxed"
+              data-testid="volume-variability-note"
+            >
+              <strong>Volume variability on:</strong> each interval's case count was drawn at random around your forecast. The recommended headcount includes a small buffer for this random variation (not for heavy days or forecast error). The baseline figures still use your forecast. Do not compare with runs where this is Off — run both if you want to see the size of the buffer.
+            </div>
+          )}
+
           {singleShiftNoLateStarts && !searchOutput.isInfeasible && (
             <div
               className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 leading-relaxed"
@@ -710,13 +729,12 @@ function ResultsFlowBody({
                 : searchOutput.primaryDrivenHC;
             const nMin = searchOutput.nMinAnalytical;
             const history = searchOutput.searchHistory || [];
-            const ciPct = clampConfidenceLevelPct(sla.confidenceLevelPct);
             const phase = isInfeasible
               ? 'Search Infeasible at Cap'
               : 'Sizing & Verification Complete';
             const currentMessage = isInfeasible
               ? `Search Infeasible: ${searchOutput.infeasibleReason || 'No compliant headcount found within search bounds.'}`
-              : `Optimal Staffing: ${recommendedN} Operational HC (Primary-Driven: ${searchOutput.primaryDrivenHC} with ${ciPct}% CI).`;
+              : buildStaffingLine({ recommendedN, primaryDrivenHC: searchOutput.primaryDrivenHC, bindingDescription: searchOutput.bindingConstraintDescription });
 
             return (
               <div className="bg-white rounded-2xl shadow-xs border border-slate-200 overflow-hidden flex flex-col">
@@ -1000,6 +1018,11 @@ function ResultsFlowBody({
                       </>
                     ) : null}
                   </div>
+                  {des.drainCapped === true && (
+                    <div className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2 leading-relaxed">
+                      The simulation stopped 366 days after the plan end because some deadlines lie further out — check the answer-window unit.
+                    </div>
+                  )}
                   {searchOutput.belowWorkloadFloor && (
                     <div className="text-[11px] text-red-800 bg-red-50 border border-red-200 rounded-lg px-2.5 py-2 leading-relaxed">
                       Req HC {searchOutput.recommendedHC} is below the workload floor (N_min {searchOutput.nMinAnalytical}, N_occ {searchOutput.occupancyFeasibleFloor ?? 'n/a'}). This team only clears the SLA by draining backlog after the planning horizon — treat as optimistic.
@@ -1105,13 +1128,18 @@ function ResultsFlowBody({
                   {des.boAsaMeanMinutes}m
                 </span>
                 <span className="text-xs text-slate-500">
-                  {sla.boAsaEnabled ? `target ≤ ${sla.boAsaTarget} ${sla.boAsaUnit}` : 'no ASA target enforced'}
+                  {sla.boAsaEnabled ? `global target ≤ ${sla.boAsaTarget} ${sla.boAsaUnit}` : 'no ASA target enforced'}
                 </span>
               </div>
+              {sla.boAsaEnabled && (
+                <span className="text-[10px] text-purple-700 block mt-1" data-testid="asa-own-rule">
+                  Each category must meet its answer-time target on its own (its own target if ticked, otherwise the global target).
+                </span>
+              )}
               <span className="text-[10px] text-slate-400 block mt-1">
                 {(sla.asaClockBasis || 'business_window') === 'business_window'
                   ? 'Mean wait time during open business hours'
-                  : 'Mean 24/7 elapsed wall-clock wait time'}
+                  : 'Mean 24/7 elapsed wall-clock wait time'}{sla.boAsaEnabled ? ' — all categories (for information)' : ''}
               </span>
             </div>
 
@@ -1228,6 +1256,18 @@ function ResultsFlowBody({
                         </td>
                         <td className="py-2.5 px-3 text-right font-sans font-mono text-purple-700 font-semibold">
                           {catStats?.asaMeanMinutes !== undefined ? `${catStats.asaMeanMinutes}m` : '0m'}
+                          {sla.boAsaEnabled && asaTargets[cat.category] && (() => {
+                            const t = asaTargets[cat.category];
+                            const v = asaVerdicts[cat.category];
+                            const label = t.own ? `own ${t.targetValue} ${t.targetUnit}` : `global ${t.targetValue} ${t.targetUnit}`;
+                            const state = !v ? 'not checked' : !v.judged ? 'no cases to measure, not checked' : v.passes ? 'met' : 'missed';
+                            const tone = !v || !v.judged ? 'text-slate-400' : v.passes ? 'text-emerald-600' : 'text-rose-600';
+                            return (
+                              <span className={`text-[10px] font-normal ml-1 ${tone}`} data-testid={`asa-target-${cat.category}`}>
+                                ({label}: {state}{v && v.judged ? `, upper bound ${v.ciHigh}m` : ''})
+                              </span>
+                            );
+                          })()}
                         </td>
                       </tr>
                     );
@@ -1509,7 +1549,7 @@ function ResultsFlowBody({
                 <option value="ALL">All Statuses</option>
                 <option value="COMPLETED">Completed Only</option>
                 <option value="BREACHED">Breached SLA Only</option>
-                <option value="UNFINISHED">Unfinished Remainder Only</option>
+                <option value="UNFINISHED" title="Cases not finished by the end of the simulation (deadline missed)">Unfinished Remainder Only</option>
               </select>
             </div>
 
@@ -1536,7 +1576,7 @@ function ResultsFlowBody({
                       <td className="py-2 px-3 whitespace-nowrap">{formatSafeDateTime(c.arrival)}</td>
                       <td className="py-2 px-3 whitespace-nowrap">{formatSafeDateTime(c.primaryDeadline)}</td>
                       <td className="py-2 px-3 whitespace-nowrap">{formatSafeDateTime(c.firstStartTime)}</td>
-                      <td className="py-2 px-3 whitespace-nowrap">{c.completeTime ? formatSafeDateTime(c.completeTime) : 'Unfinished'}</td>
+                      <td className="py-2 px-3 whitespace-nowrap">{c.completeTime ? formatSafeDateTime(c.completeTime) : <span title="Not finished by end of simulation">Unfinished</span>}</td>
                       <td className="py-2 px-3">{c.parkCount}</td>
                       <td className="py-2 px-3 text-right font-sans">
                         {c.overdueAtStart ? (
@@ -1994,7 +2034,7 @@ function ResultsFlowBody({
           })()}
 
           {/* 1c. Agent analytics (audit run) */}
-          <AgentAnalyticsPanel des={des} calendar={calendar} labor={labor} />
+          <AgentAnalyticsPanel des={des} calendar={calendar} labor={labor} outdatedNote={outdatedNote} />
 
           {/* 2. Secondary View: Slice Drill Down */}
           <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-xs space-y-4">
@@ -2389,10 +2429,10 @@ function ResultsFlowBody({
                           <td className="py-2 px-3 whitespace-nowrap">{formatSafeDateTime(c.primaryDeadline)}</td>
                           <td className="py-2 px-3 whitespace-nowrap text-amber-700">{formatSafeDateTime(c.latestSafeStart)}</td>
                           <td className="py-2 px-3 whitespace-nowrap">{formatSafeDateTime(c.firstStartTime)}</td>
-                          <td className="py-2 px-3 whitespace-nowrap">{c.completeTime ? formatSafeDateTime(c.completeTime) : 'Unfinished'}</td>
+                          <td className="py-2 px-3 whitespace-nowrap">{c.completeTime ? formatSafeDateTime(c.completeTime) : <span title="Not finished by end of simulation">Unfinished</span>}</td>
                           <td className="py-2 px-3">{c.parkCount}</td>
                           <td className="py-2 px-3 font-sans text-rose-700 font-medium whitespace-nowrap">
-                            {c.isCompleted ? 'Completed after primary deadline' : 'Unfinished by horizon end'}
+                            {breachReason(c, des)}
                           </td>
                         </tr>
                       ))}
@@ -2493,6 +2533,7 @@ function ResultsFlowBody({
                 <div>confidence_level_pct: {sla.confidenceLevelPct ?? 95}%</div>
                 <div>n_min_floor_enabled: {sla.nMinFloorEnabled !== false ? 'true' : 'false'}</div>
                 <div>below_workload_floor: {searchOutput.belowWorkloadFloor ? 'true' : 'false'}</div>
+                <div>volume_variability: {sla.volumeVariability === true ? 'true (random day-to-day volume swings)' : 'false'}</div>
                 <div>n_min_analytical: {rosterFloor} agents{searchOutput.nMinBeforeReduction !== undefined && ` (before reduction: ${searchOutput.nMinBeforeReduction})`}</div>
                 <div>primary_driven_hc: {primaryHC} agents</div>
                 <div>prng_seed: {simParams.seed}</div>

@@ -53,8 +53,8 @@ exploiting the simulation's drain-window edge effect (see below) while being uns
 in a repeating period.
 
 **Stage 4** grosses up *per category with its own shrinkage rate*, sums, then applies a
-single `ceil` — blending rates first or ceiling-ing per category both introduce systematic
-error. The blended-equivalent rate is a **harmonic** mean (not arithmetic), because gross-up
+single `round` (exact .5 rounds up, 1e-9 tolerance) — blending rates first or per-category
+rounding (drifts systematically) both introduce error. The blended-equivalent rate is a **harmonic** mean (not arithmetic), because gross-up
 divides by `(1 − shrinkage)`, so the quantity that adds linearly is `1/(1−shrinkage)`.
 
 ## The DES simulator — mechanics you need before touching `des-engine.ts`
@@ -101,8 +101,8 @@ change that breaks monotonicity silently breaks the search: it halts at a spurio
 reports a non-minimal headcount.
 
 **Terminating simulation, not steady-state.** Runs over a defined horizon from a defined
-opening WIP (not to statistical equilibrium), plus a **drain window** (up to 14 days past
-horizon end) so near-the-end arrivals aren't unfairly counted as failures. This creates an
+opening WIP (not to statistical equilibrium), plus a **drain window** (until the later of 14 days
+past horizon end or the last case deadline, capped at 366 days: `computeDrainEnd`) so near-the-end arrivals aren't unfairly counted as failures. This creates an
 edge effect the `N_min` floor exists specifically to guard against. Occupancy's denominator
 is the *planned horizon*, not the drained span — widening it would make an undersized team
 look adequately utilised because it took extra weeks.

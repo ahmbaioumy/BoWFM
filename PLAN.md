@@ -2083,3 +2083,363 @@ E5. **Stat output + wiring (sync and async through the shared function):** `comp
 E6. **Results:** the per-category ASA column (`ResultsFlow.tsx:~1229`) shows the target used ("own 30 min" / "global 60 min") and pass/fail; the headline ASA card states "global target applies to categories without their own target".
 E7. **Tests D82 add:** change global after load (copies follow, HC as today's behaviour for the new global); unit-only change of global; own tick on Claims_Life 90 with ASA on → measured and reported; single-run warning absent when own-target category passes; `days` unit with non-24h business calendar basis; unattainable own target → infeasible wording names the category; replications with primaryEligible 0 skipped; all-skipped → note not NaN; import of an old settings file without `boAsaOwn` → identical results.
 E8. Scope adds: `src/types/wfm.ts` (field), `src/components/ConfigFlow.tsx` (ASA column + template apply), `src/components/ResultsFlow.tsx` (E6), `src/App.tsx` (only if import/export needs the field passed through). Still no `des-engine.ts`, `csv-parser.ts`, `default-config.ts`.
+
+## Item 3 — owner decision 2026-10-15 (after review round 1) and rework F (OVERRIDES E4 and the follower pool)
+
+Review round 1 (commit 579ce44 in worktree `.claude/worktrees/agent-aa2f0409565b64922`): auditor PASS; user-side FAIL (no explanation of a jump caused via other categories; shared rows have no verdict; pooled figure not shown); challenger FAIL (builder's "a looser tick can only keep or lower HC" is false; follower-pool cliff 43 → 62 not decided by the owner). Tester stopped (semantics superseded).
+**Owner decision:** "Every category judged on its own" — no averaging across categories at all when answer time is on: each category must meet its own target if ticked, otherwise the global target, on its own (upper 95 % CI of that category's ASA ≤ its target). This REVERSES the earlier "identical to today with nothing ticked" for answer-time-ON runs; answer-time-OFF runs stay byte-identical.
+F1. Gate (in `computeStatisticalEvaluation` only): when `sla.boAsaEnabled`, for every category: target = own (ticked, E1) else global; E3 sample rules (skip primaryEligible 0, n/df = used, n = 0 → not checked + note). The pooled all-category ASA gate is REMOVED from pass/fail (pooled mean kept for display). Reasons start "BO ASA (category 'X') …"; `passesBoAsaCap` false if any category fails; fold into `categoryPasses`.
+F2. Labels / single-run flags: name the failing category and its target (own or global) in both searches; single-run flags per category with the same targets.
+F3. Results: per-category column shows target used ("own 30 min" / "global 60 min") and the gate verdict met / missed / not checked from the stat result (not the single run); headline ASA card: "Each category must meet its answer-time target on its own (its own target if ticked, otherwise the global target)." Pooled mean labelled "all categories (for information)".
+F4. Config rule text: same sentence; ticking without changing the value has no effect (say so in the cell hint).
+F5. Docs: PRD L30/§6 rewritten (remove the false "looser tick" claim and the follower-pool text), version 1.26.0 stays (unreleased) or 1.26.1; project_context, docs/wfm/07, FINDINGS.
+F6. Tests: D82 updated — no follower pool; nothing ticked + ASA on → every category vs global; ASA off byte-identical to 24c21f2; existing ASA-on pins may move UP only (report each old → new); measure three samples + support + AJM_Only with ASA 60 before/after; mutation: restore pooled gate → D82 fails.
+
+---
+
+# BUILD PLAN — Item 4: drain period runs until the last deadline (G9, DES-10), 2026-10-16
+
+**Task:** the simulation keeps working after the planning horizon until the later of (horizon end + 14 days) and the latest case deadline, so no case is counted as failed before its deadline has passed.
+**End user:** WFM planner. **Tier 3** (headcount numbers). Reviewers: `tester` + `auditor` + `user-side` + final `challenger`.
+**Skills:** `wfm-sizing-simulation`, `wfm-engine-testing`, `browser-automation`.
+**Owner decision 2026-10-15:** drain end = later of (horizon end + 14 days) and the last case deadline.
+
+## Facts (investigator 2026-10-15, probe scratch `r3/q_p2b2.mts`)
+- `drainHorizonEnd = horizonEnd + 14 calendar days`, hand-rolled (`des-engine.ts:865`); agent day-scheduling loop `:1162-1213` stops there.
+- Cases unfinished at drain end count as SLA failures even if their deadline lies after drain end.
+- Repro: vol 20 → HC 8 without holidays; 12 with 8 holidays after the horizon (deadlines pushed past drain end). Expected after fix: 8.
+- Occupancy denominator = planned horizon, unchanged (frozen decision 3). ASA-gated runs may move slightly (later starts no longer censored).
+- Tests to re-check: D59.1 / D59.3 (re-pin with reason), AA.41 / AA.45d.
+
+## Design
+1. One helper computes the drain end: latest deadline over ALL cases the run will judge (primary deadline; secondary/other deadlines too if the engine judges them — builder confirms and reports), maximum with horizon end + 14 days. Deadlines are already business-calendar timestamps; any date shift goes through `calendar.ts` (replace the hand-rolled +14 days if a calendar helper fits without changing the result; otherwise keep it and say why).
+2. Agent day-scheduling, event loop end, unfinished-case counting all use that one value. Sync and async searches go through the same engine call (no duplicate logic).
+3. Occupancy denominator, N_min, N_occ, Gross HC untouched.
+4. Safety: a hard upper bound (e.g. horizon end + 366 days) to stop a bad deadline from making the run endless; if hit, the run proceeds with the bound and existing unfinished-case counting (report whether any sample/test reaches it).
+5. Deterministic: no `new Date()` / `Date.now()`.
+
+## Steps (builder `sonnet-executor`, fail-first)
+1. Checkpoint commit. Tests first — suite **D83** before the RESULTS block of `scripts/verify-sizing-fixes.mts`:
+   a. Holiday repro (vol 20, 8 post-horizon holidays): recommended HC equals the no-holiday value (8); fails on today's code.
+   b. Engine unit: a case whose deadline is after horizon + 14 days and that is finished before its deadline is counted as met (not unfinished).
+   c. Drain end = horizon + 14 days when every deadline is earlier (no change for short SLAs).
+   d. Sync == async on the repro.
+   e. Three built-in samples at defaults unchanged (31 / 27 / 31 HC; gross 40 / 34 / 39) and occupancy % unchanged.
+   f. Determinism: two runs byte-identical.
+2. Implement design 1–5 in `des-engine.ts` (plus `calendar.ts` only if a helper is needed).
+3. D59.1 / D59.3 / AA.41 / AA.45d: re-run; any change reported with reason, never silently re-pinned.
+4. `npm run lint`, `npm run build:standalone`, `npm test` once.
+5. Measure before/after, idle, one job at a time: three samples, AJM_Only, EGS_Only, repro — HC, gross, SLA %, occupancy %, runtime. Table into FINDINGS.md. Flag any case slower than 1.5x.
+6. Docs: `PRD.md` (G9/DES-10 resolved, glossary "drain", version bump), `project_context.md` (§5 drain, §11), `docs/wfm/06` (`:159` drain text), `docs/wfm/07` if a D-entry mentions the 14 days.
+
+## Scope lock
+`src/utils/des-engine.ts`, `src/utils/calendar.ts` (only if needed), `scripts/verify-sizing-fixes.mts` (D83 + listed re-pins), `scripts/verify-fixes.mts` (AA.41 / AA.45d only if they change, with reason), `PRD.md`, `project_context.md`, `docs/wfm/06-*.md`, `docs/wfm/07-known-defects-and-decisions.md`, `FINDINGS.md`, rebuilt `BoWFM.html`. No `hc-search.ts`, no UI component, no `package.json`.
+
+## Acceptance criteria and proof
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | Holidays after the horizon no longer inflate HC | D83.a: 8 with and without holidays |
+| 2 | No case failed before its deadline | D83.b |
+| 3 | Short-SLA runs unchanged | D83.c, D83.e; three samples identical |
+| 4 | Occupancy unchanged | D83.e occupancy %; diff shows denominator untouched |
+| 5 | Sync = async, deterministic | D83.d, D83.f |
+| 6 | Changes listed | FINDINGS table, every moved case old → new |
+| 7 | Run time acceptable | idle runtime; flag > 1.5x |
+| 8 | No regression | lint clean; `npm test` green (1,756 + D83) |
+| 9 | Mutation proof | revert drain end to +14 days only → D83.a/b fail |
+| 10 | Docs + artifact | PRD / project_context / docs updated; `npm run check:artifact` passes |
+| 11 | Scope | `git diff <checkpoint>..HEAD --stat` only scope files |
+
+## Item 4 — amendments after the plan challenge (2026-10-16). These OVERRIDE the item 4 text above.
+Challenger verdict: fail (6 majors, 4 minors) — all accepted as below.
+G1. **D59 redesign, not re-pin.** D59.1/.2/.3 (`verify-sizing-fixes.mts:4550-4587`) move to 9/10 because their deadlines (Oct 30) now fall inside the drain. Redesign D59 so it still proves "unfinished cases stay in the denominator": e.g. agent too slow to finish all cases before their deadline, so 4 remain unfinished at the new drain end. Keep the 6/10, 60 % expectations if the redesign allows. Builder also sweeps every hand-built `precomputedCases` test with far deadlines and reports any that move.
+G2. **Scope fix:** AA.41 / AA.45d are in `scripts/verify-agent-analytics.mts` (`:270-274`, `:345`), not `verify-fixes.mts`. Add that file to the scope (edits only if they move, with reason). Remove `verify-fixes.mts` from scope.
+G3. **ASA (answer time):** keep the existing measuring rule (a case that never starts is censored at horizon end; a case that starts has its real wait counted). The longer drain means more cases start, so their real wait is counted — more honest, may RAISE HC on ASA-gated runs. D83.g: ASA on + multi-week answer window fixture, report ASA and HC before/after. Measure ASA-on 60 for the three samples and AJM_Only before/after (item 3 figures: claims 31, healthcare 52, support 62, AJM_Only 41).
+G4. **Deadline guard:** drain end = min( max(horizonEnd + 14 days, max over cases of finite `primaryDeadline`), horizonEnd + 366 days ). Non-finite deadlines skipped. D83.h: a NaN deadline does not break the run (agents work, result equals the run without that case's deadline effect). Result flag `drainCapped: true` on `DESResult` when the cap bit (types/wfm.ts added to scope for this optional field only); D83.i asserts it. No UI for the flag in this build (backlog).
+G5. **Run time:** measure a multi-week answer-window scenario (e.g. support sample with primary window 15 working days and 30 working days) before/after, plus the samples. Do NOT add lazy day scheduling in this build; if any case > 1.5x slower, report to supervisor with figures (owner decides).
+G6. **Per-agent figures:** for runs that do not finish, per-agent available/idle minutes and the timeline now extend to the later drain end (legitimate metric; frozen decision 3 denominator untouched). D83.j: undersized long-window run — timeline invariants hold (`verifyAgentTimelineInvariants` or equivalent: contiguous, no overlap). Report utilisation change for the audit fixture.
+G7. Only `primaryDeadline` exists (`wfm.ts:301`); judgement `completeTime <= primaryDeadline` (`des-engine.ts:1992`). No secondary deadlines; backlog/overdue cases cannot extend the drain.
+G8. **Keep the ms arithmetic** for +14 days (`:865`) — no calendar helper swap (DST risk). Compute the max once per run from the case array (same for every candidate N; CRN preserved).
+G9. **Mutation proof (criterion 9)** adds: max applied to the scheduling loop (`:1162`) but not to SimulationEnd (`:866`), and the reverse — D83.a/b must fail in both.
+
+---
+
+# BUILD PLAN — Item 5: manual backlog form default (G10, DES-7), 2026-10-16
+
+**Task:** in the manual backlog (opening work-in-progress) form, a blank "remaining time" means the full handling time of the case's category, so new manual backlog no longer jumps ahead of new cases as if part-worked.
+**End user:** WFM planner. **Tier 2** (form + docs; engine unchanged; headcount changes only through what the user enters). Reviewers: `tester` + `auditor` + `user-side`; final `challenger`.
+**Owner decision 2026-10-15:** fix the form default only; an explicitly entered remaining < AHT keeps in-progress priority. No engine change.
+
+## Facts (investigator 2026-10-15, probe scratch `r3/q_p4.mts`)
+- Engine rule already: remaining < full AHT → in-progress priority (`des-engine.ts:187-188, 270`).
+- Defect: manual form defaults remaining to 30 min (`DemandFlow.tsx:106, 276, 301`) while sample AHTs are 35/45/60, so every manual backlog case counts as part-worked.
+- Imported files without a remaining column already get full AHT.
+- Probe (VOL=1, 30 backlog, N=1): new-case SLA 51.7 % part-worked vs 91.7 % full.
+
+## Design
+1. Form field "remaining minutes" starts blank, with a hint: "Leave blank = not started (full handling time of the category)." Blank stored as "not set" so the engine path that already gives full AHT is used (same path as an import without the column) — builder confirms which representation (undefined / null / omitted) the engine and CSV path use and reuses it; no new engine branch.
+2. An entered value is kept exactly as today (validation unchanged; a value ≥ AHT behaves as not started, as today).
+3. Existing saved/loaded configs (JSON import/export of a scenario) with a numeric remaining keep their value; only the form default changes. Check any template/sample that pre-fills backlog.
+4. Summary/list of manual backlog rows shows "full" (or the AHT) when blank, not "30".
+
+## Steps (builder `sonnet-executor`, fail-first where testable)
+1. Tests first in `scripts/verify-sizing-fixes.mts` suite **D84**: (a) the form's default row object (extract a pure helper if the default lives inline in JSX, e.g. `createManualBacklogRow(category)` in a small util) has no remaining value; (b) a backlog row with no remaining value reaches the engine as not part-worked (full AHT, no in-progress priority) — via the same conversion the form uses; (c) an explicit remaining 10 < AHT keeps priority; (d) samples unchanged (31/40, 28/35, 31/39).
+2. Implement in `src/components/DemandFlow.tsx` (+ the small helper file if extracted).
+3. lint, build:standalone, fast suites + D84 via trimmed copy; full `npm test` once at the end.
+4. Browser: add a manual backlog row, leave remaining blank → hint visible, row shows full; run → no console errors; with probe-like input new-case SLA is the full-AHT value.
+5. Docs: PRD (G10/DES-7 resolved, form text, version 1.27.2), project_context §11, docs/wfm if backlog input is described; rebuild BoWFM.html; `npm run check:artifact`.
+
+## Scope lock
+`src/components/DemandFlow.tsx`, optional new `src/utils/<backlog-row helper>.ts`, `scripts/verify-sizing-fixes.mts` (D84 only), `PRD.md`, `project_context.md`, `docs/wfm/*` (backlog text only), `FINDINGS.md`, `BoWFM.html`. No engine files, no `package.json`.
+
+## Acceptance criteria
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | Blank = not started | D84.a/b; browser row shows full handling time |
+| 2 | Entered value kept | D84.c; browser enter 10 → shown and used |
+| 3 | Samples unchanged | D84.d; browser samples |
+| 4 | Hint visible and clear | browser screenshot; user-side |
+| 5 | No regression | lint; `npm test` green |
+| 6 | Docs + artifact | PRD / project_context; `check:artifact` passes |
+| 7 | Scope | diff stat only scope files |
+
+## Item 5 — amendments after the plan challenge (2026-10-16). These OVERRIDE the item 5 text above.
+Challenger: fail (4 majors, 4 minors) — all accepted.
+H1. **Representation = undefined.** `OpeningWIPCase.remainingWorkMinutes` becomes optional (`wfm.ts:258`, `?: number`). Engine already tolerates undefined (`des-engine.ts:566`, `hc-search.ts:2131/3183/3950`, `csv-parser.ts:1563`): blank inherits the CURRENT category AHT (also the sensitivity-reduced AHT), so editing the AHT later never turns the row part-worked. File import (`wip-import.ts:159-171`, numeric AHT copy) unchanged.
+H2. **Input:** replace the `NumberField` for "Remaining Work" (`DemandFlow.tsx:808-813`) with a plain blank-capable number input (local to DemandFlow; do not change shared `NumberField.tsx`). Placeholder/hint: "Blank = not started (full handling time of the category)". State `useState<number | undefined>(undefined)` (`:106`).
+H3. **Validation:** blank → undefined; typed value > 0 → kept; typed 0, negative or non-numeric → treated as blank (undefined) with no error, hint stays. Unknown category: undefined is still stored (engine uses its AHT path); the `|| 30` fallback is removed.
+H4. **Whole row builder extracted** to a pure helper (e.g. `src/utils/wip-row.ts`: `buildManualWipCase(input)`), called by `handleAddWipCase` (`:276`). D84 tests the helper and runs `generateCaseEntities` on a blank row: `remainingWorkMinutes === totalAhtMinutes`, not parked/in-progress; typed 10 keeps priority; typed 0/-5/NaN → undefined; edit category AHT after adding blank row → still not started; Total Pending Work uses category AHT for blank rows.
+H5. **Display:** row list `:1262` shows "full (<AHT>m)" when undefined; import preview `:1171` unchanged unless it can receive undefined; Total Pending Work `:1232-1236` falls back to category AHT (extract the total into the helper file so D84 can test it). Check `run-inputs.ts:66` fingerprint and `App.tsx:162/227/264` remap keep undefined.
+H6. Scenario export does not include openingWIP (`App.tsx:426-435`) — no saved-scenario migration needed.
+H7. Docs say plainly: manual backlog rows left blank are now sized at full handling time, so headcount (and N_min / baseline) can rise versus the old 30-minute default where AHT > 30.
+H8. Scope lock adds: `src/types/wfm.ts` (that one field), `src/utils/wip-row.ts` (new), `src/utils/run-inputs.ts` and `src/App.tsx` only if undefined is not preserved (report). D84.d samples check dropped (trivial); instead a probe-like before/after measurement (r3/q_p4.mts: 51.7 % vs 91.7 %) reported in FINDINGS.
+
+---
+
+# BUILD PLAN — Item 6: rounding ties (F4, HC-1 + HC-5), 2026-10-16
+
+**Task:** tiny floating-point errors must never change a headcount: an exact .5 Gross HC always rounds up whatever the category order, and an exact whole-number workload ratio gives the intended N_min.
+**End user:** WFM planner. **Tier 3** (headcount numbers). Reviewers: `tester` + `auditor` + `user-side` + final `challenger`.
+**Owner decision:** exact .5 always rounds UP; result independent of category order. Frozen decision 7 (per-category gross-up, sum, single `round`) otherwise unchanged.
+
+## Facts (investigator 2026-10-15)
+- Gross: `Math.round(sumGrossHC)` (`hc-search.ts:~2213`). 10 agents, 5 categories at 20 % shrinkage → 12 or 13 depending on category order (sum 12.499999…).
+- N_min: FLOOR-based (`:132`). 123.75 h case → 1 because the ratio is 1.9999… → expected 2.
+- N_occ: ceiling (`:158`); an exact whole ratio computed as x.0000001 would round up one too many.
+- Tests pinning these: D10, D11, D12, D60 (re-check; re-pin only with reason).
+
+## Design
+1. One small shared helper (e.g. `snap(x)` = round x to 9 decimal places, or the tolerance form `round(x + 1e-9)`, `floor(x + 1e-9)`, `ceil(x − 1e-9)`), used at those three sites only — the builder confirms every other `Math.round/floor/ceil` that produces a headcount (grep hc-search.ts, des-engine.ts allocation, ResultsFlow display, sensitivity, F7 `operationalHCWithOff` floor `:2145-2147`) and reports which ones also need it; F7 floor gets the same tolerance (owner kept floor, not the epsilon question).
+2. Tolerance relative enough for large headcounts (e.g. 1e-9 × max(1, |x|)) — builder justifies.
+3. Sync and async share the code (no duplication).
+
+## Steps (builder `sonnet-executor`, fail-first)
+1. Suite **D85** first: (a) 10 agents, 5 categories at 20 % → 13 in every category order (all 120 permutations); (b) 123.75 h case → N_min 2; (c) N_occ exact whole ratio not bumped; (d) genuine 12.4999 (not a float artefact, e.g. 12.49) still rounds to 12; (e) three samples unchanged (31/40, 28/35, 31/39); (f) F7 example unchanged (HC 10, 5 open days, 4 worked → 12 → Gross 15).
+2. Implement.
+3. Re-run D10/D11/D12/D60; report any change with reason.
+4. lint, build:standalone, full `npm test` once.
+5. Measure audit fixtures/samples before/after: HC, gross — table into FINDINGS.
+6. Docs: PRD (F4 resolved, rounding rule text, version 1.27.3 → owner-visible behaviour), project_context §5/§6.7 note on tolerance, docs/wfm/07 entry; rebuild; check:artifact.
+
+## Scope lock
+`src/utils/hc-search.ts`, `scripts/verify-sizing-fixes.mts` (D85 + listed re-pins), `PRD.md`, `project_context.md`, `docs/wfm/07-known-defects-and-decisions.md`, `FINDINGS.md`, `BoWFM.html`. Others (des-engine.ts, results-display.ts) only if step-1 grep finds a headcount rounding site needing the same fix — report before editing.
+
+## Acceptance criteria
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | Order-independent .5 → up | D85.a all permutations |
+| 2 | N_min exact ratio | D85.b |
+| 3 | Genuine values untouched | D85.c/d |
+| 4 | Samples unchanged | D85.e; browser |
+| 5 | No regression | lint; npm test green |
+| 6 | Mutation proof | remove tolerance → D85.a/b fail |
+| 7 | Docs + artifact | PRD / project_context / docs 07; check:artifact |
+| 8 | Scope | diff stat |
+
+## Item 6 — amendments after the plan challenge (2026-10-16). These OVERRIDE the item 6 text above.
+Challenger: fail (3 majors, minors) — accepted.
+J1. **Only two sites change:** Gross `Math.round(sumGrossHC)` (anchor text, ~`hc-search.ts:2224`) → `Math.round(sumGrossHC + 1e-9)`; N_min `Math.floor(W / (...))` (~`:133`) → `Math.floor(ratio + 1e-9)`. Absolute 1e-9 (double error ≈ 2e-16·|x|; no relative form). Anchor on code text, not line numbers.
+J2. **Dropped:** F7 floor tolerance (integer division, exact — no-op) and N_occ ceil tolerance (0 mismatches measured, FINDINGS:91). No edits there.
+J3. **D85.a fixture must go red first:** builder finds concrete inputs (category workloads/shrinkages, e.g. investigator's probe in scratchpad r3 or AJM_Simu-like shares) where `sumGrossHC` is 12.4999… in some category order, records the red run (all 120 orders: results differ / some 12) before implementing. If no realistic input reproduces it, report and stop at that step (do not invent).
+J4. D85.b: N_min example 123.75 h with 7.5 h × 15 days × 0.55 adherence × cap 100 % → 2 (red before: 1). D85.d boundary: 12.5 − 5e-10 → 13; 12.5 − 1e-7 → 12; 12.49 → 12. N_min boundary analog (1.9999999999 → 2; 1.9999 → 1).
+J5. Expected movement: any fixture with a true tie may move (e.g. 12 → 13); listed in FINDINGS as intended, not a regression. Full `npm test` reports any moved check; no silent re-pins. Add a tie scenario to trusted-source-validation.json only if cheap (scope add, optional).
+J6. Docs: "nearest whole HC; an exact half rounds up" wording in PRD/project_context/docs 07; note per-category Gross shown to 2 decimals may not sum to the total at a tie (pre-existing). Late-starter split `Math.round(share*seats)` (~:1011) untouched; mention in report.
+
+---
+
+# BUILD PLAN — F7 (docs) + G7 (pooled category filter display, UI-2, L29), 2026-10-16
+
+**Task:** (F7) document the approved rule that, when the team works fewer days than the calendar is open, the team total is rounded down before gross-up; (G7) on a POOLED run, when the agent table/chart is filtered by category, per-agent occupancy and available time show a dash with a short note, because pooled agents' idle time cannot be split by category (owner principle: occupancy is per agent; per queue only for dedicated queues).
+**End user:** WFM planner. **Tier 2** (display + docs; no headcount change). Reviewers: `tester` + `auditor` + `user-side`; final `challenger`.
+
+## Facts (investigator 2026-10-15)
+- F7: `operationalHCWithOff = floor(operationalHC × openDays / coverageDays)` (`hc-search.ts`, text anchor `Math.floor((operationalHC * openDaysPerWeek) / coverageDays)`), team total before gross-up; approved earlier (project_context §5, §6.7; D40.1/2b). Example: HC 10, open 5 days, team works 4 → floor(12.5) = 12 → Gross 15 (carrying 12.5 would give 16).
+- G7: `pooledCategoryFilter` exists (`agent-analytics.ts:~552`), note text `:~698-702`; dash needed in table (`AgentAnalyticsPanel.tsx:~424-427`), team row (`:~446-449`), chart (`:~102-140`), insight (`agent-analytics.ts:~627-632`), export (`:~736-739`). Siloed (dedicated) runs keep per-queue figures; unfiltered pooled view unchanged.
+
+## Design
+1. F7: PRD §10 L14 states the rule, the example, and that it is an accepted owner decision (2026-10-15). project_context §6.7 cross-reference. No code.
+2. G7: when `pooledCategoryFilter` is true: occupancy % and available/idle minutes per agent and in the team row show "—"; busy (handling) minutes for the filtered category stay (they are real); chart hides/greys the occupancy series with the note; insight text does not quote a split occupancy; CSV export writes an empty value (not 0) for those columns plus the note in the header/notes row. One shared predicate drives all sites.
+3. Siloed runs and the unfiltered pooled view: byte-identical figures.
+
+## Steps (builder `sonnet-executor`)
+1. Tests first in `scripts/verify-agent-analytics.mts` (new AA checks): pooled + category filter → occupancy/available null-or-dash in the analytics model, export empty, note present; siloed + filter → numbers unchanged; pooled unfiltered → unchanged.
+2. Implement in `src/utils/agent-analytics.ts`, `src/components/AgentAnalyticsPanel.tsx`.
+3. lint, build:standalone, fast suites; full `npm test` once.
+4. Browser: pooled sample, filter a category → dashes + note in table, team row, chart, export; siloed sample filter → numbers; 0 console errors.
+5. Docs: PRD (L29 resolved, F7 L14 text, version 1.27.4), project_context, docs/wfm if agent analytics described; rebuild; check:artifact.
+
+## Scope lock
+`src/utils/agent-analytics.ts`, `src/components/AgentAnalyticsPanel.tsx`, `scripts/verify-agent-analytics.mts`, `PRD.md`, `project_context.md`, `docs/wfm/*` (analytics/F7 text only), `FINDINGS.md`, `BoWFM.html`. No engine files.
+
+## Acceptance criteria
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | Pooled + filter shows dash + note everywhere (table, team row, chart, insight, export) | AA tests; browser |
+| 2 | Siloed and unfiltered views unchanged | AA tests; browser numbers |
+| 3 | No headcount change | samples 31/40, 28/35, 31/39 |
+| 4 | F7 documented | PRD L14 text |
+| 5 | No regression | lint; npm test green |
+| 6 | Docs + artifact | check:artifact |
+
+## F7 + G7 — amendments after the plan challenge (2026-10-16). These OVERRIDE the text above.
+Challenger: fail (4 majors) — accepted.
+M1. **Option stays dash** (owner decision recorded under "Decided, no engine change": occupancy and available time show a dash with a short note). Showing unfiltered per-agent occupancy is NOT chosen: the filter's purpose is category work, and the unfiltered figure is already visible with the filter off.
+M2. **Masked sites (pooled + category filter):** Available, Scheduled, Occupancy %, Utilisation % per agent and in the team row; chart body replaced by the note (including SVG title/desc and bar tooltips); insights that quote occupancy/utilisation ranking (`agent-analytics.ts` ~:627-632, ~:642-646); fairness metrics built on utilisation (utilCv, utilJain) shown as "—"; CSV export columns Available / Scheduled / Occupancy % / Utilisation % written empty. **Kept:** Busy (filtered category handling — real) and Idle (the agent's own full idle — per agent, not split).
+M3. **Model:** keep raw values in the model; add a flag (e.g. `maskedForPooledFilter: true` on the analytics result) set by the one shared predicate; every view and the export honour it. Tests pin dashes via the UI helper / export output, not the model.
+M4. **Tests to rewrite (with reason):** AA.44d (note text), AA.44f (note claim "Available smaller / reads lower" no longer shown) — update to the new note; AA.38 (scheduled − available per day on the model) stays valid because the model keeps raw values — confirm. New AA checks: pooled+filter export empty columns; flag set; single-category pooled run filtered on its only category → masked too (accepted: consistent rule, note explains); 'Pooled' option selected → masked; siloed+filter and pooled unfiltered → unchanged.
+M5. **New note text:** "Pooled team: agents serve every category, so their available time and occupancy cannot be split by category. Busy shows only the selected category's handling; Idle is each agent's full idle time. Clear the filter to see occupancy."
+M6. **F7 is already documented** (PRD §6 Stage 4 :1144/:1159-1161/:1172, :1733; project_context :552/:567/:579). Only add, in the Stage 4 area (not L14), one worked example with stated shrinkage: HC 10, open 5 days, team works 4 days, 20 % shrinkage → floor(12.5) = 12 → Gross 15 (carrying 12.5 would give 16); mark F7 "decided: keep floor (owner 2026-10-15)" in the backlog/decisions list.
+M7. Browser: name the samples used for pooled (check sample config) and for siloed (switch staffing model to siloed on one sample); check both.
+
+---
+
+# BUILD PLAN — Item 7: opt-in volume variability (Poisson arrival counts), 2026-10-17
+
+**Owner confirmed 2026-10-17** ("yes consider for 7"); parallel lane B (worktree `wt-item7`, branch `item7-poisson`), alongside lane A (G7 → P2-13). Lanes never edit the same source file; docs reconciled at merge; `BoWFM.html` rebuilt only after merge to main.
+**Task:** an opt-in switch (default OFF) makes each interval's case count random around the forecast (Poisson, mean = forecast volume) so the planner can see the extra staff needed when volumes vary.
+**End user:** WFM planner. **Tier 3** (headcount when ON). Reviewers: `tester` + `auditor` + `user-side` + final `challenger`.
+**Skills:** `wfm-sizing-simulation`, `wfm-engine-testing`, `browser-automation`.
+
+## Design (from roadmap line, to be verified by the challenger)
+1. Flag on SLA config (e.g. `sla.volumeVariability === true`), default OFF; OFF = byte-identical results (regression test on samples and audit fixtures).
+2. ConfigFlow toggle next to "Workload Floor", with a one-line explanation.
+3. Per interval, count ~ Poisson(mean = interval volume) from a SEPARATE seeded stream keyed by (replication seed, interval index) so Common Random Numbers hold across candidate N (same counts for every N in a replication) and the existing arrival-time/AHT streams are not shifted. Normal approximation (rounded, clamped ≥ 0) above ~30 expected; exact Poisson (e.g. Knuth / inversion) below. Deterministic, seeded `createPrng` only.
+4. Opening WIP (backlog) fixed. Replications R unchanged (wider CI may raise HC — intended).
+5. Confirmation block (item 2) uses its own seeds the same way.
+6. N_min / N_occ / Gross stay on forecast volume (analytical stages unchanged) — or state otherwise with reason.
+7. Results badge + note: "Volume variability on: not comparable with replay runs." Run inputs fingerprint includes the flag (stale-results warning). Sensitivity grid honours the flag.
+
+## Steps (builder `sonnet-executor`, fail-first)
+1. Suite D86 in `scripts/verify-sizing-fixes.mts`: (a) OFF byte-identical (samples HC/gross + digest); (b) ON deterministic (two runs identical); (c) ON counts: mean over many intervals ≈ volume, variance ≈ mean (Poisson), small and large volumes; (d) CRN: same counts at N and N+1 within a replication; (e) sync == async ON; (f) ON HC ≥ OFF HC on samples (report values); (g) toggle in fingerprint.
+2. Implement (engine case generation in `des-engine.ts` / wherever precomputed case sets are built; types; ConfigFlow; ResultsFlow badge).
+3. lint, build:standalone (inside worktree only; artifact not committed from lane — or committed and re-built at merge), fast suites, full `npm test` once — scheduled when lane A is not running its full test (supervisor coordinates).
+4. Measure OFF vs ON (idle machine): three samples, AJM_Only, EGS_Only — HC, gross, SLA %, runtime.
+5. Docs: PRD (new FR + limitation, version bump at merge), project_context §5/§11, docs/wfm/06 (arrivals).
+
+## Scope lock (lane B)
+`src/utils/des-engine.ts`, `src/utils/hc-search.ts` (only if case-set generation lives there), `src/types/wfm.ts`, `src/components/ConfigFlow.tsx`, `src/components/ResultsFlow.tsx`, `src/utils/run-inputs.ts`, `src/utils/default-config.ts` (default OFF), `src/components/SensitivityFlow.tsx` (only if needed to pass the flag), `scripts/verify-sizing-fixes.mts` (D86), `PRD.md`, `project_context.md`, `docs/wfm/06-simulation-des.md`, `FINDINGS.md`. NOT: `agent-analytics.ts`, `AgentAnalyticsPanel.tsx`, `verify-agent-analytics.mts` (lane A).
+
+## Acceptance criteria
+| # | Criterion | Proof |
+|---|---|---|
+| 1 | OFF identical to today | D86.a; samples 31/40, 28/35, 31/39 |
+| 2 | ON is Poisson and deterministic | D86.b/c |
+| 3 | CRN preserved, sync = async | D86.d/e |
+| 4 | Planner sees it is on | browser: toggle, badge, note |
+| 5 | Headcount effect measured | FINDINGS table OFF vs ON |
+| 6 | Runtime acceptable | ON vs OFF, idle machine; flag > 1.5x |
+| 7 | No regression | lint; npm test green |
+| 8 | Mutation proof | share the arrival stream with case stream → D86.d fails; ignore flag in async → D86.e fails |
+| 9 | Docs + artifact | at merge: rebuild, check:artifact |
+
+## Item 7 — amendments after the plan challenge (2026-10-17). These OVERRIDE the item 7 text above.
+Challenger: fail (5 majors) — accepted; decisions:
+P1. **Roster and siloed seats use forecast demand, not the noisy draw.** When ON, roster design (shift placement, coverage repair, rescue ladder — all read `precomputedCaseSets[0].cases`, `hc-search.ts` ~3262/3276/3313/3397/3416/3606/4068/4249) uses a replay (OFF-style) case set generated from the same seed; siloed seat apportionment (`allocateSiloedSeats`, `des-engine.ts:~997`) uses forecast (replay) workload, so seats are fixed across replications as in real life. One shared way for sync and async. Test: siloed ON → per-category seats identical across replications and equal to OFF seats.
+P2. **ON mean = raw interval volume** (the forecast expectation); intervals with volume ≤ 0 draw nothing and generate nothing. OFF keeps `Math.round(volume)`. The difference for fractional volumes is documented (PRD limitation) and reported in measurements.
+P3. **Stream:** one count stream per replication from a mixed seed (e.g. `(repSeed ^ 0x9e3779b9) >>> 0`), drawn in interval order; exact Poisson (Knuth) for mean < 30, normal approximation (Box–Muller, rounded, clamped ≥ 0) for ≥ 30; consumption documented. The arrival-time stream `createPrng(seed)` untouched. OFF path: the only new branch is `if (sla.volumeVariability === true)`, no extra PRNG call when OFF.
+P4. **Tests (D86) rewritten so they can fail:** (a) OFF digest of `generateCaseEntities` output (ids, arrivals, deadlines) identical to main for samples + a fractional-volume fixture; plus samples HC/gross; (b) ON deterministic; (c) Poisson stats with ≥ 20,000 draws per λ ∈ {0.4, 3, 29, 31, 400}: |mean−λ| ≤ 4·sqrt(λ/n); variance ratio in [0.85, 1.15] (normal path var ≈ λ+1/12, ±10 %); (d) direct `generateCaseEntities`: counts unchanged when an unrelated category's volume changes, and equal to a standalone count stream for the same seed; (e) sync == async ON on a small fixture + roster/seat test of P1; (f) ON vs OFF HC REPORT-ONLY (no assertion); (g) fingerprint includes flag (no code needed — `sla` section stringified). Mutation proofs: count draws from the arrival stream → D86.a or (d) fails; roster from noisy set → P1 test fails.
+P5. **Wording:** toggle + badge/note say it models random arrival counts around the forecast (day-to-day noise), NOT forecast error; N_min / N_occ stay on forecast volume. PRD limitation: per-interval Poisson averages out over long horizons; may show little extra staff; does not replace a forecast-error buffer.
+P6. **Scope trimmed:** `src/types/wfm.ts`, `src/utils/default-config.ts`, `src/utils/des-engine.ts`, `src/utils/hc-search.ts` (P1 only), `src/components/ConfigFlow.tsx`, `src/components/ResultsFlow.tsx` (badge + exported inputs block `~:2519`), `scripts/verify-sizing-fixes.mts` (D86), `PRD.md`, `project_context.md`, `docs/wfm/06-simulation-des.md`, `FINDINGS.md`. No run-inputs.ts, no SensitivityFlow.tsx.
+P7. Runtime: measure ON vs OFF; expected within ~10 %; flag > 1.5x. Full `npm test` only when the supervisor says lane A is idle.
+
+---
+
+# BUILD PLANS — last items, two parallel lanes (2026-10-17)
+
+Facts: investigator 2026-10-17 (main b782e0a). No headcount effect in any item. Lanes never edit the same file; docs (PRD / project_context / FINDINGS) reconciled at merge; `BoWFM.html` rebuilt only after merge. Housekeeping (package.json) runs AFTER both lanes merge (it makes the artifact stale). Audit of never-reviewed areas = report only, after merges.
+
+## Lane A — P1-11 (safer import, crash screen, leave warning, Sensitivity kept) + P1-12 (calendar guards). Tier 2. Branch `laneA-input-safety`.
+1. **Import validation:** new pure `src/utils/config-import.ts` `validateImportedConfig(json)` — per-key type/range checks (calendar: workingDays int[] 0–6, hours/minutes ranges, holidays `YYYY-MM-DD`; labor finite numbers in ranges; sla merged over defaults with existing sanitising; categories array, each with name, ahtMinutes > 0, shrinkage in valid range; simParams finite; columnMapping object). Valid keys applied, rejected keys listed in a red/amber banner (no green "successfully loaded" when anything was rejected). Non-object JSON → error. `App.tsx:461-514` uses it; `Sidebar.tsx:226-232` resets `input.value` after reading.
+2. **Crash screen:** new `src/components/ErrorBoundary.tsx` (class component, no dependency) wraps `<App/>` in `main.tsx`; fallback: plain message, error text, "Reload" button; second boundary around the main content in `App.tsx` so the sidebar (Export JSON) stays usable.
+3. **Leave-page warning:** `beforeunload` registered in `App.tsx` only while data is loaded or results exist; removed on cleanup.
+4. **Sensitivity kept:** keep `SensitivityFlow` mounted and hidden when another flow is shown (CSS `hidden`), and show an "outdated" note on the matrix when live inputs differ from those it was computed with (reuse `run-inputs.ts` fingerprint/diff helpers); cancel any in-flight computation on unmount.
+5. **Calendar guards:** pure `getCalendarIssues(calendar, labor)` in `calendar.ts` → errors: no working days (non-24x7); zero-length window (close <= open, except close 00:00 = 24:00); warnings: productive hours > window; holiday on a non-working weekday. Banner in `CalendarConfigPanel.tsx` near the window-length row. Errors added to the data-quality gate (`csv-parser.ts` DQ area ~:1578) so "CLEARED" can no longer coexist with a run that fails.
+- Tests (fail-first, new suite D87 in `scripts/verify-sizing-fixes.mts`): validator malformed/partial/valid fixtures; getCalendarIssues cases; DQ `passed === false` for empty weekdays and zero window; samples' DQ unchanged.
+- Browser: import a broken JSON → banner lists rejected keys, app usable; force an error (e.g. import shape that previously white-screened) → crash screen, not white page; leave warning prompt registered; Sensitivity matrix survives flow switch + outdated note after a change; calendar banners; samples 31/40, 28/35, 31/39; 0 console errors.
+- Scope: `src/App.tsx`, `src/main.tsx`, `src/components/ErrorBoundary.tsx` (new), `src/utils/config-import.ts` (new), `src/components/Sidebar.tsx` (input reset only), `src/components/SensitivityFlow.tsx`, `src/components/CalendarConfigPanel.tsx`, `src/utils/calendar.ts` (helper only), `src/utils/csv-parser.ts` (DQ area only), `scripts/verify-sizing-fixes.mts` (D87), docs.
+
+## Lane B — P2-13 (outdated note on exports) + DataTable dead code. Tier 1/2. Branch `laneB-export-note`.
+1. Pure helper in a NEW file `src/utils/export-notes.ts`: `withOutdatedNote(sections, settingsChanged, dataChanged)` appends a trailing section `NOTE: Exported from outdated results — settings changed (…), data changed (…). Re-run to refresh.`; absent when nothing changed. (Trailing section keeps header-based re-import working.)
+2. `ResultsFlow.tsx` five CSV exports (cases, breached, queue/WIP, agent slices, agent summary) use it; `AgentAnalyticsPanel.tsx` gets an optional `outdatedNote` prop from ResultsFlow and appends it in its export. Config JSON from Results gets `"outdated": true|false` plus the changed-key lists.
+3. Delete dead `src/components/DataTable.tsx` (grep proves no import).
+- Tests: suite D88 (or AA checks) on the helper via `buildExcelCSV`: note present only when stale; columns unchanged.
+- Browser: run, change a setting, export → note at the end; re-run → no note; 0 console errors.
+- Scope: `src/utils/export-notes.ts` (new), `src/components/ResultsFlow.tsx`, `src/components/AgentAnalyticsPanel.tsx`, `src/components/DataTable.tsx` (delete), `scripts/verify-sizing-fixes.mts` (D88 — appended in a separate block; merge conflicts with D87 resolved at merge), docs. NOT csv-parser.ts (lane A edits it).
+
+## After merges
+- Housekeeping: move `vite`, `@vitejs/plugin-react`, `@tailwindcss/vite` to devDependencies (approved PLAN:1748); `npm install` to refresh lockfile; prove BoWFM.html functionally identical; optional D9 exact-dependencies assertion; PRD P2-14 removed.
+- Audit (report only): `docs/wfm/*`, Sidebar + reset dialog, personal data in sample files.
+
+## Lane plans — amendments after the plan challenge (2026-10-17). These OVERRIDE the lane text above.
+Challenger: fail (3 blockers, 6 majors) — all accepted.
+N1. **Round-trip:** validator allows close hour 0–24 (minute 0 when 24), open hour 0–23; ignores unknown top-level keys (`exportedAt`, `outdated`, future keys). D87 round-trips `buildConfigSnapshot`-shaped output for DEFAULT_*, the 24:00 preset, 24x7, and the three samples' configs — all accepted unchanged.
+N2. **Import is all-or-nothing for the core keys** (calendar, labor, sla, categories, simParams): if any core key is invalid, nothing is applied and a persistent red banner (dismiss button, no 4 s auto-hide) lists each problem; columnMapping invalid → ignored with a note. Success message only when everything applied. Non-object JSON → error.
+N3. **Sensitivity kept by lifting state (not hidden-mounted):** `matrixScenarios` + the input fingerprint captured at click time move to `App.tsx` (passed as props with setter); the running loop is cancelled on unmount (leaving the tab stops an in-flight grid, with a note "Stopped — leaving the tab cancels a running grid"); Reset All, new file upload and sample load clear the kept matrix; outdated note when live inputs (incl. demand/backlog fingerprints from App) differ from the click-time fingerprint.
+N4. **Error boundary:** outer boundary in `main.tsx` (last resort, full reload); inner boundary around the flow content in `App.tsx` with a reset on flow change (key = currentFlow). Docs say plainly the validator is the real guard; App-level render throws reach only the outer boundary. Browser proof: tester forces a child render error by any page-level means (no test hook in `src/`); the one expected `console.error` from React is allowed.
+N5. **Calendar issues reuse the engine rule:** zero window = `getDailyWindowLengthHours(calendar) <= 0` (no re-implementation); `is24x7` short-circuits (never newly blocked). Severities match DQ: productive hours > window = error (same as M1, not duplicated in DQ); no working days = NEW DQ error (fail-first); holiday on a non-working weekday = warning (panel only). D87 fail-first only for the new rules (empty weekdays in DQ; panel helper); zero-window DQ already fails today — asserted as a control, not as red.
+N6. **Lane B:** drop the Results config JSON `outdated` flag (it lives in `App.tsx`, lane A) — moved to lane A as optional (`outdated` + changed-key lists in the run snapshot export; validator ignores it on import). DataTable deletion adds `scripts/verify-agent-analytics.mts` (EX.9 at :99 reads the file — remove that path from its list) and PRD P2-1 / project_context mentions to lane B scope. `exportToExcelCSV` empty-data guard: an export with no rows still returns early (no note-only file) — implemented inside the new helper's caller, not in csv-parser.ts. D88 adds a source-grep check that all five ResultsFlow handlers and the AgentAnalyticsPanel export use the helper (panel note goes in `sections`). Wording: "a trailing NOTE section; tools that read by header ignore it" (not "re-import unchanged").
+N7. **Leave warning** documented: prompts only after user interaction and while data or results exist; config-only edits without data are not protected (PRD limitation).
+
+---
+
+# BUILD PLANS — audit follow-ups, two lanes (2026-10-17)
+
+Source: audit report `scratchpad/audit-never-reviewed.md` (2026-10-17). No headcount effect.
+
+## Lane D — docs corrections (docs only, no rebuild). Branch `docs-audit-fixes`.
+Fix in `docs/wfm/*`: (1) Gross HC is `round(sum + 1e-9)` not `ceil` (04:86,90,92; also `.cursor/rules/10-architecture-required-hc-chain.mdc:37,76`); (2) 06: add the independent confirmation block (decision 8 second clause) and the coverage-repair → spread → placement → rescue-ladder layout chain; (3) 06:41 dispatch = `pickNextCase`/`compareByUrgency` (heap order only for push/pop); minors: 05 default Minimum Coverage repair already covers tail; 06:123 search starts at max(N_min, N_occ); 04 tolerance + workload-reduction + Workload Floor off caveat; 07 duplicate G1/G2/G3 IDs renamed; 07:1059 "not under version control" removed; 07 entries for item 7, G7, lanes A+B, housekeeping; 03:130 replications sample arrival times (counts only when Volume Variability on); 01:68 per-category ASA rule; `docs/audit/sample-hc-audit.md` header consistent; `.claude/skills/wfm-sizing-simulation/SKILL.md:104` drain "until the later of 14 days or last deadline". Every statement verified against code. Scope: `docs/wfm/*`, `docs/audit/sample-hc-audit.md`, `.cursor/rules/10-architecture-required-hc-chain.mdc`, `.claude/skills/wfm-sizing-simulation/SKILL.md`. NOT PRD.md / project_context.md / src. Reviewer: auditor (docs vs code).
+
+## Lane E — reset dialog + Demand leftover state (product, Tier 2). Branch `reset-dialog-fixes`.
+1. `ResetConfirmModal.tsx`: `role="alertdialog"`, `aria-modal="true"`, `aria-labelledby`/`aria-describedby`, focus moves into the dialog on open (Cancel button) and is trapped; Escape cancels (exists); focus returns to the trigger on close; icon close button `aria-label="Close"`.
+2. Wording: remove "unsaved sizing runs"; list includes the Sensitivity matrix; add "Export JSON saves settings only, not data or results"; when triggered by a file upload or sample load, title/text say "Load new data — this replaces everything" and that the new file loads after confirming.
+3. Reset clears DemandFlow local state (staged backlog CSV, form drafts): remount DemandFlow on reset (key bump in App.tsx) or lift; prove an old staged backlog cannot be applied after Reset.
+4. Sidebar minors: inspector toggle label matches state; `aria-current` on active flow/tab; Import JSON tooltip says it replaces current settings.
+- Tests: a pure helper for dialog text by trigger (D89) if extracted; otherwise browser proof. Browser: keyboard-only reset flow (Tab/Escape/Enter), focus trap, upload-triggered wording, staged backlog cleared after Reset, samples 31/40, 28/35, 31/39, 0 console errors.
+- Scope: `src/components/ResetConfirmModal.tsx`, `src/components/Sidebar.tsx`, `src/components/DemandFlow.tsx`, `src/App.tsx` (key/trigger prop only), `scripts/verify-sizing-fixes.mts` (D89), `PRD.md`, `project_context.md`, `FINDINGS.md`, `BoWFM.html` at merge. Reviewers: tester + user-side.
+
+---
+
+# BUILD PLAN — input safety + results wording (backlog), 2026-10-18. Branch `polish-input-wording`. Tier 2 (no headcount change).
+
+## A. Manual backlog "Remaining Work" input (`src/utils/wip-row.ts` parseRemainingText, `src/components/DemandFlow.tsx`)
+1. "1,000" / "2,500" (comma followed by exactly three digits) → invalid (amber message), not 1.0 / 2.5. A single comma decimal like "12,5" stays valid.
+2. Upper cap = the file-import cap `WIP_MAX_REMAINING_MINUTES` (100000, `wip-import.ts`) — reuse the constant; above it → invalid with message "more than 100,000 minutes".
+3. `inputMode="decimal"` instead of `"numeric"`.
+4. Tests D90 (fail-first): "1,000", "2,500", "12,5", "100001", "100000", "99999.5".
+
+## B. Results wording
+1. Unfinished reason strings "Unfinished by horizon end" → "Not finished by end of simulation (deadline missed)" in `src/utils/export-rows.ts:~49` and `src/utils/hc-search.ts:~3799, ~4762` (string change only — no logic), matching the on-screen label.
+2. When `drainCapped === true`, a case cut at the 366-day cap before its deadline is labelled "Not finished — simulation stopped at the 366-day limit before its deadline" (screen row label in `ResultsFlow.tsx` and export reason), not "deadline missed". Determine per case: unfinished AND primaryDeadline > simulation end.
+3. Run-progress text "Primary-Driven: N with 95% CI" (find source: RunFlow / hc-search progress callback) names the binding constraint: e.g. "Answer-time-driven" when the ASA gate binds, consistent with Results' binding label; if the binding constraint is not known during the search, use neutral wording "Candidate N passes all targets (95% CI)".
+4. Tests in D90: export reason strings; drainCapped label helper; progress wording helper (extract pure helpers where needed). Any existing test pinning the old strings: update with reason.
+
+## Scope
+`src/utils/wip-row.ts`, `src/components/DemandFlow.tsx`, `src/utils/export-rows.ts`, `src/utils/hc-search.ts` (strings / progress text only), `src/components/ResultsFlow.tsx`, `src/components/RunFlow.tsx` (if progress text lives there), `scripts/verify-sizing-fixes.mts` (D90 + string re-pins), `scripts/verify-*.mts` only for old-string re-pins, `PRD.md` (1.29.3), `project_context.md`, `FINDINGS.md`, `BoWFM.html`.
+## Proof
+D90 red→green; full `npm test` once; browser: type "1,000" → amber; samples 31/40, 28/35, 31/39 unchanged; breach export wording; 0 console errors; check:artifact.
+
+## Polish plan — amendments after challenge (2026-10-18). OVERRIDE the text above.
+Q1. **B3:** M ("Primary-Driven: M") stays labelled as the primary-SLA-only headcount, reworded plainly: "(primary SLA alone needs M; binding: <bindingConstraintDescription>)". One shared pure helper in a NEW util `src/utils/staffing-summary.ts` builds the line; called from both `hc-search.ts:~4826` (async final progress message) and `ResultsFlow.tsx:~736`. D90 source-grep check that both sites call it.
+Q2. **B2:** cap-cut check derived, no new type field: `isCapCut(case, result) = result.drainCapped === true && !completed && Number.isFinite(case.primaryDeadline) && case.primaryDeadline > result.horizonEnd + 366 days` (helper beside `computeDrainEnd` semantics, exported from a util used by export-rows and ResultsFlow; constant shared with des-engine, not duplicated — import the existing cap constant if exported, else export it). Under-cap unfinished rows keep "deadline missed". `buildBreachExportRows` gets the result context as a new parameter (all callers updated). Confirm overdue-at-start rows are excluded by the caller as today.
+Q3. **A1:** `parseRemainingText` returns `{ value, invalid, reason? }` with reason ∈ {'format', 'thousands', 'over_cap'}; DemandFlow shows a reason-specific amber message: format → existing text; thousands → "Looks like a thousands separator — type 1000 without the comma."; over_cap → "More than 100,000 minutes — this row will use the full handling time." (same Add behaviour as today: invalid → row added at full handling time). "1.000" stays 1 (documented); "100,000" → 'thousands'.
+Q4. Scope adds `src/utils/staffing-summary.ts` (new), the cap-cut util location, `docs/wfm/07-known-defects-and-decisions.md` (resolve the backlog line), PRD §11 entries resolved. `inputMode="decimal"` kept as planned (text input stays).

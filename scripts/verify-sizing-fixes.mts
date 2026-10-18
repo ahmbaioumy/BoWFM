@@ -32,6 +32,7 @@ import {
   effectivePrimaryTarget,
   evaluateCandidateStatistical,
   findPlacementFeasibleFloor,
+  representativeCasesOf,
   resolveAgentHoursForNMin,
   searchOptimalHC,
   searchOptimalHCAsync,
@@ -52,6 +53,7 @@ import * as hcNs from '../src/utils/hc-search';
 import * as calNs from '../src/utils/calendar';
 import * as desNs from '../src/utils/des-engine';
 import { discoverAndSyncCategories, mapRawRecordsToIntervals, missingRequiredMappings, validateDataQuality } from '../src/utils/csv-parser';
+import { buildManualWipCase, normalizeRemainingInput, parseRemainingText, remainingWorkLabel, totalPendingWorkMinutes } from '../src/utils/wip-row';
 import { buildSampleDataset } from '../src/utils/sample-data';
 import { loadSampleFile } from './sample-files';
 import { DEFAULT_CALENDAR, DEFAULT_CATEGORIES, DEFAULT_LABOR, DEFAULT_SIM_PARAMS, DEFAULT_SLA } from '../src/utils/default-config';
@@ -699,6 +701,9 @@ console.log('\n--- Suite D9: Offline & zero-dependency integrity ---');
       assert(!(banned in allDeps), `D9.4 unused dependency '${banned}' is absent from package.json`);
     }
     assert('react' in (pkg.dependencies || {}), 'D9.5 required dependency react is still present');
+    // Build tooling (vite, @vitejs/plugin-react, @tailwindcss/vite) is devDependency-only (NFR-2.2).
+    const runtimeDeps = Object.keys(pkg.dependencies || {}).sort().join(',');
+    assert(runtimeDeps === ['lucide-react', 'react', 'react-dom'].join(','), `D9.5b dependencies is exactly {react, react-dom, lucide-react}`, runtimeDeps);
   }
 
   // The shipped artifact must be genuinely self-contained.
@@ -3806,7 +3811,7 @@ console.log('\n--- Suite D50: roster polish at fixed HC ---');
 //
 // Characterisation pins, not a fix: they freeze the default-setting required-HC of the cheapest
 // sample file so any engine change that moves it fails loudly. Values are the "after" baseline in
-// docs/audit/sample-hc-after-2026-09-30.jsonl (the full 4-file x 6-cell diff is `npm run test:audit`).
+// docs/audit/sample-hc-after-2026-09-30.jsonl, unchanged for AJM_Only BA/BN/FOFF/PON in sample-hc-after-2026-10-15.jsonl (the full 4-file x 6-cell diff is `npm run test:audit`).
 // The file is loaded through scripts/sample-files.ts, the same loader as the audit script.
 // =================================================================
 console.log('\n--- Suite D49: sample-file guard (AJM_Only.csv, defaults, pooled) ---');
@@ -4436,7 +4441,8 @@ console.log('\n--- Suite D57: CI gates use the confidence bound, not the mean --
       rawOccupancyPct: o.occ ? o.occ[i] : 50,
       boAsaMeanMinutes: o.asa ? o.asa[i] : 0,
       minCoverageObserved: Infinity,
-      categoryStats: { A: { primaryPct: o.catA ? o.catA[i] : 100 }, B: { primaryPct: o.catB ? o.catB[i] : 100 } },
+      // Item 3: answer time is judged per category; the ASA samples belong to category A (B has no eligible cases, so it is not judged).
+      categoryStats: { A: { primaryPct: o.catA ? o.catA[i] : 100, ...(o.asa ? { primaryEligible: 10, asaMeanMinutes: o.asa[i] } : {}) }, B: { primaryPct: o.catB ? o.catB[i] : 100 } },
     }));
   const evalCI = (rs: any[], sla: SLAPolicyConfig) =>
     hcNs.computeStatisticalEvaluation(4, rs, rs.map((r) => r.primaryAchievedPct), rs.length, sla, BIZ_CAL, catsCI);
@@ -4472,7 +4478,7 @@ console.log('\n--- Suite D57: CI gates use the confidence bound, not the mean --
   const slaAsa: SLAPolicyConfig = { ...slaCI, boAsaEnabled: true, boAsaTarget: 41, boAsaUnit: 'minutes', asaClockBasis: 'business_window' };
   const af = evalCI(reps(allGood, { asa: [38, 42, 40, 39, 41] }), slaAsa);
   assert(af.passesOrgGates === false && af.passesPrimaryCI === true && af.passesCategorySLA === true && af.passesCoverage === true, 'D57.5a ASA mean 40 <= target 41 but upper bound 41.96 > 41 -> only the ASA gate fails', JSON.stringify({ o: af.passesOrgGates, p: af.passesPrimaryCI, c: af.passesCategorySLA }));
-  assert(af.failingReasons.length === 1 && /^BO ASA 95% CI/.test(af.failingReasons[0]) && /upper bound > target 41minutes \(41m\)/.test(af.failingReasons[0]), 'D57.5b exactly one failing reason: BO ASA upper bound > target 41 minutes', af.failingReasons.join(' | '));
+  assert(af.failingReasons.length === 1 && /^BO ASA \(category 'A'\) 95% CI/.test(af.failingReasons[0]) && /upper bound > target 41minutes \(41m\)/.test(af.failingReasons[0]), 'D57.5b exactly one failing reason: BO ASA upper bound > target 41 minutes', af.failingReasons.join(' | '));
   const ap = evalCI(reps(allGood, { asa: [38, 38, 38, 39, 39] }), slaAsa);
   assert(ap.passesOrgGates === true && ap.failingReasons.length === 0, 'D57.5c ASA [38,38,38,39,39] (upper bound 39.1 <= 41) passes', ap.failingReasons.join(' | '));
   const aoff = evalCI(reps(allGood, { asa: [38, 42, 40, 39, 41] }), { ...slaAsa, boAsaEnabled: false });
@@ -4546,8 +4552,11 @@ console.log('\n--- Suite D58: Common Random Numbers ---');
 
 // ---------------------------------------------------------------
 // Suite D59 — Unfinished cases count in the SLA denominator (TEST-9)
-// 10 cases, 1 agent, AHT 800 min, 8 productive h/day. Horizon Mon 12 Oct, drain until Mon 26 Oct 17:00 = 11 working days
-// x 480 min = 5280 min -> floor(5280 / 800) = 6 cases finish (all inside their long deadline); 4 do not.
+// 10 cases, 1 agent, AHT 1100 min, 8 productive h/day. Horizon Mon 12 Oct; every case is due Fri 30 Oct 17:00.
+// Item 4 (2026-10-16): the drain now runs until the last deadline (Fri 30 Oct 17:00, later than horizon + 14 days = Mon 26 Oct 17:00)
+// = 15 working days x 480 min = 7200 min -> floor(7200 / 1100) = 6 cases finish (6600 min, inside the deadline); the 7th is
+// started but not finished, cases 8-10 never start: 4 unfinished at the new drain end. (Before item 4 this fixture used AHT 800 and
+// the 11-day drain, 6 / 4; at AHT 800 the new drain would finish 9 of 10 - the redesign keeps the same 6 / 10, 60 % expectations.)
 // ---------------------------------------------------------------
 console.log('\n--- Suite D59: unfinished cases stay in the SLA denominator ---');
 {
@@ -4559,8 +4568,8 @@ console.log('\n--- Suite D59: unfinished cases stay in the SLA denominator ---')
     priority: 1,
     arrival: at59(12, 9),
     clockStart: at59(12, 9),
-    totalAhtMinutes: 800,
-    remainingWorkMinutes: 800,
+    totalAhtMinutes: 1100,
+    remainingWorkMinutes: 1100,
     primaryDeadline: at59(30, 17),
     latestSafeStart: at59(28, 9),
     firstStartTime: null,
@@ -4568,7 +4577,7 @@ console.log('\n--- Suite D59: unfinished cases stay in the SLA denominator ---')
     parkCount: 0,
     isOpeningWip: false,
   }));
-  const cat59: CategoryConfig[] = [{ id: 'a', name: 'A', ahtMinutes: 800, shrinkagePct: 0.2, priority: 1, primaryWindowMinutes: 100000 }];
+  const cat59: CategoryConfig[] = [{ id: 'a', name: 'A', ahtMinutes: 1100, shrinkagePct: 0.2, priority: 1, primaryWindowMinutes: 100000 }];
   const r59 = runBackofficeDES({
     operationalHC: 1,
     intervals: [],
@@ -4581,7 +4590,7 @@ console.log('\n--- Suite D59: unfinished cases stay in the SLA denominator ---')
     skipCaseResultsAndTimeline: true,
     precomputedCases: { cases: cases59, horizonStart: at59(12, 9), horizonEnd: at59(12, 17) },
   });
-  assert(r59.totalCases === 10 && r59.completedCases === 6 && r59.unfinishedCases === 4, 'D59.1 6 of 10 cases finish inside horizon + drain (floor(11 x 480 / 800) = 6), 4 unfinished', `total ${r59.totalCases}, completed ${r59.completedCases}, unfinished ${r59.unfinishedCases}; expected 10/6/4`);
+  assert(r59.totalCases === 10 && r59.completedCases === 6 && r59.unfinishedCases === 4, 'D59.1 6 of 10 cases finish inside the drain (to the last deadline: floor(15 x 480 / 1100) = 6), 4 unfinished', `total ${r59.totalCases}, completed ${r59.completedCases}, unfinished ${r59.unfinishedCases}; expected 10/6/4`);
   assert(r59.primaryEligibleCount === 10 && r59.primaryPassCount === 6, 'D59.2 SLA denominator is all 10 cases, numerator the 6 finished in time', `eligible ${r59.primaryEligibleCount}, pass ${r59.primaryPassCount}; expected 10 / 6`);
   assert(r59.primaryAchievedPct === 60, 'D59.3 primaryAchievedPct is 60 (6/10), not 100 (6/6)', `got ${r59.primaryAchievedPct}`);
 }
@@ -7159,7 +7168,7 @@ console.log('\n--- Suite D78: spread layout when the coverage-repair roster fail
     const pS = (cov: boolean) => ({ intervals: ivs, openingWIP: [] as OpeningWIPCase[], categories: cats, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: { ...DEFAULT_SLA, minCoverageEnabled: cov, boAsaEnabled: true, boAsaTarget: 60, boAsaUnit: 'minutes' as const }, seed: DEFAULT_SIM_PARAMS.seed, userMaxHC: DEFAULT_SIM_PARAMS.maxHCSearch, replications: DEFAULT_SIM_PARAMS.replications, queueArchitecture: 'pooled' as const, dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness });
     const sOn = searchOptimalHC(pS(true)); const sOnA: any = await searchOptimalHCAsync(pS(true));
     assert(sig(sOn) === sig(sOnA), 'D78.d4 support + answer-time 60 min, coverage ON: sync === async (HC, roster, label, history)', `sync=${sOn.recommendedHC} async=${sOnA.recommendedHC}`);
-    assert(sOn.recommendedHC !== null && sOn.recommendedHC < 46, 'D78.d5 support + answer-time 60 min, coverage ON: below the old 46', `rec=${sOn.recommendedHC}`);
+    assert(sOn.recommendedHC !== null && sOn.recommendedHC === 62, 'D78.d5 support + answer-time 60 min, coverage ON: 62 (was 43 while the pooled mean hid Technical_Escalations; Item 3 judges every category on its own, owner decision 2026-10-15)', `rec=${sOn.recommendedHC}`);
   }
 
   // ---- D78.e three built-in samples at defaults are unchanged ----
@@ -7325,7 +7334,7 @@ console.log('\n--- Suite D79: start-time block and roster-source end-to-end (A12
     assert(!!fdr && sumOf(fdr.shiftDistributionUsed) === nH && fdr.operationalHC === nH && rosterOf(fdr.shiftDistributionUsed) === '0:5 450:5 900:5 990:5', 'D79.j A4 HC-14 final audit run at N=20 ran on the winning roster', `sum=${sumOf(fdr?.shiftDistributionUsed)} n=${nH}`);
   }
   // The N-1 evidence run needs a case where the search actually judged N-1: support sample + answer-time 60 min, coverage ON
-  // (recommended 43; 42 is tried with the 21+21 spread and fails). HC-14 and D33 start at their floor, so N-1 is never tried there.
+  // (recommended 62 since Item 3, was 43; 61 is tried with the 31+30 spread and fails on Technical_Escalations' own answer time). HC-14 and D33 start at their floor, so N-1 is never tried there.
   {
     const { rows } = buildSampleDataset('support', new Date(2026, 9, 5, 8, 0, 0, 0));
     const ivS = mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
@@ -7336,12 +7345,12 @@ console.log('\n--- Suite D79: start-time block and roster-source end-to-end (A12
     const sumS = (d: ShiftDistributionByCategory | undefined) => d ? Object.values(d).reduce((a, x) => a + x.slaps.reduce((b, s) => b + s.agentCount, 0), 0) : 0;
     const nS = sOn.recommendedHC ?? 0;
     const fS = sOn.boundaryEvidence?.failedResult;
-    assert(nS === 43 && sOn.finalDESResult?.operationalHC === 43 && rosterOf(sOn.finalDESResult?.shiftDistributionUsed) === '0:22 150:21', 'D79.k1 support + answer-time 60, coverage ON: final audit run at N=43 ran on the winning roster 0:22 150:21', `n=${nS} roster=${rosterOf(sOn.finalDESResult?.shiftDistributionUsed)}`);
-    assert(!!fS && fS.operationalHC === 42 && sumS(fS.shiftDistributionUsed) === 42 && rosterOf(fS.shiftDistributionUsed) === '0:21 150:21', 'D79.k2 same run: the N-1 evidence run (N=42) ran on the roster the search tried and rejected (0:21 150:21), not the uniform fallback', `n=${fS?.operationalHC} roster=${rosterOf(fS?.shiftDistributionUsed)}`);
+    assert(nS === 62 && sOn.finalDESResult?.operationalHC === 62 && rosterOf(sOn.finalDESResult?.shiftDistributionUsed) === '0:61 150:1', 'D79.k1 support + answer-time 60, coverage ON: final audit run at N=62 ran on the winning roster 0:61 150:1 (re-pinned from 43 / 0:22 150:21: Item 3 judges every category on its own)', `n=${nS} roster=${rosterOf(sOn.finalDESResult?.shiftDistributionUsed)}`);
+    assert(!!fS && fS.operationalHC === 61 && sumS(fS.shiftDistributionUsed) === 61 && rosterOf(fS.shiftDistributionUsed) === '0:31 150:30', 'D79.k2 same run: the N-1 evidence run (N=61) ran on the roster the search tried and rejected (0:31 150:30; was N=42, 0:21 150:21), not the uniform fallback', `n=${fS?.operationalHC} roster=${rosterOf(fS?.shiftDistributionUsed)}`);
     assert(rosterOf(sOnA.boundaryEvidence?.failedResult?.shiftDistributionUsed) === rosterOf(fS?.shiftDistributionUsed) && rosterOf(sOnA.finalDESResult?.shiftDistributionUsed) === rosterOf(sOn.finalDESResult?.shiftDistributionUsed), 'D79.l2 same run, async twin: audit and N-1 rosters identical to sync', `sync=${rosterOf(fS?.shiftDistributionUsed)} async=${rosterOf(sOnA.boundaryEvidence?.failedResult?.shiftDistributionUsed)}`);
     if (typeof fn === 'function') {
       const ls = fn(sOn.finalDESResult?.shiftDistributionUsed, DEFAULT_CALENDAR);
-      assert(ls?.[0]?.text === '22 agents at 08:00, 21 agents at 10:30', 'D79.m support + answer-time 60: helper prints "22 agents at 08:00, 21 agents at 10:30" (sums to the recommended 43)', JSON.stringify(ls));
+      assert(ls?.[0]?.text === '61 agents at 08:00, 1 agent at 10:30', 'D79.m support + answer-time 60: helper prints "61 agents at 08:00, 1 agent at 10:30" (sums to the recommended 62; was 22 + 21 = 43)', JSON.stringify(ls));
     }
   }
 
@@ -7715,6 +7724,1046 @@ console.log('\n--- Suite D81: reliable minimum - a passing headcount also passes
     assert(leapConf.length > 0, 'D81.r1 R=3: a leap step is a full evaluation and shows the confirmation run (3 replications)', `leap-confirm events=${leapConf.length}`);
     assert(sigOf(s3) === sigOf(s3a) && s3.recommendedHC !== null, 'D81.r2 R=3: sync === async', `sync=${s3.recommendedHC} async=${s3a.recommendedHC}`);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Suite D82 - Item 3 (H4 / L30 / P1-10): per-category answer-time (BO ASA) targets with an explicit own-target switch
+// (owner decisions 2026-10-15). A category has an OWN target iff boAsaOwn === true AND boAsaTarget is a finite number > 0.
+// Copies of the global value (CSV load, template apply, defaults, settings files from before the field) are never targets.
+// OWNER DECISION 2026-10-15 (after review round 1, rework F): EVERY category is judged on its own - its own target if ticked,
+// otherwise the global target (upper CI bound of that category's answer time). No pooled gate, no follower pool. Answer time OFF is unchanged.
+// Fail-first (pre-change): the helper is absent (D82.0 and everything that needs it), D82.b/c/e fail (own target never read).
+// ---------------------------------------------------------------------------
+console.log('\n--- Suite D82: per-category answer-time targets, explicit own-target switch (H4 / L30 / P1-10) ---');
+{
+  const h = hcNs as any;
+  const resolveAsa = h.resolveCategoryAsaTargets as ((c: CategoryConfig[], s: SLAPolicyConfig, cal: CalendarConfig) => Record<string, any>) | undefined;
+  assert(typeof resolveAsa === 'function', 'D82.0 resolveCategoryAsaTargets is exported', `typeof=${typeof resolveAsa}`);
+  const mkc = (name: string, extra: Record<string, unknown> = {}): CategoryConfig => ({ id: name, name, ahtMinutes: 20, shrinkagePct: 0.2, priority: 1, primaryPct: 80, ...extra } as CategoryConfig);
+  const slaA: SLAPolicyConfig = { ...DEFAULT_SLA, primaryPct: 80, slaAcceptanceSlackEnabled: false, boAsaEnabled: true, boAsaTarget: 60, boAsaUnit: 'minutes', occupancyCapEnabled: false, confidenceLevelPct: 95 };
+  const R82 = (c: CategoryConfig[], s: SLAPolicyConfig, cal: CalendarConfig = BIZ_CAL) => (resolveAsa ? resolveAsa(c, s, cal) : {});
+
+  // ---- D82.a the own-target rule ----
+  {
+    const t = R82([mkc('A', { boAsaTarget: 60, boAsaUnit: 'minutes' }), mkc('B', { boAsaTarget: 90, boAsaUnit: 'minutes' }), mkc('C', { boAsaTarget: 1, boAsaUnit: 'hours' }), mkc('D')], slaA);
+    assert(['A', 'B', 'C', 'D'].every((k) => t[k]?.own === false), 'D82.a1 copies are never own, equal to the global or not (B holds 90 but is not ticked), and a category with no value follows too', JSON.stringify(t));
+    assert(t.B?.targetMinutes === 60 && t.C?.targetMinutes === 60, 'D82.a1b a follower reports the GLOBAL target (60 min) whatever value its copy holds', JSON.stringify(t));
+    const o = R82([mkc('A', { boAsaOwn: true, boAsaTarget: 30, boAsaUnit: 'minutes' }), mkc('B', { boAsaOwn: true, boAsaTarget: 60, boAsaUnit: 'minutes' })], slaA);
+    assert(o.A?.own === true && o.A.targetMinutes === 30 && o.A.targetValue === 30 && o.A.targetUnit === 'minutes', 'D82.a2 ticked + 30 min -> own, 30 min', JSON.stringify(o.A));
+    assert(o.B?.own === true && o.B.targetMinutes === 60, 'D82.a3 ticked with a value equal to the global stays own (the switch is explicit, not value-compared)', JSON.stringify(o.B));
+    const bad = R82([0, NaN, -5, Infinity].map((v, i) => mkc('X' + i, { boAsaOwn: true, boAsaTarget: v, boAsaUnit: 'minutes' })).concat([mkc('Y', { boAsaOwn: true }), mkc('Z', { boAsaOwn: 'true' as any, boAsaTarget: 30 })]), slaA);
+    assert(Object.values(bad).every((x: any) => x.own === false), 'D82.a4 ticked but 0 / NaN / negative / Infinity / missing value, or a non-boolean flag -> not own', JSON.stringify(bad));
+    const u = R82([mkc('A', { boAsaOwn: true, boAsaTarget: 1, boAsaUnit: 'hours' }), mkc('B', { boAsaOwn: true, boAsaTarget: 30 })], slaA);
+    assert(u.A?.targetMinutes === 60 && u.B?.targetMinutes === 30 && u.B.targetUnit === 'minutes', 'D82.a5 own value converted with its own unit (1 hour = 60 min); an own value without a unit takes the global unit', JSON.stringify(u));
+    const dBiz = R82([mkc('A', { boAsaOwn: true, boAsaTarget: 1, boAsaUnit: 'days' })], { ...slaA, asaClockBasis: 'business_window' }, BIZ_CAL);
+    const dClk = R82([mkc('A', { boAsaOwn: true, boAsaTarget: 1, boAsaUnit: 'days' })], { ...slaA, asaClockBasis: 'clock_hours' }, BIZ_CAL);
+    assert(dBiz.A?.targetMinutes === 480 && dClk.A?.targetMinutes === 1440, 'D82.a6 "days" uses the same basis as the global target: business window 8 h -> 480 min, clock hours -> 1440 min', `${dBiz.A?.targetMinutes} / ${dClk.A?.targetMinutes}`);
+  }
+
+  // ---- D82.b the gate, hand-built replications (R = 5, t(df 4, 95%) = 2.776) ----
+  {
+    const mkRep = (cs: Record<string, { asa?: number; elig?: number }>, pooled?: number): any => {
+      const e = Object.entries(cs);
+      const tot = e.reduce((s, [, v]) => s + (v.elig ?? 0), 0);
+      const p = pooled ?? (tot > 0 ? Math.round((e.reduce((s, [, v]) => s + (v.asa ?? 0) * (v.elig ?? 0), 0) / tot) * 10) / 10 : 0);
+      return {
+        primaryAchievedPct: 100, rawOccupancyPct: 50, boAsaMeanMinutes: p, minCoverageObserved: Infinity,
+        categoryStats: Object.fromEntries(e.map(([k, v]) => [k, { primaryPct: 100, ...(v.elig === undefined ? {} : { primaryEligible: v.elig }), ...(v.asa === undefined ? {} : { asaMeanMinutes: v.asa }) }])),
+      };
+    };
+    const rs5 = (f: (i: number) => any): any[] => [0, 1, 2, 3, 4].map(f);
+    const ev = (rs: any[], cats: CategoryConfig[], s: SLAPolicyConfig = slaA): any => h.computeStatisticalEvaluation(4, rs, rs.map((r: any) => r.primaryAchievedPct), rs.length, s, BIZ_CAL, cats);
+    const own = (name: string, v: number, extra: Record<string, unknown> = {}) => mkc(name, { boAsaOwn: true, boAsaTarget: v, boAsaUnit: 'minutes', ...extra });
+    const fol = (name: string) => mkc(name, { boAsaTarget: 60, boAsaUnit: 'minutes' });
+
+    // b1: own A = 30 but A answers in 40; B (follower, 20 min) and the pooled mean (30) are fine -> only A's own target fails
+    const b1 = ev(rs5(() => mkRep({ A: { asa: 40, elig: 10 }, B: { asa: 20, elig: 10 } })), [own('A', 30), fol('B')]);
+    assert(b1.passesBoAsaCap === false && b1.passesOrgGates === false && b1.passesAllConstraints === false, 'D82.b1a own target missed -> BO ASA cap false, org gates false, run fails', JSON.stringify({ c: b1.passesBoAsaCap, o: b1.passesOrgGates, a: b1.passesAllConstraints }));
+    assert(b1.categoryPasses.A === false && b1.categoryPasses.B === true, 'D82.b1b categoryPasses: A false (its own target), B true', JSON.stringify(b1.categoryPasses));
+    assert(b1.failingReasons.length === 1 && b1.failingReasons[0].startsWith("BO ASA (category 'A')") && /30/.test(b1.failingReasons[0]) && /own target/.test(b1.failingReasons[0]), 'D82.b1c exactly one reason, "BO ASA (category \'A\') ... own target", naming the target', b1.failingReasons.join(' | '));
+    assert(b1.categoryAsa?.A?.own === true && b1.categoryAsa?.A?.passes === false && b1.categoryAsa?.A?.mean === 40 && b1.categoryAsa?.A?.n === 5 && b1.categoryAsa?.A?.target === 30 && b1.categoryAsa?.B?.own === false, 'D82.b1d categoryAsa carries own / target / mean / n / passes for A and own=false for B', JSON.stringify(b1.categoryAsa));
+    assert(b1.categoryAsa?.B?.own === false && b1.categoryAsa?.B?.target === 60 && b1.categoryAsa?.B?.passes === true && b1.followersAsa === undefined, 'D82.b1e B follows the global 60 and is judged on its own (passes at 20); there is no follower pool', JSON.stringify(b1.categoryAsa));
+    // the same replications with A left to follow the global (copy, not ticked) pass: pooled 30 <= 60
+    const b1f = ev(rs5(() => mkRep({ A: { asa: 40, elig: 10 }, B: { asa: 20, elig: 10 } })), [mkc('A', { boAsaTarget: 30, boAsaUnit: 'minutes' }), fol('B')]);
+    assert(b1f.passesBoAsaCap === true && b1f.passesAllConstraints === true && b1f.categoryAsa?.A?.own === false && b1f.categoryAsa?.A?.target === 60 && b1f.categoryAsa?.A?.passes === true, 'D82.b1f the SAME replications with A holding 30 as a copy (not ticked): A is judged against the global 60 on its own (40 passes)', JSON.stringify(b1f.failingReasons));
+
+    // b2: a LOOSER own target lets A through while the rest passes alone; without the tick the pooled mean (65 > 60) fails as today
+    const looseReps = rs5(() => mkRep({ A: { asa: 80, elig: 30 }, B: { asa: 20, elig: 10 } }));
+    const b2 = ev(looseReps, [own('A', 90), fol('B')]);
+    const b2n = ev(looseReps, [mkc('A', { boAsaTarget: 90, boAsaUnit: 'minutes' }), fol('B')]);
+    assert(b2.passesBoAsaCap === true && b2.passesAllConstraints === true && b2.failingReasons.length === 0, 'D82.b2a A own 90 (answers in 80) and B follows 60 (answers in 20) -> both met on their own, passes', JSON.stringify({ r: b2.failingReasons }));
+    assert(b2n.passesBoAsaCap === false && b2n.failingReasons.length === 1 && b2n.failingReasons[0].startsWith("BO ASA (category 'A')") && /upper bound > target 60minutes \(60m\)/.test(b2n.failingReasons[0]) && !/own target/.test(b2n.failingReasons[0]), 'D82.b2b no tick: A (80) is judged against the global 60 on its own and fails - even though the pooled mean (65) would be only slightly over and B is fine', b2n.failingReasons.join(' | '));
+
+    // b3: the upper CI bound, not the mean, decides an own target
+    const b3f = ev(rs5((i) => mkRep({ A: { asa: [29, 29, 29, 29, 31][i], elig: 10 }, B: { asa: 10, elig: 10 } })), [own('A', 30), fol('B')]);
+    const b3p = ev(rs5((i) => mkRep({ A: { asa: [28, 29, 29, 29, 29][i], elig: 10 }, B: { asa: 10, elig: 10 } })), [own('A', 30), fol('B')]);
+    assert(b3f.passesBoAsaCap === false && b3f.categoryAsa?.A?.mean === 29.4 && b3f.categoryAsa?.A?.ciHigh > 30, 'D82.b3a own target 30: mean 29.4 clears it but the upper bound (~30.5) does not -> fails', JSON.stringify(b3f.categoryAsa?.A));
+    assert(b3p.passesBoAsaCap === true && b3p.categoryAsa?.A?.ciHigh <= 30, 'D82.b3b mean 28.8, upper bound ~29.4 -> passes', JSON.stringify(b3p.categoryAsa?.A));
+
+    // b4: replications that carry no per-category ASA data (D57-style) never produce NaN; the own category is not judged and a note says so
+    const b4 = ev(rs5(() => mkRep({ A: {}, B: {} }, 5)), [own('A', 30), fol('B')]);
+    assert(!/NaN/.test(JSON.stringify({ c: b4.categoryAsa, n: b4.asaNotes, r: b4.failingReasons }, (_k, v) => (typeof v === 'number' && !Number.isFinite(v) ? 'NaN' : v))) && b4.passesBoAsaCap === true, 'D82.b4a no per-category ASA data: no NaN anywhere, nothing judged, passes', JSON.stringify(b4.categoryAsa));
+    assert(Array.isArray(b4.asaNotes) && b4.asaNotes.length === 2 && /'A'/.test(b4.asaNotes[0]) && /'B'/.test(b4.asaNotes[1]) && b4.categoryAsa?.A?.judged === false && b4.categoryAsa?.A?.n === 0 && b4.categoryAsa?.B?.judged === false, 'D82.b4b a note per category (A own, B global) says it was not checked (no cases to measure); judged=false, n=0', JSON.stringify({ n: b4.asaNotes, a: b4.categoryAsa }));
+
+    // b5: replications with primaryEligible 0 are skipped (n and the t value use the samples that remain)
+    const b5 = ev(rs5((i) => mkRep({ A: { asa: [99, 99, 25, 26, 27][i], elig: [0, 0, 10, 10, 10][i] }, B: { asa: 10, elig: 10 } })), [own('A', 30), fol('B')]);
+    assert(b5.categoryAsa?.A?.n === 3 && b5.categoryAsa?.A?.mean === 26 && b5.passesBoAsaCap === true, 'D82.b5 two replications with no eligible A case are skipped: n = 3, mean 26 (the 99s are not averaged in), passes', JSON.stringify(b5.categoryAsa?.A));
+    // b5b: a replication with no case for the category is skipped (n = 1: the value itself is compared)
+    const b5b = ev(rs5((i) => mkRep({ A: { asa: 10, elig: 10 }, B: { asa: [70, 70, 70, 70, 70][i], elig: [0, 0, 0, 0, 5][i] } })), [own('A', 30), fol('B')]);
+    assert(b5b.categoryAsa?.B?.n === 1 && b5b.categoryAsa?.B?.mean === 70 && b5b.categoryAsa?.B?.passes === false && b5b.passesBoAsaCap === false, 'D82.b5b B follows 60: only the replication with B cases counts (n = 1, value 70 > 60 -> fails by the value itself)', JSON.stringify(b5b.categoryAsa?.B));
+
+    // b6: every category own -> there is no pooled gate
+    const b6 = ev(rs5(() => mkRep({ A: { asa: 20, elig: 10 }, B: { asa: 40, elig: 10 } }, 999)), [own('A', 30), own('B', 50)]);
+    assert(b6.passesBoAsaCap === true, 'D82.b6 all categories own: the (absurd) pooled 999 is not judged; each is held to its own target', JSON.stringify({ c: b6.passesBoAsaCap }));
+    // b7: ASA gate off -> the flag is ignored
+    const b7 = ev(rs5(() => mkRep({ A: { asa: 40, elig: 10 }, B: { asa: 20, elig: 10 } })), [own('A', 30), fol('B')], { ...slaA, boAsaEnabled: false });
+    assert(b7.passesBoAsaCap === true && b7.passesAllConstraints === true && b7.failingReasons.length === 0, 'D82.b7 answer-time off: a ticked own target is ignored', JSON.stringify(b7.failingReasons));
+    // b8: R = 1 uses the value itself
+    const b8 = ev([mkRep({ A: { asa: 29, elig: 10 }, B: { asa: 10, elig: 10 } })], [own('A', 30), fol('B')]);
+    const b8f = ev([mkRep({ A: { asa: 31, elig: 10 }, B: { asa: 10, elig: 10 } })], [own('A', 30), fol('B')]);
+    assert(b8.passesBoAsaCap === true && b8f.passesBoAsaCap === false, 'D82.b8 one replication: the value itself is compared (29 passes, 31 fails)', `${b8.passesBoAsaCap}/${b8f.passesBoAsaCap}`);
+    // b9: two failing own categories -> reasons in name order, all starting "BO ASA"
+    const b9 = ev(rs5(() => mkRep({ B: { asa: 50, elig: 10 }, A: { asa: 40, elig: 10 } })), [own('B', 20), own('A', 30)]);
+    assert(b9.failingReasons.length === 2 && b9.failingReasons[0].startsWith("BO ASA (category 'A')") && b9.failingReasons[1].startsWith("BO ASA (category 'B')"), 'D82.b9 two own categories missed: two reasons, category-name order, both start with "BO ASA"', b9.failingReasons.join(' | '));
+    // b10: no own category -> exactly today's gate (reason text, no extra fields)
+    const b10 = ev(rs5(() => mkRep({ A: { asa: 70, elig: 10 }, B: { asa: 70, elig: 10 } })), [fol('A'), fol('B')]);
+    assert(b10.passesBoAsaCap === false && b10.failingReasons.length === 2 && b10.failingReasons[0] === "BO ASA (category 'A') 95% CI [70m, 70m] upper bound > target 60minutes (60m) (Mean: 70m)" && b10.failingReasons[1].startsWith("BO ASA (category 'B')"), 'D82.b10 nothing ticked, answer time on: every category is judged against the global target on its own (one reason each, names the category)', JSON.stringify(b10.failingReasons));
+    // b11: no averaging: pooled mean is fine (about 19) but category A alone is not
+    const b11 = ev(rs5(() => mkRep({ A: { asa: 90, elig: 1 }, B: { asa: 10, elig: 100 } })), [fol('A'), fol('B')]);
+    assert(b11.passesBoAsaCap === false && b11.categoryAsa?.A?.passes === false && b11.categoryAsa?.B?.passes === true && b11.failingReasons.length === 1, 'D82.b11 no pooled gate: a thin category at 90 fails the global 60 although the all-category mean is about 10', JSON.stringify(b11.failingReasons));
+  }
+
+  // ---- fixtures for the searches: two categories, flat 5-day business week, answer-time global 240 min (not binding) ----
+  const fx82 = (ownFast?: number, o: { globalT?: number; globalUnit?: 'minutes' | 'hours'; copyFast?: number; copyUnit?: 'minutes' | 'hours'; ownSlow?: number; userMaxHC?: number; asaOn?: boolean } = {}) => {
+    const ivs: StandardInterval[] = [];
+    for (const category of ['Fast', 'Slow']) for (let day = 0; day < 5; day++) for (let hr = 9; hr < 17; hr++) for (let m = 0; m < 60; m += 30) ivs.push({ intervalIndex: ivs.length, start: new Date(2026, 2, 2 + day, hr, m), end: new Date(2026, 2, 2 + day, hr, m + 30), volume: 10, category });
+    const gT = o.globalT ?? 240; const gU = o.globalUnit ?? 'minutes';
+    const cat = (id: string, name: string, aht: number, pr: number, extra: Record<string, unknown>) => ({ id, name, ahtMinutes: aht, shrinkagePct: 0.2, priority: pr, primaryPct: 80, primaryWindow: 4, primaryUnit: 'hours', ...extra }) as CategoryConfig;
+    const categories: CategoryConfig[] = [
+      cat('f', 'Fast', 15, 1, ownFast !== undefined ? { boAsaTarget: ownFast, boAsaUnit: 'minutes', boAsaOwn: true } : o.copyFast !== undefined ? { boAsaTarget: o.copyFast, boAsaUnit: o.copyUnit ?? 'minutes' } : {}),
+      cat('s', 'Slow', 30, 2, o.ownSlow !== undefined ? { boAsaTarget: o.ownSlow, boAsaUnit: 'minutes', boAsaOwn: true } : {}),
+    ];
+    const sla: SLAPolicyConfig = { primaryPct: 80, primaryWindow: 4, primaryUnit: 'hours', boAsaEnabled: o.asaOn ?? true, boAsaTarget: gT, boAsaUnit: gU, asaClockBasis: 'business_window', clockBasis: 'business_time', clockStartPolicy: 'next_open', occupancyCapEnabled: false, occupancyCapPct: 100, confidenceLevelPct: 90, minCoverageEnabled: false };
+    return { intervals: ivs, openingWIP: [] as OpeningWIPCase[], categories, calendar: { ...BIZ_CAL }, labor: { ...LABOR }, sla, seed: 7, userMaxHC: o.userMaxHC ?? 80, replications: 5, queueArchitecture: 'pooled' as const };
+  };
+  const sig82 = (r: any): string => `${r.recommendedHC}|${r.staffing?.grossHCTotal}|${r.isInfeasible}|${r.infeasibleReason}|${r.bindingConstraintType}|${r.bindingConstraintDescription}|${r.infeasibleAdjacentWarning}|${JSON.stringify(r.searchHistory)}|${r.finalDESResult?.boAsaMeanMinutes}`;
+  const stripAsa = (p: any) => ({ ...p, categories: p.categories.map((c: any) => { const { boAsaTarget, boAsaUnit, boAsaOwn, ...rest } = c; return rest; }) });
+
+  // ---- D82.c a tighter own target raises the headcount; sync === async; the failing row names the category ----
+  const base82: any = searchOptimalHC(fx82());
+  const tight82: any = searchOptimalHC(fx82(5));
+  const tight82a: any = await searchOptimalHCAsync(fx82(5));
+  assert(base82.recommendedHC !== null && tight82.recommendedHC !== null && tight82.recommendedHC > base82.recommendedHC, 'D82.c1 Fast ticked own 5 min (global 240, not binding): recommended HC rises above the no-own answer', `base=${base82.recommendedHC} own5=${tight82.recommendedHC}`);
+  assert(sig82(tight82) === sig82(tight82a), 'D82.c2 sync === async with an own target (HC, reasons, labels, full history)', `sync=${tight82.recommendedHC} async=${tight82a.recommendedHC}`);
+  const rowBelow82 = (tight82.searchHistory as any[]).find((x) => x.hc === tight82.recommendedHC - 1);
+  assert(!!rowBelow82 && rowBelow82.passed === false && rowBelow82.failingReasons.some((x: string) => x.startsWith("BO ASA (category 'Fast')")), 'D82.c3 the row one below the recommendation fails with "BO ASA (category \'Fast\') ..."', JSON.stringify(rowBelow82?.failingReasons));
+  assert(tight82.bindingConstraintType === 'bo_asa_cap' && /Fast/.test(tight82.bindingConstraintDescription) && /5/.test(tight82.bindingConstraintDescription), 'D82.c4 the binding-constraint label names the category and its own target', `${tight82.bindingConstraintType}: ${tight82.bindingConstraintDescription}`);
+  // c6: a LOOSER own target for the slow-answering category: global 3 min binds on the others only
+  {
+    const allGlobal: any = searchOptimalHC(fx82(undefined, { globalT: 3 }));
+    const fastLoose: any = searchOptimalHC(fx82(240, { globalT: 3 }));
+    assert(allGlobal.recommendedHC !== null && fastLoose.recommendedHC !== null && fastLoose.recommendedHC < allGlobal.recommendedHC, 'D82.c6a Fast ticked own 240 while the global is 3: Slow alone is held to 3 -> fewer agents than when both follow 3', `follow=${allGlobal.recommendedHC} fastOwn=${fastLoose.recommendedHC}`);
+    assert(fastLoose.finalDESResult.passesBOASA === false && fastLoose.infeasibleAdjacentWarning === undefined, 'D82.c6b the single-run pooled flag is false (Fast is slow) but no "fell slightly below target" warning appears: the check uses the resolved targets', `passesBOASA=${fastLoose.finalDESResult.passesBOASA} warn=${fastLoose.infeasibleAdjacentWarning}`);
+    const sharedBind: any = searchOptimalHC(fx82(240, { globalT: 1 }));
+    const sharedBindA: any = await searchOptimalHCAsync(fx82(240, { globalT: 1 }));
+    assert(sharedBind.bindingConstraintType === 'bo_asa_cap' && /category 'Slow' \(global target/.test(sharedBind.bindingConstraintDescription) && sharedBind.bindingConstraintDescription === sharedBindA.bindingConstraintDescription, 'D82.c6c Fast ticked own 240, global 1: Slow (global target) is what stopped N-1, and the binding-constraint label names it (sync = async)', `${sharedBind.bindingConstraintType}: ${sharedBind.bindingConstraintDescription} | ${sharedBindA.bindingConstraintDescription}`);
+    assert(tight82.categoryAsa?.Fast?.own === true && tight82.categoryAsa?.Fast?.judged === true && tight82.categoryAsa?.Fast?.passes === true && base82.categoryAsa?.Fast?.own === false && base82.categoryAsa?.Fast?.target === 240, 'D82.c8 the search result carries the statistical per-category verdict (Results reads it): Fast own and met in the ticked run, global 240 in the unticked run', JSON.stringify([tight82.categoryAsa?.Fast, base82.categoryAsa?.Fast]));
+  }
+  // c7: an own target that cannot be met within the cap -> infeasible, the message names the category
+  {
+    const inf: any = searchOptimalHC(fx82(0.01, { userMaxHC: 18 }));
+    const infA: any = await searchOptimalHCAsync(fx82(0.01, { userMaxHC: 18 }));
+    assert(inf.isInfeasible === true && /BO ASA \(category 'Fast'\)/.test(inf.infeasibleReason ?? ''), 'D82.c7a unattainable own target within the cap -> infeasible and the wording names category Fast', inf.infeasibleReason);
+    assert(infA.isInfeasible === true && infA.infeasibleReason === inf.infeasibleReason, 'D82.c7b sync === async infeasible wording', `${inf.infeasibleReason} | ${infA.infeasibleReason}`);
+  }
+
+  // ---- D82.d nothing ticked -> identical to today ----
+  {
+    const cp = fx82(undefined, { copyFast: 5, copyUnit: 'hours' });
+    const rCopy: any = searchOptimalHC(cp);
+    const rStripped: any = searchOptimalHC(stripAsa(cp));
+    assert(sig82(rCopy) === sig82(rStripped) && rCopy.recommendedHC === base82.recommendedHC, 'D82.d1 Fast holds 5 hours as an unticked copy: the whole result is identical to the categories with no value at all (and to the baseline)', `copy=${rCopy.recommendedHC} stripped=${rStripped.recommendedHC}`);
+    // older settings file (no boAsaOwn key at all) -> same
+    const old = { ...cp, categories: JSON.parse(JSON.stringify(cp.categories)) };
+    assert(sig82(searchOptimalHC(old)) === sig82(rCopy) && !old.categories.some((c: any) => 'boAsaOwn' in c), 'D82.d2 a settings file without the boAsaOwn key gives the same result', '');
+    // global changed after load: copies (240 min) follow the NEW global
+    const g3copies = fx82(undefined, { globalT: 3, copyFast: 240 });
+    const g3 = fx82(undefined, { globalT: 3 });
+    const rg3c: any = searchOptimalHC(g3copies); const rg3: any = searchOptimalHC(stripAsa(g3));
+    assert(sig82(rg3c) === sig82(rg3) && rg3c.recommendedHC > base82.recommendedHC, 'D82.d3 global lowered to 3 after the copies were made (240): copies follow, same answer as no copies, higher than the 240 answer', `copies=${rg3c.recommendedHC} stripped=${rg3.recommendedHC} base=${base82.recommendedHC}`);
+    // unit-only change of the global: 0.05 hours = 3 min, copies say minutes
+    const gu = fx82(undefined, { globalT: 0.05, globalUnit: 'hours', copyFast: 240, copyUnit: 'minutes' });
+    assert(sig82(searchOptimalHC(gu)).split('|').slice(0, 3).join('|') === sig82(rg3).split('|').slice(0, 3).join('|'), 'D82.d4 only the global unit changed (0.05 hours = 3 min): copies follow it; same headcount and verdict as global 3 minutes', '');
+    // answer-time off: a ticked value changes nothing
+    const offTick: any = searchOptimalHC(fx82(5, { asaOn: false }));
+    const offBase: any = searchOptimalHC(fx82(undefined, { asaOn: false }));
+    assert(sig82(offTick) === sig82(offBase), 'D82.d5 answer-time OFF: a ticked own target changes nothing', `${offTick.recommendedHC} vs ${offBase.recommendedHC}`);
+    // the three built-in samples: ticked-nothing categories (default copies, Claims_Life 90) == values stripped, at fixed headcounts, ASA on and off
+    for (const [st, n] of [['claims', 31], ['support', 40], ['healthcare', 30]] as const) {
+      const { rows } = buildSampleDataset(st, new Date(2026, 9, 5, 8, 0, 0, 0));
+      const ivs = mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+      const withCopies = st === 'claims' ? DEFAULT_CATEGORIES : discoverAndSyncCategories(ivs, DEFAULT_CATEGORIES, DEFAULT_SLA);
+      const stripped = withCopies.map((c: any) => { const { boAsaTarget, boAsaUnit, boAsaOwn, ...rest } = c; return rest as CategoryConfig; });
+      for (const on of [true, false]) {
+        const run = (cats: CategoryConfig[]) => { const r: any = evaluateCandidateStatistical({ operationalHC: n, intervals: ivs, openingWIP: [], categories: cats, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: { ...DEFAULT_SLA, boAsaEnabled: on, boAsaTarget: 60 }, baseSeed: DEFAULT_SIM_PARAMS.seed, replications: 4, queueArchitecture: 'pooled', dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness }); return JSON.stringify([r.primaryStats, r.failingReasons, r.passesAllConstraints, r.passesOrgGates, r.categoryPasses, r.passesBoAsaCap, r.categoryAsa, r.followersAsa]); };
+        assert(run(withCopies) === run(stripped), `D82.d6 sample ${st}, N=${n}, answer-time ${on ? 'on (60)' : 'off'}: default copies (e.g. Claims_Life 90) give the same statistical evaluation as no copies`, '');
+      }
+    }
+  }
+
+  // ---- D82.e a ticked Claims_Life on the default sample: Life judged alone at 90, the other two share the global 60 ----
+  {
+    const { rows } = buildSampleDataset('claims', new Date(2026, 9, 5, 8, 0, 0, 0));
+    const ivs = mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+    const ticked = DEFAULT_CATEGORIES.map((c) => (c.name === 'Claims_Life' ? { ...c, boAsaOwn: true } : c));
+    const r: any = evaluateCandidateStatistical({ operationalHC: 31, intervals: ivs, openingWIP: [], categories: ticked, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: { ...DEFAULT_SLA, boAsaEnabled: true, boAsaTarget: 60 }, baseSeed: DEFAULT_SIM_PARAMS.seed, replications: 4, queueArchitecture: 'pooled', dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness });
+    assert(r.categoryAsa?.Claims_Life?.own === true && r.categoryAsa?.Claims_Life?.target === 90 && r.categoryAsa?.Claims_Auto?.own === false && r.categoryAsa?.Claims_Auto?.target === 60 && r.categoryAsa?.Claims_Home?.target === 60, 'D82.e1 ticking Claims_Life (value 90 from the defaults): it is judged at 90, Claims_Auto / Claims_Home each at the global 60', JSON.stringify(r.categoryAsa));
+  }
+
+  // ---- D82.f the polish/"BO ASA" invariant of D77.2b holds with own targets, across a sweep ----
+  {
+    const p = fx82(5);
+    let consistent = true; let sawFail = false; let sawPass = false; let sawOwnReason = false;
+    for (const n of [12, 15, 18, 22, 30]) {
+      const r: any = evaluateCandidateStatistical({ operationalHC: n, intervals: p.intervals, openingWIP: [], categories: p.categories, calendar: p.calendar, labor: p.labor, sla: p.sla, baseSeed: 42, replications: 4 });
+      const fr: string[] = r.failingReasons;
+      if (r.passesBoAsaCap !== !fr.some((x) => x.startsWith('BO ASA'))) consistent = false;
+      if (r.passesBoAsaCap === false) sawFail = true; else sawPass = true;
+      if (fr.some((x) => x.startsWith("BO ASA (category 'Fast')"))) sawOwnReason = true;
+      if (r.categoryAsa?.Fast?.passes === false && r.categoryPasses.Fast !== false) consistent = false;
+    }
+    assert(consistent && sawFail && sawPass && sawOwnReason, 'D82.f the BO ASA flag agrees with the "BO ASA" reasons at every swept N (own category failing and passing both occur); a failing own category is false in categoryPasses', `consistent=${consistent} fail=${sawFail} pass=${sawPass}`);
+  }
+
+  // ---- D82.g planner-facing text is in the screens ----
+  {
+    const cfgSrc = readFileSync(resolve(import.meta.dirname, '../src/components/ConfigFlow.tsx'), 'utf8');
+    const resSrc = readFileSync(resolve(import.meta.dirname, '../src/components/ResultsFlow.tsx'), 'utf8');
+    assert(cfgSrc.includes('Own target') && cfgSrc.includes('follows global') && cfgSrc.includes('boAsaOwn'), 'D82.g1 Config: each category has an "Own target" tick; unticked shows "follows global"', '');
+    assert(cfgSrc.includes('Each category must meet its answer-time target on its own (its own target if ticked, otherwise the global target).') && resSrc.includes('Each category must meet its answer-time target on its own (its own target if ticked, otherwise the global target).'), 'D82.g2 the rule sentence is shown in Config and in Results', '');
+    assert(!/shared pool|categories without their own target|share the global target/.test(cfgSrc + resSrc), 'D82.g4 no text about a shared pool or a shared-pool rule remains in the screens', '');
+    assert(/boAsaOwn: false/.test(cfgSrc), 'D82.g3 "Apply Template to All Categories" sets every category back to follow the global target', '');
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Suite D83 - Item 4 (G9 / DES-10): the drain runs until the last deadline (owner decision 2026-10-15; challenge amendments G1-G9 2026-10-16)
+// drain end = min( max(horizon end + 14 calendar days, latest finite primaryDeadline of the run's cases), horizon end + 366 days ).
+// The same value drives the day-open/close scheduling, SimulationEnd and the unfinished-case count; computed once per run from the case
+// array (same for every candidate N, CRN preserved). Non-finite deadlines are skipped. drainCapped is true on the result when the cap bit.
+// Occupancy denominator (planned horizon), N_min, N_occ and Gross HC are untouched (frozen decision 3).
+// Fail-first (pre-change): D83.a (12, not 8), D83.b (6 / 4, not 10 / 0), D83.d (async 12), D83.g (5 censored, not 3), D83.h1 (6 finish),
+// D83.i1 / D83.i3 (field absent), D83.j2 (timeline ends at the old drain end); D59.1-3 redesigned (see D59). Controls that hold before and after:
+// D83.c, D83.e, D83.f, D83.h2, D83.i2, D83.j1 / j3.
+// ---------------------------------------------------------------------------
+console.log('\n--- Suite D83: the drain runs until the last deadline (Item 4 / G9 / DES-10) ---');
+{
+  const at83 = (mo: number, d: number, h: number, m: number = 0) => new Date(2026, mo, d, h, m);
+  const mkCases83 = (n: number, aht: number, deadline: Date): any[] =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `U${i}`, syntheticId: i + 1, category: 'A', priority: 1,
+      arrival: at83(9, 12, 9), clockStart: at83(9, 12, 9),
+      totalAhtMinutes: aht, remainingWorkMinutes: aht,
+      primaryDeadline: deadline, latestSafeStart: at83(9, 12, 9),
+      firstStartTime: null, completeTime: null, parkCount: 0, isOpeningWip: false,
+    }));
+  const cat83 = (aht: number): CategoryConfig[] => [{ id: 'a', name: 'A', ahtMinutes: aht, shrinkagePct: 0.2, priority: 1, primaryWindowMinutes: 100000 }];
+  const run83 = (cases: any[], aht: number, full: boolean = false): any =>
+    runBackofficeDES({
+      operationalHC: 1, intervals: [], openingWIP: [], categories: cat83(aht), calendar: BIZ_CAL, labor: LABOR, sla: { ...DEFAULT_SLA }, seed: 7,
+      skipCaseResultsAndTimeline: !full,
+      precomputedCases: { cases, horizonStart: at83(9, 12, 9), horizonEnd: at83(9, 12, 17) },
+    });
+  const NOV20 = at83(10, 20, 17);
+
+  // ---- D83.a / D83.d / D83.f the holiday repro (vol 20, AHT 33, 5-day window; 8 holidays after the horizon push deadlines past the old drain end) ----
+  const HOLS83 = ['2026-10-19', '2026-10-20', '2026-10-21', '2026-10-22', '2026-10-23', '2026-10-26', '2026-10-27', '2026-10-28'];
+  const mkIv83 = (): StandardInterval[] => {
+    const out: StandardInterval[] = [];
+    let idx = 0;
+    for (const d of [5, 15, 16]) {
+      for (let i = 0; i < 20; i++) {
+        const s = new Date(2026, 9, d, 8, i * 30);
+        out.push({ intervalIndex: idx++, start: s, end: new Date(s.getTime() + 30 * 60000), volume: d === 5 ? (i === 0 ? 1 : 0) : 20, category: 'A' } as StandardInterval);
+      }
+    }
+    return out;
+  };
+  const sla83: SLAPolicyConfig = { ...DEFAULT_SLA, primaryWindow: 5, primaryUnit: 'days', clockBasis: 'business_time', clockStartPolicy: 'next_open' } as SLAPolicyConfig;
+  const iv83 = mkIv83();
+  const cats83 = discoverAndSyncCategories(iv83, [{ ...DEFAULT_CATEGORIES[0], id: 'a', name: 'A', ahtMinutes: 33, primaryWindow: 5, primaryUnit: 'days' } as CategoryConfig], sla83);
+  const p83 = (hol: boolean) => ({ intervals: iv83, openingWIP: [] as OpeningWIPCase[], categories: cats83, calendar: { ...DEFAULT_CALENDAR, holidays: hol ? HOLS83 : [] }, labor: DEFAULT_LABOR, sla: sla83, seed: 12345, userMaxHC: 100, replications: 5, queueArchitecture: 'pooled' as const });
+  const sig83 = (r: any): string => `${r.recommendedHC}|${r.staffing?.grossHCTotal}|${r.isInfeasible}|${r.finalDESResult?.primaryAchievedPct}|${r.finalDESResult?.occupancyPct}|${r.finalDESResult?.unfinishedCases}|${JSON.stringify(r.searchHistory)}`;
+  const noHol: any = searchOptimalHC(p83(false));
+  const withHol: any = searchOptimalHC(p83(true));
+  assert(noHol.recommendedHC === 8 && withHol.recommendedHC === 8, 'D83.a1 vol 20: 8 HC with and without 8 holidays after the horizon (holidays push deadlines past the old drain end; it used to give 12)', `no holidays ${noHol.recommendedHC}, holidays ${withHol.recommendedHC}`);
+  assert(withHol.staffing?.grossHCTotal === noHol.staffing?.grossHCTotal && withHol.finalDESResult?.primaryAchievedPct === noHol.finalDESResult?.primaryAchievedPct, 'D83.a2 the holiday run has the same gross HC and the same SLA % in the recommended result (a case still open at its own deadline is a miss whether it is counted late or unfinished)', `gross ${withHol.staffing?.grossHCTotal}/${noHol.staffing?.grossHCTotal}, SLA ${withHol.finalDESResult?.primaryAchievedPct}/${noHol.finalDESResult?.primaryAchievedPct}`);
+  const withHolA: any = await searchOptimalHCAsync(p83(true));
+  assert(sig83(withHolA) === sig83(withHol) && withHolA.recommendedHC === 8, 'D83.d sync === async on the holiday repro (HC, gross, verdict, figures, full search history)', `sync=${withHol.recommendedHC} async=${withHolA.recommendedHC}`);
+  const withHol2: any = searchOptimalHC(p83(true));
+  assert(sig83(withHol2) === sig83(withHol), 'D83.f determinism: two sync runs of the holiday repro are byte-identical (HC, gross, figures, search history)', '');
+
+  // ---- D83.b a case due after horizon + 14 days and finished before its deadline is met, not unfinished ----
+  {
+    const r = run83(mkCases83(10, 800, NOV20), 800, true);
+    const lastDone = Math.max(...(r.caseResults as any[]).filter((c) => c.isCompleted).map((c) => c.completeTime.getTime()));
+    assert(r.completedCases === 10 && r.unfinishedCases === 0, 'D83.b1 10 x 800 min, 1 agent, all due Fri 20 Nov: all 10 finish (8000 min = 16.7 working days), none counted unfinished', `completed ${r.completedCases}, unfinished ${r.unfinishedCases}`);
+    assert(r.primaryEligibleCount === 10 && r.primaryPassCount === 10 && r.primaryAchievedPct === 100, 'D83.b2 all 10 met their deadline: 10 / 10 = 100 %', `eligible ${r.primaryEligibleCount}, pass ${r.primaryPassCount}, pct ${r.primaryAchievedPct}`);
+    assert(lastDone > at83(9, 26, 17).getTime() && lastDone <= NOV20.getTime(), 'D83.b3 the last case finished after the old drain end (Mon 26 Oct 17:00) and before its deadline', new Date(lastDone).toISOString());
+  }
+
+  // ---- D83.c deadlines earlier than horizon + 14 days: drain end unchanged (Mon 26 Oct 17:00 = 11 working days) ----
+  {
+    const r = run83(mkCases83(10, 800, at83(9, 20, 17)), 800, true);
+    assert(r.completedCases === 6 && r.unfinishedCases === 4, 'D83.c1 all deadlines earlier than horizon + 14 days (Tue 20 Oct): the drain still ends at horizon + 14 days: floor(5280 / 800) = 6 finish, 4 unfinished (unchanged)', `completed ${r.completedCases}, unfinished ${r.unfinishedCases}`);
+    assert(r.primaryPassCount === 4 && r.primaryAchievedPct === 40 && r.drainCapped !== true, 'D83.c2 only the 4 finished by Tue 20 Oct 17:00 are met (7 days x 480 / 800 = 4): 40 %; drain not capped', `pass ${r.primaryPassCount}, pct ${r.primaryAchievedPct}, capped ${r.drainCapped}`);
+  }
+
+  // ---- D83.e the three built-in samples and AJM_Only at defaults: headcount, gross and occupancy unchanged ----
+  for (const [type, hc, gross, occ] of [['claims', 31, 40, 99.1], ['support', 28, 35, 74.9], ['healthcare', 31, 39, 58.9]] as Array<['claims' | 'support' | 'healthcare', number, number, number]>) {
+    const { rows } = buildSampleDataset(type, new Date(2026, 9, 5, 8, 0, 0, 0));
+    const ivs = mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+    const cats = discoverAndSyncCategories(ivs, DEFAULT_CATEGORIES, DEFAULT_SLA);
+    const r: any = searchOptimalHC({ intervals: ivs, openingWIP: [], categories: cats, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, seed: DEFAULT_SIM_PARAMS.seed, userMaxHC: DEFAULT_SIM_PARAMS.maxHCSearch, replications: DEFAULT_SIM_PARAMS.replications, queueArchitecture: 'pooled', dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness });
+    assert(r.recommendedHC === hc && r.staffing.grossHCTotal === gross && r.finalDESResult?.occupancyPct === occ && r.finalDESResult?.drainCapped !== true, `D83.e ${type} sample (defaults): HC ${hc} / gross ${gross} / occupancy ${occ} % unchanged by the longer drain`, `got ${r.recommendedHC}/${r.staffing.grossHCTotal}/${r.finalDESResult?.occupancyPct}`);
+  }
+
+  // ---- D83.g answer time: a case that starts inside the longer drain has its real wait counted; one that never starts stays censored ----
+  {
+    const r = run83(mkCases83(10, 1100, at83(9, 30, 17)), 1100, true);
+    assert(r.boAsaCensoredCount === 3 && r.completedCases === 6, 'D83.g1 10 x 1100 min due Fri 30 Oct (drain to Fri 30 Oct 17:00): 7 cases start (6 done + 1 in progress), only the 3 that never start are censored (was 5 at the old drain end)', `censored ${r.boAsaCensoredCount}, completed ${r.completedCases}`);
+    const startedWaits = (r.caseResults as any[]).filter((c) => !c.asaCensored).length;
+    assert(startedWaits === 7, 'D83.g2 7 cases carry a real (uncensored) wait', `uncensored ${startedWaits}`);
+  }
+
+  // ---- D83.h a non-finite deadline is skipped: agents still work and the result equals the run where that case simply fails ----
+  {
+    const nan = mkCases83(10, 800, NOV20);
+    nan[0] = { ...nan[0], primaryDeadline: new Date(NaN) };
+    const early = mkCases83(10, 800, NOV20);
+    early[0] = { ...early[0], primaryDeadline: at83(9, 13, 9) };
+    const a = run83(nan, 800, true);
+    const b = run83(early, 800, true);
+    assert(a.completedCases === 10 && a.completedCases === b.completedCases && a.primaryPassCount === b.primaryPassCount && a.primaryPassCount === 9 && a.drainCapped !== true, 'D83.h1 one NaN deadline: the other 9 deadlines still set the drain (all 10 finish), equals the run where that case simply has an impossible deadline; not capped', `nan: ${a.completedCases}/${a.primaryPassCount}, early: ${b.completedCases}/${b.primaryPassCount}, capped ${a.drainCapped}`);
+    const allNaN = mkCases83(10, 800, new Date(NaN));
+    const c = run83(allNaN, 800, true);
+    assert(c.completedCases === 6 && c.unfinishedCases === 4 && c.drainCapped !== true, 'D83.h2 every deadline NaN: the drain falls back to horizon + 14 days (6 finish, 4 unfinished), no crash, no hang', `completed ${c.completedCases}, unfinished ${c.unfinishedCases}`);
+  }
+
+  // ---- D83.i a far-future deadline is capped at horizon end + 366 days and flagged ----
+  {
+    const far = mkCases83(10, 800, new Date(2030, 0, 4, 17, 0));
+    const r = run83(far, 800, true);
+    assert(r.drainCapped === true && r.completedCases === 10 && r.unfinishedCases === 0, 'D83.i1 a deadline in 2030 (beyond horizon end + 366 days): the run proceeds with the cap, drainCapped is true, the cases still finish', `capped ${r.drainCapped}, completed ${r.completedCases}`);
+    const near = run83(mkCases83(10, 800, NOV20), 800, true);
+    assert(near.drainCapped !== true, 'D83.i2 a deadline inside the cap leaves drainCapped unset / false', `capped ${near.drainCapped}`);
+    // a deadline well beyond the cap that no agent could reach: 40000-min cases, 1 agent, would need more than a year -> the cap still ends the run
+    const slow = run83(mkCases83(10, 40000, new Date(2030, 0, 4, 17, 0)), 40000, true);
+    assert(slow.drainCapped === true && slow.completedCases < 10 && slow.unfinishedCases === 10 - slow.completedCases, 'D83.i3 undersized run to a far-future deadline: stops at the cap, unfinished cases counted as before', `completed ${slow.completedCases}, unfinished ${slow.unfinishedCases}`);
+  }
+
+  // ---- D83.k the cap flag reaches the search output (sync and async), so Results can show the note (rework 1, R2) ----
+  {
+    const slaFar: SLAPolicyConfig = { ...sla83, primaryWindow: 300, primaryUnit: 'days' } as SLAPolicyConfig;
+    const catsFar = discoverAndSyncCategories(iv83, [{ ...DEFAULT_CATEGORIES[0], id: 'a', name: 'A', ahtMinutes: 33, primaryWindow: 300, primaryUnit: 'days' } as CategoryConfig], slaFar);
+    const pFar = { ...p83(false), categories: catsFar, sla: slaFar };
+    const farS: any = searchOptimalHC(pFar);
+    const farA: any = await searchOptimalHCAsync(pFar);
+    assert(farS.finalDESResult?.drainCapped === true && farA.finalDESResult?.drainCapped === true, 'D83.k2 a 300-working-day answer window: searchOutput.finalDESResult.drainCapped is true for sync and async', `sync ${farS.finalDESResult?.drainCapped}, async ${farA.finalDESResult?.drainCapped}`);
+    assert(noHol.finalDESResult?.drainCapped !== true, 'D83.k1 the ordinary holiday-free repro leaves drainCapped unset in the search output', `capped ${noHol.finalDESResult?.drainCapped}`);
+  }
+
+  // ---- D83.j undersized long-window run: the agent timeline extends to the longer drain and the invariants hold ----
+  {
+    const cases = mkCases83(10, 1100, at83(9, 30, 17));
+    const r = run83(cases, 1100, true);
+    const inv = verifyAgentTimelineInvariants(r, LABOR, BIZ_CAL);
+    const lastBusy = Math.max(...(r.agentTimeline as any[]).filter((s) => s.state === 'busy').map((s) => s.to.getTime()));
+    assert(inv.valid, 'D83.j1 undersized run to Fri 30 Oct: timeline invariants hold (contiguous, no overlap, busy sum = handling minutes, daily budget)', inv.errors.slice(0, 3).join(' | '));
+    assert(lastBusy > at83(9, 26, 17).getTime() && lastBusy <= at83(9, 30, 17).getTime(), 'D83.j2 the agent keeps working past the old drain end (busy slices to Fri 30 Oct)', new Date(lastBusy).toISOString());
+    assert(r.totalAvailableProductiveMinutes === 480, 'D83.j3 occupancy denominator is still the planned horizon (1 agent x 1 working day x 480 min) - frozen decision 3; the longer drain does not widen it', `available ${r.totalAvailableProductiveMinutes}, raw occupancy ${r.rawOccupancyPct}`);
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Suite D84 - Item 5 (G10 / DES-7): a blank "remaining work" in the manual backlog form means the full handling time
+// (owner decision 2026-10-15; amendments H1-H8 2026-10-16). Pure helper src/utils/wip-row.ts; engine unchanged.
+// ---------------------------------------------------------------------------------------------------------------------
+console.log('\n--- Suite D84: manual backlog row, blank remaining = full handling time (Item 5 / G10 / DES-7) ---');
+{
+  const cats84: CategoryConfig[] = [{ id: 'a', name: 'Alpha', ahtMinutes: 45, shrinkagePct: 0.2, priority: 2, primaryWindow: 2, primaryUnit: 'days' } as CategoryConfig];
+  const arr84 = new Date(2026, 9, 12, 9, 0);
+  const iv84: StandardInterval[] = [{ intervalIndex: 0, start: new Date(2026, 9, 12, 9, 0), end: new Date(2026, 9, 12, 9, 30), volume: 1, category: 'Alpha' } as StandardInterval];
+  const sla84: SLAPolicyConfig = { ...DEFAULT_SLA, primaryWindow: 2, primaryUnit: 'days', clockBasis: 'business_time', clockStartPolicy: 'next_open' } as SLAPolicyConfig;
+  const gen84 = (wip: OpeningWIPCase[], cats: CategoryConfig[] = cats84): CaseEntity[] =>
+    generateCaseEntities({ intervals: iv84, openingWIP: wip, categories: cats, calendar: BIZ_CAL, sla: sla84, seed: 42 }).cases.filter((c: CaseEntity) => c.isOpeningWip);
+  const mk84 = (rem: unknown, name: string = 'Alpha') => buildManualWipCase({ id: 'WIP-0001', categoryName: name, categories: cats84, remainingMinutes: rem, arrival: arr84 });
+
+  // a: the blank form builds a row with no remaining value (undefined), category/priority resolved
+  const blank = mk84(undefined);
+  assert(blank.remainingWorkMinutes === undefined && blank.category === 'Alpha' && blank.priority === 2 && blank.arrival.getTime() === arr84.getTime(), 'D84.a1 blank remaining -> row has remainingWorkMinutes undefined (not 30)', `rem ${blank.remainingWorkMinutes}`);
+  const unknown = mk84(undefined, 'Nope');
+  assert(unknown.remainingWorkMinutes === undefined && unknown.category === 'Nope' && unknown.priority === 1, 'D84.a2 unknown category: still undefined (no 30 fallback), category as typed, priority 1', `rem ${unknown.remainingWorkMinutes}`);
+
+  // b: the engine treats the blank row as full handling time, not part-worked
+  const eb = gen84([blank]);
+  assert(eb.length === 1 && eb[0].remainingWorkMinutes === 45 && eb[0].totalAhtMinutes === 45 && eb[0].parkCount === 0, 'D84.b1 engine: blank row -> remaining == full AHT (45), no in-progress priority', `rem ${eb[0]?.remainingWorkMinutes}/${eb[0]?.totalAhtMinutes}`);
+  // editing the category AHT afterwards: a blank row follows the new AHT and never becomes part-worked
+  const cats84b: CategoryConfig[] = [{ ...cats84[0], ahtMinutes: 20 } as CategoryConfig];
+  const eb2 = gen84([blank], cats84b);
+  assert(eb2[0].remainingWorkMinutes === 20 && eb2[0].totalAhtMinutes === 20, 'D84.b2 blank row follows a later AHT edit (45 -> 20): still full, not part-worked', `rem ${eb2[0]?.remainingWorkMinutes}/${eb2[0]?.totalAhtMinutes}`);
+
+  // c: explicit 10 < AHT keeps in-progress priority
+  const ten = mk84(10);
+  const ec = gen84([ten]);
+  assert(ten.remainingWorkMinutes === 10 && ec[0].remainingWorkMinutes === 10 && ec[0].remainingWorkMinutes < ec[0].totalAhtMinutes, 'D84.c1 typed 10 is kept and reaches the engine as part-worked (10 < 45)', `rem ${ec[0]?.remainingWorkMinutes}`);
+  assert(mk84(0).remainingWorkMinutes === undefined && mk84(-5).remainingWorkMinutes === undefined && mk84(NaN).remainingWorkMinutes === undefined && mk84('abc').remainingWorkMinutes === undefined && mk84(null).remainingWorkMinutes === undefined, 'D84.c2 typed 0 / -5 / NaN / text / null -> undefined (treated as blank)', '');
+  assert(normalizeRemainingInput(60) === 60 && normalizeRemainingInput(Infinity) === undefined, 'D84.c3 value >= AHT (60) kept as typed; Infinity -> blank', '');
+
+  // d: Total Pending Work uses the category AHT for blank rows
+  const total = totalPendingWorkMinutes([blank, ten, { ...blank, id: 'WIP-0002', category: 'Nope' }], cats84);
+  assert(total === 45 + 10 + 30, 'D84.d1 total pending: blank = category AHT (45), typed 10, unknown-category blank = 30 fallback (same as the data-quality workload check)', `total ${total}`);
+  assert(totalPendingWorkMinutes([blank], cats84b) === 20, 'D84.d2 total pending follows the current AHT (20) for a blank row', '');
+
+  // e: strict text parsing (K1/K3) - no silent digit-stripping; invalid input is flagged and stored as blank
+  const pr = (t: string) => parseRemainingText(t);
+  assert(pr('').value === undefined && !pr('').invalid && pr('  ').value === undefined && !pr('  ').invalid, 'D84.e1 "" and "  " -> blank, not invalid', '');
+  assert(pr('10').value === 10 && !pr('10').invalid && pr('12.5').value === 12.5 && !pr('12.5').invalid, 'D84.e2 "10" -> 10, "12.5" -> 12.5 (decimals kept)', '');
+  assert(pr('12,5').value === 12.5 && !pr('12,5').invalid, 'D84.e3 comma decimal "12,5" is supported -> 12.5', '');
+  assert(['0', '-5', 'abc', '1e2', '12.5.3', '0.0'].every((t) => pr(t).value === undefined && pr(t).invalid), 'D84.e4 "0" / "-5" / "abc" / "1e2" / "12.5.3" / "0.0" -> undefined AND invalid', '');
+  // f: table label (in progress only when below the category handling time)
+  const lbl = (rem: number | undefined) => remainingWorkLabel({ ...blank, remainingWorkMinutes: rem }, cats84);
+  assert(lbl(undefined) === 'full (45m)' && lbl(10) === '10m (in progress)' && lbl(12.5) === '12.5m (in progress)' && lbl(45) === '45m' && lbl(60) === '60m', 'D84.f1 label: blank "full (45m)", below AHT "(in progress)", equal/above AHT plain', `${lbl(undefined)} | ${lbl(10)} | ${lbl(45)} | ${lbl(60)}`);
+}
+
+// ---------------------------------------------------------------
+// Suite D85 — rounding ties (Item 6, F4 / HC-1 + HC-5; PRD 1.27.3)
+// A tiny floating-point error must never change a headcount. (1) Gross HC: an exact .5 total rounds UP
+// whatever order the categories are listed in (the per-category gross-ups were added in list order, so
+// 10 seats over unequal workloads at 20 % shrinkage summed to 12.4999999... in some orders -> 12, 12.5 in
+// others -> 13). (2) N_min: an exact whole-number workload/capacity ratio floors to that whole number
+// (123.75 h / 61.875 h = 1.9999999999999998 floored to 1). Tolerance is an absolute 1e-9 (double error is
+// about 2e-16 x value, so 1e-9 is far above float noise and far below any real 0.01-scale difference).
+// Frozen decision 7 (per-category gross-up, sum, one round) is unchanged.
+// ---------------------------------------------------------------
+console.log('\n--- Suite D85: rounding ties (Gross HC .5 and N_min exact ratio) ---');
+{
+  const permute85 = <T,>(a: T[]): T[][] => (a.length < 2 ? [a] : a.flatMap((x, i) => permute85([...a.slice(0, i), ...a.slice(i + 1)]).map((p) => [x, ...p])));
+  const hs85 = new Date(2026, 9, 5, 9, 0);
+  const he85 = new Date(2026, 9, 9, 17, 0);
+  const grossOf85 = (hc: number, vols: Array<[string, number]>, shr = 0.2, labor: LaborConfig = LABOR) =>
+    calculateStaffingRequirement({
+      operationalHC: hc,
+      categories: vols.map(([n], i) => ({ id: `c${i}`, name: n, ahtMinutes: 30, shrinkagePct: shr, priority: 1 })),
+      intervals: vols.map(([n, v], i) => ({ intervalIndex: i, start: new Date(2026, 9, 5, 9, 0), end: new Date(2026, 9, 5, 9, 30), category: n, volume: v })),
+      openingWIP: [],
+      calendar: BIZ_CAL,
+      labor,
+      horizonStart: hs85,
+      horizonEnd: he85,
+      bindingConstraint: 'test',
+    });
+
+  // ---- a: order independence, all 120 category orders ----
+  // Workloads 10:20:30:40:50 (volumes at equal handling time), 20 % shrinkage: 10 seats -> 12.5 exactly -> 13; 50 seats -> 62.5 -> 63.
+  const base85: Array<[string, number]> = [['Billing', 10], ['Claims', 20], ['Refunds', 30], ['Disputes', 40], ['Transfers', 50]];
+  for (const [hc, want] of [[10, 13], [50, 63]] as Array<[number, number]>) {
+    const seen = new Map<number, number>();
+    for (const order of permute85(base85)) {
+      const g = grossOf85(hc, order).grossHCTotal;
+      seen.set(g, (seen.get(g) ?? 0) + 1);
+    }
+    assert(seen.size === 1 && seen.has(want), `D85.a${hc} ${hc} seats, 5 categories (10:20:30:40:50) at 20 % shrinkage: gross ${want} in all 120 category orders`, `distribution gross->orders: ${JSON.stringify([...seen])}`);
+  }
+
+  // ---- b: N_min exact ratio ----
+  const labor85 = { dailyProductiveHours: 7.5, adherencePct: 0.55, contractualHoursSource: 'derived' as const };
+  const nMin85 = (w: number) => computeAnalyticalNMin({ totalWorkloadHours: w, labor: labor85, workingDaysInHorizon: 15, occupancyCapEnabled: false, occupancyCapPct: 100 });
+  assert(nMin85(123.75) === 2, 'D85.b1 123.75 h / (7.5 h x 15 days x 0.55 adherence x cap 100 %) = exactly 2 -> N_min 2', `got ${nMin85(123.75)}`);
+  assert(nMin85(61.875 * 1.9999999999) === 2, 'D85.b2 ratio 1.9999999999 (inside the 1e-9 tolerance) -> 2', `got ${nMin85(61.875 * 1.9999999999)}`);
+  assert(nMin85(61.875 * 1.9999) === 1, 'D85.b3 ratio 1.9999 (a real shortfall) still floors to 1', `got ${nMin85(61.875 * 1.9999)}`);
+  assert(nMin85(61.875 * 2.5) === 2 && nMin85(61.875 * 3) === 3, 'D85.b4 ratio 2.5 -> 2 (floor), ratio 3 -> 3', `got ${nMin85(61.875 * 2.5)}, ${nMin85(61.875 * 3)}`);
+
+  // ---- g: N_occ (computeOccupancyFloor) ceiling, same tolerance ----
+  // A workload summed from category parts can land one ulp above an exact whole ratio
+  // (7 h x 0.55 x 15 days = 57.75 h per seat; 0.1+0.2+0.3+0.4 of 2 seats' work = 2.0000000000000004 seats) -> bare ceil gave 3.
+  const nOcc85 = (w: number, dph = 7, days = 15) => computeOccupancyFloor({ totalWorkloadHours: w, labor: { dailyProductiveHours: dph, adherencePct: 0.55 }, workingDaysInHorizon: days, occupancyCapEnabled: false, occupancyCapPct: 100 });
+  const seat85 = 7 * 0.55 * 15;
+  const parts85 = (k: number, dph = 7, days = 15) => [0.1, 0.2, 0.3, 0.4].reduce((a, x) => a + k * dph * 0.55 * days * x, 0);
+  assert(parts85(2) / seat85 > 2 && nOcc85(parts85(2)) === 2, 'D85.g1 workload summed from 4 category parts (ratio 2.0000000000000004) -> N_occ exactly 2', `ratio ${parts85(2) / seat85}, got ${nOcc85(parts85(2))}`);
+  assert(parts85(1) / seat85 > 1 && nOcc85(parts85(1)) === 1 && parts85(19, 7.5, 22) / (7.5 * 0.55 * 22) > 19 && nOcc85(parts85(19, 7.5, 22), 7.5, 22) === 19, 'D85.g2 same on k = 1 and on 7.5 h x 22 days k = 19', `got ${nOcc85(parts85(1))}, ${nOcc85(parts85(19, 7.5, 22), 7.5, 22)}`);
+  assert(nOcc85(seat85 * 2.0001) === 3, 'D85.g3 ratio 2.0001 (a real excess) -> 3', `got ${nOcc85(seat85 * 2.0001)}`);
+  assert(nOcc85(seat85 * (2 + 5e-10)) === 2, 'D85.g4 ratio 2 + 5e-10 (inside the tolerance) -> 2', `got ${nOcc85(seat85 * (2 + 5e-10))}`);
+  assert(nOcc85(seat85 * (2 + 1e-7)) === 3, 'D85.g5 ratio 2 + 1e-7 (a real excess) -> 3', `got ${nOcc85(seat85 * (2 + 1e-7))}`);
+
+  // ---- d: Gross boundaries (one category, share 1, so the sum is exactly 10 / (1 - shr)) ----
+  const grossAt85 = (target: number) => grossOf85(10, [['Only', 10]], 1 - 10 / target).grossHCTotal;
+  assert(grossAt85(12.5 - 5e-10) === 13, 'D85.d1 12.5 - 5e-10 (float noise) -> 13', `got ${grossAt85(12.5 - 5e-10)}`);
+  assert(grossAt85(12.5 - 1e-7) === 12, 'D85.d2 12.5 - 1e-7 (a real shortfall) -> 12', `got ${grossAt85(12.5 - 1e-7)}`);
+  assert(grossAt85(12.49) === 12 && grossAt85(12.5) === 13 && grossAt85(12.51) === 13, 'D85.d3 12.49 -> 12, exactly 12.5 -> 13, 12.51 -> 13', `got ${grossAt85(12.49)}, ${grossAt85(12.5)}, ${grossAt85(12.51)}`);
+
+  // ---- f: the OFF-adjusted example is unchanged: 10 seats, 5 open days, 4 worked -> 12 seats -> gross 15 ----
+  const f85 = grossOf85(10, [['Only', 10]], 0.2, { ...LABOR, workingDaysPerWeek: 4, offDaysPerWeek: 3 });
+  assert(f85.operationalHCWithOff === 12 && f85.grossHCTotal === 15, 'D85.f 10 seats, 5 open days, 4 worked -> 12 seats -> gross 15 (unchanged)', `got ${f85.operationalHCWithOff}/${f85.grossHCTotal}`);
+
+  // ---- e: the three built-in samples at defaults are unchanged ----
+  for (const [type, hc, gross] of [['claims', 31, 40], ['support', 28, 35], ['healthcare', 31, 39]] as Array<['claims' | 'support' | 'healthcare', number, number]>) {
+    const { rows } = buildSampleDataset(type, new Date(2026, 9, 5, 8, 0, 0, 0));
+    const ivs = mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+    const cats = discoverAndSyncCategories(ivs, DEFAULT_CATEGORIES, DEFAULT_SLA);
+    const r = searchOptimalHC({ intervals: ivs, openingWIP: [], categories: cats, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, seed: DEFAULT_SIM_PARAMS.seed, userMaxHC: DEFAULT_SIM_PARAMS.maxHCSearch, replications: DEFAULT_SIM_PARAMS.replications, queueArchitecture: 'pooled', dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness });
+    assert(r.recommendedHC === hc && r.staffing.grossHCTotal === gross, `D85.e sample ${type}: HC ${hc} / gross ${gross} unchanged`, `got ${r.recommendedHC}/${r.staffing.grossHCTotal}`);
+  }
+}
+
+// ---------------------------------------------------------------
+// Suite D86 — Volume variability (Item 7; opt-in sla.volumeVariability, default OFF; PRD 1.28.0)
+// ON: each interval's case count ~ Poisson(raw forecast volume) from a separate seeded stream (mixed seed, drawn in
+// interval order, exact Knuth below 30, rounded normal above), so planners see the staff needed when volumes wobble.
+// OFF is untouched (Math.round(volume), no extra PRNG call). Roster design and siloed seats read the forecast
+// (replay) case set, so they do not move with the noisy draw. N_min / N_occ / Gross stay on forecast volume.
+// ---------------------------------------------------------------
+console.log('\n--- Suite D86: volume variability (opt-in Poisson arrival counts) ---');
+{
+  const createVolumeCountStream = (desNs as any).createVolumeCountStream as (seed: number) => (mean: number) => number;
+  const OFF86: SLAPolicyConfig = { ...DEFAULT_SLA, volumeVariability: false };
+  const ON86: SLAPolicyConfig = { ...DEFAULT_SLA, volumeVariability: true };
+  const dig86 = (x: unknown) => createHash('sha1').update(JSON.stringify(x)).digest('hex').slice(0, 16);
+  const caseDigest86 = (cs: ReadonlyArray<any>) => dig86(cs.map((c) => [c.id, c.category, c.arrival.getTime(), c.clockStart.getTime(), c.primaryDeadline.getTime(), c.latestSafeStart.getTime(), c.totalAhtMinutes]));
+  // Fixture: A first (fractional, zero and negative volumes), B after it.
+  const mkIv86 = (bVol: number): StandardInterval[] => {
+    const out: StandardInterval[] = [];
+    const aVols = [3.4, 2.5, 0.4, 0, -1, 12, 45.5, 7.6];
+    for (let day = 0; day < 3; day++) {
+      aVols.forEach((v, i) => out.push({ intervalIndex: out.length, start: new Date(2026, 9, 5 + day, 9 + i, 0), end: new Date(2026, 9, 5 + day, 9 + i, 30), volume: v, category: 'A' }));
+    }
+    for (let day = 0; day < 3; day++) {
+      for (let i = 0; i < 8; i++) out.push({ intervalIndex: out.length, start: new Date(2026, 9, 5 + day, 9 + i, 30), end: new Date(2026, 9, 5 + day, 10 + i, 0), volume: bVol, category: 'B' });
+    }
+    return out;
+  };
+  const cats86: CategoryConfig[] = [
+    { id: 'a', name: 'A', ahtMinutes: 20, shrinkagePct: 0.2, priority: 1 },
+    { id: 'b', name: 'B', ahtMinutes: 40, shrinkagePct: 0.2, priority: 1 },
+  ];
+  const gen86 = (sla: SLAPolicyConfig, ivs: StandardInterval[], seed = 4242) => generateCaseEntities({ intervals: ivs, openingWIP: [], categories: cats86, calendar: BIZ_CAL, sla, seed });
+  const perInterval86 = (cs: ReadonlyArray<any>, ivs: StandardInterval[], cat: string) =>
+    ivs.map((iv) => cs.filter((c) => c.category === cat && c.arrival.getTime() >= iv.start.getTime() && c.arrival.getTime() < iv.end.getTime()).length);
+
+  // ---- a: OFF is byte-identical to main (digests recorded from the pre-change code) ----
+  const fx86 = mkIv86(8);
+  const OFF_FIXTURE_DIGEST = '83370ed630827a38';
+  const OFF_SAMPLES_DIGEST = '6b3507943c808676';
+  const sampleIvs86 = (['claims', 'support', 'healthcare'] as const).map((type) => {
+    const { rows } = buildSampleDataset(type, new Date(2026, 9, 5, 8, 0, 0, 0));
+    return mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+  });
+  const fxDig = caseDigest86(gen86(OFF86, fx86).cases);
+  const fxDigDefault = caseDigest86(gen86({ ...DEFAULT_SLA }, fx86).cases);
+  const smDig = dig86(sampleIvs86.map((ivs) => caseDigest86(generateCaseEntities({ intervals: ivs, openingWIP: [], categories: discoverAndSyncCategories(ivs, DEFAULT_CATEGORIES, DEFAULT_SLA), calendar: DEFAULT_CALENDAR, sla: OFF86, seed: 4242 }).cases)));
+  console.log(`  [D86 digests] fixture=${fxDig} samples=${smDig}`);
+  assert(fxDig === OFF_FIXTURE_DIGEST && fxDigDefault === OFF_FIXTURE_DIGEST, 'D86.a1 OFF (flag false or absent): fractional-volume fixture case set (ids, arrivals, deadlines) identical to main', `got ${fxDig}/${fxDigDefault}`);
+  assert(smDig === OFF_SAMPLES_DIGEST, 'D86.a2 OFF: the three built-in samples produce the identical case sets as main', `got ${smDig}`);
+  assert((gen86(OFF86, fx86) as any).forecastCases === undefined, 'D86.a3 OFF builds no forecast copy (no extra work, no extra field)');
+  for (const [i, [type, hc, gross]] of ([['claims', 31, 40], ['support', 28, 35], ['healthcare', 31, 39]] as Array<['claims' | 'support' | 'healthcare', number, number]>).entries()) {
+    const ivs = sampleIvs86[i];
+    const r = searchOptimalHC({ intervals: ivs, openingWIP: [], categories: discoverAndSyncCategories(ivs, DEFAULT_CATEGORIES, DEFAULT_SLA), calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, seed: DEFAULT_SIM_PARAMS.seed, userMaxHC: DEFAULT_SIM_PARAMS.maxHCSearch, replications: DEFAULT_SIM_PARAMS.replications, queueArchitecture: 'pooled', dispatchFairness: DEFAULT_SIM_PARAMS.dispatchFairness });
+    assert(r.recommendedHC === hc && r.staffing.grossHCTotal === gross, `D86.a4 OFF sample ${type}: HC ${hc} / gross ${gross} unchanged`, `got ${r.recommendedHC}/${r.staffing.grossHCTotal}`);
+  }
+
+  // ---- b: ON is deterministic and actually different from OFF ----
+  const on1 = gen86(ON86, fx86);
+  const on2 = gen86(ON86, fx86);
+  assert(caseDigest86(on1.cases) === caseDigest86(on2.cases) && on1.cases.length > 0, 'D86.b1 ON: same seed -> identical case set', `${on1.cases.length} cases`);
+  assert(caseDigest86(on1.cases) !== fxDig && caseDigest86(gen86(ON86, fx86, 4243).cases) !== caseDigest86(on1.cases), 'D86.b2 ON differs from OFF and from another seed');
+  assert((on1 as any).forecastCases !== undefined && caseDigest86((on1 as any).forecastCases) === fxDig, 'D86.b3 ON carries the forecast (replay) case set, identical to the OFF set for the same seed');
+
+  // ---- c: Poisson statistics of the count stream ----
+  for (const lam of [0.4, 3, 29, 31, 400]) {
+    const n = 20000;
+    const draw = createVolumeCountStream(7 + Math.round(lam * 10));
+    let sum = 0;
+    let sumSq = 0;
+    for (let i = 0; i < n; i++) {
+      const k = draw(lam);
+      sum += k;
+      sumSq += k * k;
+    }
+    const mean = sum / n;
+    const variance = sumSq / n - mean * mean;
+    const wantVar = lam >= 30 ? lam + 1 / 12 : lam;
+    const tol = lam >= 30 ? 0.1 : 0.15;
+    assert(Math.abs(mean - lam) <= 4 * Math.sqrt(lam / n), `D86.c1 lambda ${lam}: mean ${mean.toFixed(3)} within 4 sigma of ${lam}`, `|diff|=${Math.abs(mean - lam).toFixed(4)} limit ${(4 * Math.sqrt(lam / n)).toFixed(4)}`);
+    assert(Math.abs(variance / wantVar - 1) <= tol, `D86.c2 lambda ${lam}: variance ${variance.toFixed(3)} ~ ${wantVar.toFixed(3)} (Poisson)`, `ratio ${(variance / wantVar).toFixed(3)}`);
+  }
+  assert(createVolumeCountStream(1)(0) === 0 && createVolumeCountStream(1)(-5) === 0 && createVolumeCountStream(1)(NaN) === 0, 'D86.c3 mean <= 0 or NaN draws zero');
+
+  // ---- d: counts come from the separate stream, in interval order ----
+  const ivsD = mkIv86(8);
+  const onD = gen86(ON86, ivsD, 99).cases;
+  const stream = createVolumeCountStream(99);
+  const expectD = ivsD.map((iv) => (Math.round(iv.volume) > 0 ? stream(Math.round(iv.volume)) : 0)); // mean = the rounded forecast volume, the same basis Off uses
+  const gotD = ivsD.map((iv) => perInterval86(onD, [iv], iv.category)[0]);
+  assert(JSON.stringify(gotD) === JSON.stringify(expectD), 'D86.d1 per-interval counts equal a standalone count stream for the same seed (rounded volume <= 0 draws nothing)', `got ${gotD.slice(0, 12)} want ${expectD.slice(0, 12)}`);
+  const aIdx = ivsD.map((iv, i) => (iv.category === 'A' ? i : -1)).filter((i) => i >= 0);
+  const ivsD40 = mkIv86(40);
+  const gotD2 = perInterval86(gen86(ON86, ivsD40, 99).cases, ivsD40, 'A');
+  const gotD1A = perInterval86(onD, ivsD, 'A');
+  assert(aIdx.every((i) => gotD1A[i] === gotD2[i]), 'D86.d2 category A counts unchanged when the later category B volume changes (8 -> 40)');
+  // Pinned stream: first counts for seed 12345 (a stream seeded with the unmixed seed, or any other draw order, gives different numbers).
+  const pinned86 = createVolumeCountStream(12345);
+  assert(JSON.stringify([3.4, 2.5, 0.4, 12, 29, 45.5, 400, 7.6].map((m) => pinned86(m))) === '[5,7,0,12,23,41,391,4]', 'D86.d4 count stream for seed 12345 matches the pinned values (mixed seed, Knuth below 30, normal from 30)');
+  // The arrival-time stream is untouched: the first arrivals match the OFF stream draw by draw.
+  const ivsE = [{ intervalIndex: 0, start: new Date(2026, 9, 5, 9, 0), end: new Date(2026, 9, 5, 10, 0), volume: 6, category: 'A' }] as StandardInterval[];
+  const offE = gen86(OFF86, ivsE, 5).cases.map((c) => c.arrival.getTime());
+  const onE = gen86(ON86, ivsE, 5).cases.map((c) => c.arrival.getTime());
+  const kE = Math.min(offE.length, onE.length);
+  assert(kE > 0 && JSON.stringify(offE.slice(0, kE)) === JSON.stringify(onE.slice(0, kE)), 'D86.d3 arrival-time stream is not shifted: the first arrivals match the OFF run', `off ${offE.length} on ${onE.length}`);
+
+  // ---- e: sync == async ON; roster and seats follow the forecast ----
+  const ivsS = mkIv86(8);
+  const laborS: LaborConfig = { ...LABOR, shiftPlacementEnabled: true };
+  const argsS = (sla: SLAPolicyConfig, arch: 'pooled' | 'siloed') => ({ intervals: ivsS, openingWIP: [], categories: cats86, calendar: BIZ_CAL, labor: laborS, sla, seed: 42, userMaxHC: 60, replications: 5, queueArchitecture: arch });
+  const slaS = (v: boolean): SLAPolicyConfig => ({ ...DEFAULT_SLA, volumeVariability: v, minCoverageEnabled: false });
+  const syncOn = searchOptimalHC(argsS(slaS(true), 'pooled'));
+  const asyncOn = await searchOptimalHCAsync(argsS(slaS(true), 'pooled'));
+  const syncOff = searchOptimalHC(argsS(slaS(false), 'pooled'));
+  const hist86 = (r: any) => dig86(r.searchHistory);
+  assert(syncOn.recommendedHC === asyncOn.recommendedHC && syncOn.staffing.grossHCTotal === asyncOn.staffing.grossHCTotal && hist86(syncOn) === hist86(asyncOn), 'D86.e1 ON: sync search == async search (HC, gross and the whole search history)', `sync ${syncOn.recommendedHC}/${syncOn.staffing.grossHCTotal}/${hist86(syncOn)} async ${asyncOn.recommendedHC}/${asyncOn.staffing.grossHCTotal}/${hist86(asyncOn)}`);
+  assert(hist86(syncOn) !== hist86(syncOff), 'D86.e1b ON really changes the simulated results (search history differs from OFF)');
+  assert(syncOn.nMinAnalytical === syncOff.nMinAnalytical, 'D86.e2 N_min is computed from forecast volume: equal to OFF', `on ${syncOn.nMinAnalytical} off ${syncOff.nMinAnalytical}`);
+  const setsOn86 = [1, 2, 3].map((sd) => gen86(ON86, ivsS, sd));
+  const setsOff86 = [1, 2, 3].map((sd) => gen86(OFF86, ivsS, sd));
+  assert(caseDigest86(representativeCasesOf(setsOn86 as any) as any[]) === caseDigest86(setsOff86[0].cases) && caseDigest86(setsOn86[0].cases) !== caseDigest86(setsOff86[0].cases) && caseDigest86(representativeCasesOf(setsOff86 as any) as any[]) === caseDigest86(setsOff86[0].cases), 'D86.e2b roster design reads the forecast (replay) set when ON (not the noisy draw), and the ordinary set when OFF');
+  const asyncOnSiloed = await searchOptimalHCAsync(argsS(slaS(true), 'siloed'));
+  const syncOnSiloed = searchOptimalHC(argsS(slaS(true), 'siloed'));
+  assert(asyncOnSiloed.recommendedHC === syncOnSiloed.recommendedHC, 'D86.e3 ON siloed: sync == async', `sync ${syncOnSiloed.recommendedHC} async ${asyncOnSiloed.recommendedHC}`);
+  // Seat fixture: two categories with equal handling time and equal forecast, small volumes (noisy draws would tip a 5/5 split).
+  const catsSeat86: CategoryConfig[] = [
+    { id: 'a', name: 'A', ahtMinutes: 30, shrinkagePct: 0.2, priority: 1 },
+    { id: 'b', name: 'B', ahtMinutes: 30, shrinkagePct: 0.2, priority: 1 },
+  ];
+  const ivsSeat86: StandardInterval[] = [];
+  for (const cat of ['A', 'B']) {
+    for (let day = 0; day < 3; day++) for (let i = 0; i < 8; i++) ivsSeat86.push({ intervalIndex: ivsSeat86.length, start: new Date(2026, 9, 5 + day, 9 + i, 0), end: new Date(2026, 9, 5 + day, 9 + i, 30), volume: 1.5, category: cat });
+  }
+  const seatsOf86 = (sla: SLAPolicyConfig, seed: number) => {
+    const set = generateCaseEntities({ intervals: ivsSeat86, openingWIP: [], categories: catsSeat86, calendar: BIZ_CAL, sla, seed });
+    const res = runBackofficeDES({ operationalHC: 10, intervals: ivsSeat86, openingWIP: [], categories: catsSeat86, calendar: BIZ_CAL, labor: LABOR, sla, seed, queueArchitecture: 'siloed', precomputedCases: set });
+    const m = new Map<string, number>();
+    for (const row of res.agentFairness?.perAgent ?? []) m.set(row.category ?? '?', (m.get(row.category ?? '?') ?? 0) + 1);
+    return JSON.stringify([...m.entries()].sort());
+  };
+  const offSeats = seatsOf86(OFF86, 1);
+  const seeds86 = Array.from({ length: 12 }, (_, i) => i + 1);
+  const onSeats = seeds86.map((s) => seatsOf86(ON86, s));
+  assert(new Set(onSeats).size === 1 && onSeats[0] === offSeats && offSeats === '[["A",5],["B",5]]', 'D86.e4 siloed ON: per-category seats identical across 12 replications and equal to the OFF seats (5/5)', `on ${[...new Set(onSeats)].join(' | ')} off ${offSeats}`);
+
+  // ---- e5: search level P1 - the roster chosen by BOTH searches is built from the forecast set ----
+  // Peaky one-category fixture, loose SLA so the roster is decided by demand placement; ON recommends 11 and
+  // the roster must not move with the noisy draw (it did when a call site read precomputedCaseSets[0].cases).
+  const volsR86 = [3, 5, 14, 9, 4, 7, 16, 3, 6, 11, 2, 8, 15, 5, 3, 9];
+  const ivsR86: StandardInterval[] = [];
+  for (let day = 0; day < 5; day++) volsR86.forEach((v, i) => ivsR86.push({ intervalIndex: ivsR86.length, start: new Date(2026, 9, 5 + day, 9, i * 30), end: new Date(2026, 9, 5 + day, 9, i * 30 + 30), volume: v, category: 'A' }));
+  const catsR86: CategoryConfig[] = [{ id: 'a', name: 'A', ahtMinutes: 30, shrinkagePct: 0.2, priority: 1 }];
+  const laborR86: LaborConfig = { ...LABOR, dailyProductiveHours: 6, shiftPlacementEnabled: true, shiftSlapMinutes: 30 };
+  const argsR86 = (seed: number) => ({ intervals: ivsR86, openingWIP: [], categories: catsR86, calendar: BIZ_CAL, labor: laborR86, sla: { ...DEFAULT_SLA, primaryPct: 50, primaryWindow: 48, primaryUnit: 'hours' as const, volumeVariability: true }, seed, userMaxHC: 60, replications: 5, queueArchitecture: 'pooled' as const });
+  const rosterOf86 = (r: any) => r.recommendedHC + ':' + JSON.stringify(r.finalDESResult?.shiftDistributionUsed?.__POOLED__?.slaps?.map((x: any) => `${x.startMinutesFromOpen}x${x.agentCount}`));
+  const WANT_ROSTER86 = '11:["0x1","30x4","60x2","120x4"]';
+  const syncRosters86: string[] = [];
+  const asyncRosters86: string[] = [];
+  for (const sd of [1, 2, 3, 4, 5]) {
+    syncRosters86.push(rosterOf86(searchOptimalHC(argsR86(sd))));
+    asyncRosters86.push(rosterOf86(await searchOptimalHCAsync(argsR86(sd))));
+  }
+  assert(syncRosters86.every((x) => x === WANT_ROSTER86), 'D86.e5a sync search, ON: roster (11 agents: 0x1 30x4 60x2 120x4) is the same for 5 seeds, i.e. built from the forecast set', syncRosters86.join(' | '));
+  assert(asyncRosters86.every((x) => x === WANT_ROSTER86), 'D86.e5b async search, ON: same roster for 5 seeds', asyncRosters86.join(' | '));
+
+  // ---- h: ON mean = OFF's rounding basis (ON = OFF + noise only, never less demand) ----
+  // 0.6 rounds to 1 case per interval Off; a raw mean of 0.6 would give ON about 40 % less demand and could recommend fewer staff.
+  const fracVols86 = [0.6, 1.4, 2.5, 0.6, 0.9, 3.6, 0.6, 1.4, 2.5, 0.6];
+  const ivsH86: StandardInterval[] = [];
+  for (let day = 0; day < 4; day++) fracVols86.forEach((v, i) => ivsH86.push({ intervalIndex: ivsH86.length, start: new Date(2026, 9, 5 + day, 9, i * 30), end: new Date(2026, 9, 5 + day, 9, i * 30 + 30), volume: v, category: 'A' }));
+  const offTotalH86 = gen86(OFF86, ivsH86).cases.length;
+  const wantTotalH86 = ivsH86.reduce((a, iv) => a + Math.max(0, Math.round(iv.volume)), 0);
+  const nRepH86 = 300;
+  let onSumH86 = 0;
+  for (let sd = 1; sd <= nRepH86; sd++) onSumH86 += gen86(ON86, ivsH86, sd).cases.length;
+  const onMeanH86 = onSumH86 / nRepH86;
+  const tolH86 = 4 * Math.sqrt(wantTotalH86 / nRepH86); // sum of independent Poissons: variance = total mean
+  assert(offTotalH86 === wantTotalH86 && Math.abs(onMeanH86 - wantTotalH86) <= tolH86, 'D86.h fractional volumes: ON mean case total equals OFF (sum of rounded volumes) within 4 sigma', `off ${offTotalH86} want ${wantTotalH86} on mean ${onMeanH86.toFixed(2)} tol ${tolH86.toFixed(2)}`);
+
+  // ---- f: report only ----
+  console.log(`  [D86.f report] fixture HC off=${syncOff.recommendedHC} on=${syncOn.recommendedHC} (no assertion)`);
+
+  // ---- g: the flag lives on sla, so the run-inputs fingerprint (stringified sla) sees it ----
+  assert(JSON.stringify(ON86) !== JSON.stringify(OFF86), 'D86.g flag changes the stringified sla section the run fingerprint is built from');
+}
+// ============================================================================
+// D88: "outdated results" note on CSV exports (P2-13); DataTable.tsx removed
+// ============================================================================
+{
+  console.log('\n--- D88: outdated-results note on exports ---');
+  const en: any = await import('../src/utils/export-notes').catch(() => ({}));
+  const { buildExcelCSV } = await import('../src/utils/csv-parser');
+  const root88 = resolve(import.meta.dirname, '..');
+  const has = typeof en.withOutdatedNote === 'function';
+  assert(has, 'D88.a withOutdatedNote exists in src/utils/export-notes.ts');
+  if (has) {
+    const base = [{ title: 'Sec A', rows: [{ x: 1, y: 'a' }] }];
+    const rows = [{ Agent: 'A1', Cases: 3 }, { Agent: 'A2', Cases: 4 }];
+    const fresh = en.withOutdatedNote(base, [], []);
+    assert(JSON.stringify(fresh) === JSON.stringify(base), 'D88.b nothing changed: sections returned unchanged (no note)');
+    assert(buildExcelCSV(rows, fresh) === buildExcelCSV(rows, base), 'D88.b2 nothing changed: CSV text identical to the plain export');
+    const input = [{ title: 'Sec A', rows: [{ x: 1 }] }];
+    en.withOutdatedNote(input, ['Labor'], []);
+    assert(input.length === 1, 'D88.c input array is not mutated');
+    const s = en.withOutdatedNote(base, ['Labor', 'SLA policy'], []);
+    assert(s.length === 2 && s[0] === base[0] && s[1].rows.length === 0, 'D88.d settings only: one trailing note section appended after the real sections, no rows');
+    assert(s[1].title === 'NOTE: Exported from outdated results - settings changed (Labor, SLA policy). Re-run to refresh.', 'D88.d2 settings-only wording', s[1].title);
+    const d = en.withOutdatedNote([], [], ['demand data']);
+    assert(d.length === 1 && d[0].title === 'NOTE: Exported from outdated results - data changed (demand data). Re-run to refresh.', 'D88.e data-only wording', d[0]?.title);
+    const b = en.withOutdatedNote(base, ['Labor'], ['opening backlog']);
+    assert(b[1].title === 'NOTE: Exported from outdated results - settings changed (Labor), data changed (opening backlog). Re-run to refresh.', 'D88.f both: wording', b[1].title);
+    const csvNoted = buildExcelCSV(rows, s);
+    const csvPlain = buildExcelCSV(rows, base);
+    assert(csvNoted.startsWith(csvPlain) && csvNoted.slice(csvPlain.length).split('\r\n').filter((l) => l !== '').length === 1, 'D88.g note is only a trailing block: the plain export is an exact prefix, one extra line');
+    assert(csvNoted.split('\r\n')[0] === '\uFEFF"Agent","Cases"', 'D88.g2 header row and columns unchanged');
+    assert(buildExcelCSV(rows, d).startsWith(buildExcelCSV(rows, [])), 'D88.g3 plain rows export keeps rows first, note after');
+    // empty-data guard: a note alone must never produce a file
+    assert(typeof en.prepareNotedExport === 'function' ? en.prepareNotedExport([], [], ['Labor'], []) === null : false, 'D88.h empty export (no rows, no sections) returns null even when stale: no note-only file');
+    const ne = typeof en.prepareNotedExport === 'function' ? en.prepareNotedExport(rows, [], ['Labor'], []) : null;
+    assert(ne !== null && ne.sections.length === 1, 'D88.h2 non-empty export gets the note section');
+  }
+  // source checks: every export path goes through the helper
+  const rf = readFileSync(join(root88, 'src/components/ResultsFlow.tsx'), 'utf8').replace(/\r\n/g, '\n');
+  const ap = readFileSync(join(root88, 'src/components/AgentAnalyticsPanel.tsx'), 'utf8');
+  const handlers = ['handleExportCasesCSV', 'handleExportBreachedCasesCSV', 'handleExportQueueWipCSV', 'handleExportAgentSlicesCSV', 'handleExportAgentSummaryCSV'];
+  for (const h of handlers) {
+    const i = rf.indexOf(`function ${h}(`);
+    const j = rf.indexOf('\n  }\n', i);
+    const body = i >= 0 && j > i ? rf.slice(i, j) : '';
+    assert(body.length > 0 && !/exportToExcelCSV\(/.test(body) && /exportWithOutdatedNote\(/.test(body), `D88.i ${h} exports through exportWithOutdatedNote (not plain exportToExcelCSV)`);
+  }
+  assert(/withOutdatedNote\(/.test(ap) && /outdatedNote/.test(ap), 'D88.j AgentAnalyticsPanel export appends the note via withOutdatedNote');
+  assert(/outdatedNote=\{/.test(rf), 'D88.k ResultsFlow passes outdatedNote to AgentAnalyticsPanel');
+  assert(!existsSync(join(root88, 'src/components/DataTable.tsx')), 'D88.l dead src/components/DataTable.tsx is deleted');
+  const dtRefs = walkSrc88(join(root88, 'src')).filter((f) => /DataTable/.test(readFileSync(f, 'utf8')));
+  assert(dtRefs.length === 0, 'D88.m no source file mentions DataTable', dtRefs.join(','));
+}
+
+function walkSrc88(dir: string): string[] {
+  const out: string[] = [];
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) out.push(...walkSrc88(p));
+    else if (/\.(ts|tsx)$/.test(e.name)) out.push(p);
+  }
+  return out;
+}
+
+
+// ---------------------------------------------------------------
+// Suite D87 — Lane A input safety (P1-11 / P1-12): import validator, calendar issues, DQ empty weekdays,
+// and source checks for the crash boundary / leave warning / kept Sensitivity matrix.
+// ---------------------------------------------------------------
+console.log('\n--- Suite D87: import validator, calendar guards, crash/leave/Sensitivity wiring ---');
+{
+  const repoRoot87 = resolve(import.meta.dirname, '..');
+  const src87 = (p: string) => (existsSync(join(repoRoot87, p)) ? readFileSync(join(repoRoot87, p), 'utf8') : '');
+  let validate87: ((j: unknown) => any) | undefined;
+  try { validate87 = ((await import('../src/utils/config-import')) as any).validateImportedConfig; } catch { validate87 = undefined; }
+  const issues87 = (calNs as any).getCalendarIssues as ((c: CalendarConfig, l?: any) => Array<{ severity: string; code: string; message: string }>) | undefined;
+
+  // snapshot shaped exactly like App.buildConfigSnapshot (plus the optional run-snapshot `outdated` flag)
+  const snap87 = (calendar: any, labor: any, sla: any, categories: any, simParams: any) =>
+    JSON.parse(JSON.stringify({ calendar, labor, sla, categories, simParams, columnMapping: { intervalStartCol: 'IntervalStart', volumeCol: 'Volume' }, exportedAt: '2026-10-17T00:00:00.000Z', outdated: false }));
+  const same87 = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const key87 = (o: any): any => (o && typeof o === 'object' ? (Array.isArray(o) ? o.map(key87) : Object.fromEntries(Object.keys(o).sort().map((k) => [k, key87(o[k])]))) : o);
+
+  // ---- a: validator exists and rejects malformed input ----
+  assert(typeof validate87 === 'function', 'D87.a0 validateImportedConfig is exported from src/utils/config-import.ts');
+  if (validate87) {
+    for (const [label, bad] of [['array', []], ['number', 5], ['text', 'x'], ['null', null], ['empty object', {}], ['only unknown keys', { exportedAt: 'x' }]] as Array<[string, unknown]>) {
+      const r = validate87(bad);
+      assert(r.ok === false && r.problems.length > 0, `D87.a1 ${label} is rejected with a problem`);
+    }
+    const base = () => snap87(DEFAULT_CALENDAR, DEFAULT_LABOR, DEFAULT_SLA, DEFAULT_CATEGORIES, DEFAULT_SIM_PARAMS);
+    const bads: Array<[string, (j: any) => void, RegExp]> = [
+      ['workingDays 7', (j) => { j.calendar.workingDays = [1, 7]; }, /Calendar > Working days/],
+      ['workingDays text', (j) => { j.calendar.workingDays = 'Mon'; }, /Calendar > Working days/],
+      ['open hour 24', (j) => { j.calendar.dailyOpenHour = 24; }, /Calendar > Opening hour/],
+      ['close hour 25', (j) => { j.calendar.dailyCloseHour = 25; }, /Calendar > Closing hour/],
+      ['close 24:30', (j) => { j.calendar.dailyCloseHour = 24; j.calendar.dailyCloseMinute = 30; }, /Calendar > Closing minute/],
+      ['minute 60', (j) => { j.calendar.dailyOpenMinute = 60; }, /Calendar > Opening minute/],
+      ['holiday format', (j) => { j.calendar.holidays = ['25/12/2026']; }, /Calendar > Holidays/],
+      ['holiday not a date', (j) => { j.calendar.holidays = ['2026-02-31']; }, /Calendar > Holidays/],
+      ['productive hours text', (j) => { j.labor.dailyProductiveHours = 'seven'; }, /Labor > Daily productive hours/],
+      ['adherence 0', (j) => { j.labor.adherencePct = 0; }, /Labor > Adherence/],
+      ['adherence 90 (percent instead of fraction)', (j) => { j.labor.adherencePct = 90; }, /Labor > Adherence/],
+      ['sla primaryPct 0', (j) => { j.sla.primaryPct = 0; }, /SLA > Primary SLA target %/],
+      ['sla unit', (j) => { j.sla.primaryUnit = 'weeks'; }, /SLA > Primary SLA unit/],
+      ['categories not a list', (j) => { j.categories = {}; }, /Categories:/],
+      ['categories empty', (j) => { j.categories = []; }, /Categories:/],
+      ['category aht 0', (j) => { j.categories[0].ahtMinutes = 0; }, /Categories > \w+ > AHT \(minutes\)/],
+      ['category shrinkage 1', (j) => { j.categories[1].shrinkagePct = 1; }, /Categories > \w+ > Shrinkage/],
+      ['category no name', (j) => { delete j.categories[0].name; }, /Categories > item 1 > Name/],
+      ['simParams replications 0', (j) => { j.simParams.replications = 0; }, /Simulation > Replications/],
+      ['simParams seed null', (j) => { j.simParams.seed = null; }, /Simulation > Random seed/],
+    ];
+    for (const [label, mutate, re] of bads) {
+      const j = base(); mutate(j);
+      const r = validate87(j);
+      assert(r.ok === false && r.problems.some((p: string) => re.test(p)) && r.value === undefined, `D87.a2 ${label}: rejected, problem names the field, nothing applied`, JSON.stringify(r.problems ?? r));
+    }
+    // plain-words format, technical path kept for the tooltip, tip line is in App
+    {
+      const j = base(); j.calendar.dailyCloseHour = 25; j.labor.adherencePct = 90;
+      const r = validate87(j);
+      assert(r.ok === false && r.problems.includes('Calendar > Closing hour: must be a whole number from 0 to 24 (found: 25)') && r.problems.includes('Labor > Adherence: must be a fraction above 0 up to 1, e.g. 0.9 for 90 % (found: 90)'), 'D87.a2b banner lines read "<Screen> > <field>: <rule> (found: <value>)"', JSON.stringify(r.problems));
+      assert(Array.isArray(r.technical) && r.technical.length === r.problems.length && r.technical.includes('calendar.dailyCloseHour') && r.technical.includes('labor.adherencePct'), 'D87.a2c technical JSON paths are returned for the tooltip, one per line');
+      assert(/Tip: export settings from this tool \(Export JSON\)/.test(src87('src/App.tsx')) && /title=\{importNotification\.technical/.test(src87('src/App.tsx')), 'D87.a2d App shows the tip line and puts the technical path in a tooltip');
+    }
+    // all-or-nothing: bad core keys next to good ones list every problem, apply nothing
+    {
+      const j = base(); j.calendar.workingDays = [9]; j.labor.adherencePct = 5; j.categories[0].ahtMinutes = -1;
+      const r = validate87(j);
+      assert(r.ok === false && r.problems.length >= 3 && r.value === undefined, 'D87.a3 three bad sections: all problems listed together, nothing applied', JSON.stringify(r.problems));
+    }
+    // partial file: only some core keys; absent keys are not in the result
+    {
+      const r = validate87({ labor: { dailyProductiveHours: 6 } });
+      assert(r.ok === true && r.value.labor.dailyProductiveHours === 6 && r.value.labor.adherencePct === DEFAULT_LABOR.adherencePct && r.value.calendar === undefined && r.value.sla === undefined && r.value.categories === undefined, 'D87.a4 partial file: labor merged over defaults, absent sections not returned');
+    }
+    // columnMapping invalid -> ignored with a note, core keys still apply
+    {
+      const j = base(); j.columnMapping = { intervalStartCol: 5 };
+      const r = validate87(j);
+      assert(r.ok === true && r.value.columnMapping === undefined && r.notes.length === 1 && r.value.calendar !== undefined, 'D87.a5 invalid columnMapping is ignored with a note; core keys still apply');
+    }
+    // unknown top-level keys ignored; unknown / optional keys inside a section survive
+    {
+      const j = base(); j.futureKey = { a: 1 }; j.labor.shiftPlacementEnabled = true; j.labor.shiftSlapMinutes = 30; j.simParams.dispatchFairness = { enabled: false, resetDaily: true };
+      const r = validate87(j);
+      assert(r.ok === true && r.value.labor.shiftPlacementEnabled === true && r.value.labor.shiftSlapMinutes === 30 && r.value.simParams.dispatchFairness.enabled === false && !('futureKey' in r.value), 'D87.a6 unknown top-level key ignored; optional engine fields inside sections kept');
+    }
+    // sla sanitising kept (clamps)
+    {
+      const j = base(); j.sla.confidenceLevelPct = 200; j.sla.slaAcceptanceSlackPct = 99; j.sla.clockBasis = 'business_time'; j.sla.clockStartPolicy = 'arrival';
+      const r = validate87(j);
+      assert(r.ok === true && r.value.sla.confidenceLevelPct === 99.9 && r.value.sla.slaAcceptanceSlackPct === 20 && r.value.sla.clockStartPolicy === 'next_open', 'D87.a7 sla clamps and derived clock start behave as the old importer did');
+    }
+
+    // ---- b: round trip of what Export JSON writes is accepted unchanged ----
+    const trips: Array<[string, any, any, any, any]> = [
+      ['defaults', DEFAULT_CALENDAR, DEFAULT_LABOR, DEFAULT_CATEGORIES, DEFAULT_SIM_PARAMS],
+      ['24:00 preset', { ...DEFAULT_CALENDAR, dailyOpenHour: 0, dailyOpenMinute: 0, dailyCloseHour: 24, dailyCloseMinute: 0 }, DEFAULT_LABOR, DEFAULT_CATEGORIES, DEFAULT_SIM_PARAMS],
+      ['00:00 close', { ...DEFAULT_CALENDAR, dailyCloseHour: 0, dailyCloseMinute: 0 }, DEFAULT_LABOR, DEFAULT_CATEGORIES, DEFAULT_SIM_PARAMS],
+      ['24x7', CAL_24X7, { ...DEFAULT_LABOR, workingDaysPerWeek: 7, offDaysPerWeek: 0 }, DEFAULT_CATEGORIES, { ...DEFAULT_SIM_PARAMS, queueArchitecture: 'siloed', dispatchFairness: { enabled: true, utilTolerancePp: 2, countTolerance: 1, workloadToleranceMin: 5, resetDaily: false } }],
+    ];
+    for (const type of ['claims', 'support', 'healthcare'] as const) {
+      const { rows } = buildSampleDataset(type, new Date(2026, 9, 5, 8, 0, 0, 0));
+      const ivs = mapRawRecordsToIntervals(rows, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+      trips.push([`sample ${type}`, DEFAULT_CALENDAR, DEFAULT_LABOR, discoverAndSyncCategories(ivs, DEFAULT_CATEGORIES, DEFAULT_SLA), DEFAULT_SIM_PARAMS]);
+    }
+    for (const [label, cal, lab, cats, sp] of trips) {
+      const j = snap87(cal, lab, DEFAULT_SLA, cats, sp);
+      const r = validate87(j);
+      assert(r.ok === true && r.notes.length === 0 && same87(key87(r.value.calendar), key87(j.calendar)) && same87(key87(r.value.labor), key87(j.labor)) && same87(key87(r.value.sla), key87(j.sla)) && same87(key87(r.value.categories), key87(j.categories)) && same87(key87(r.value.simParams), key87(j.simParams)) && same87(r.value.columnMapping, j.columnMapping), `D87.b1 round trip ${label}: accepted with no problems, every section equal to the exported one`, r.ok ? '' : JSON.stringify(r.problems));
+    }
+    // b2: every value the screens can save must be accepted (override hours are total hours over the horizon, seed has no limit, AHT has no upper limit)
+    {
+      const cats2 = DEFAULT_CATEGORIES.map((c: any, i: number) => (i === 0 ? { ...c, ahtMinutes: 2000, priority: 5000000 } : c));
+      const j = snap87(DEFAULT_CALENDAR, { ...DEFAULT_LABOR, contractualHoursSource: 'override', contractualProductiveHoursOverride: 160 }, DEFAULT_SLA, cats2, { ...DEFAULT_SIM_PARAMS, seed: 5000000000 });
+      const r = validate87(j);
+      assert(r.ok === true && r.value.labor.contractualProductiveHoursOverride === 160 && r.value.labor.contractualHoursSource === 'override', 'D87.b2a override hours 160 (total over the horizon) round-trips', r.ok ? '' : JSON.stringify(r.problems));
+      assert(r.ok === true && r.value.simParams.seed === 5000000000, 'D87.b2b seed 5000000000 round-trips', r.ok ? '' : JSON.stringify(r.problems));
+      assert(r.ok === true && r.value.categories[0].ahtMinutes === 2000 && r.value.categories[0].priority === 5000000, 'D87.b2c category AHT 2000 min and priority 5000000 round-trip', r.ok ? '' : JSON.stringify(r.problems));
+      const neg = validate87(snap87(DEFAULT_CALENDAR, DEFAULT_LABOR, DEFAULT_SLA, DEFAULT_CATEGORIES, { ...DEFAULT_SIM_PARAMS, seed: -5000000000 }));
+      assert(neg.ok === true, 'D87.b2d negative large seed accepted');
+      const frac = validate87(snap87(DEFAULT_CALENDAR, DEFAULT_LABOR, DEFAULT_SLA, DEFAULT_CATEGORIES, { ...DEFAULT_SIM_PARAMS, seed: 1.5 }));
+      assert(frac.ok === false, 'D87.b2e fractional seed still rejected');
+    }
+  }
+
+  // ---- c: getCalendarIssues ----
+  assert(typeof issues87 === 'function', 'D87.c0 getCalendarIssues is exported from calendar.ts');
+  if (issues87) {
+    const codes = (c: CalendarConfig, l: any = DEFAULT_LABOR) => issues87(c, l).map((i) => `${i.severity}:${i.code}`).sort().join(',');
+    assert(codes(DEFAULT_CALENDAR) === '', 'D87.c1 default calendar: no issues');
+    assert(codes({ ...DEFAULT_CALENDAR, workingDays: [] }) === 'error:no_working_days', 'D87.c2 no working days: error');
+    assert(codes({ ...DEFAULT_CALENDAR, dailyCloseHour: 8, dailyCloseMinute: 0 }) === 'error:zero_window', 'D87.c3 close == open: zero-window error');
+    assert(codes({ ...DEFAULT_CALENDAR, dailyCloseHour: 7 }) === 'error:zero_window', 'D87.c3b close before open: zero-window error');
+    assert(codes({ ...DEFAULT_CALENDAR, dailyOpenHour: 0, dailyCloseHour: 0, dailyCloseMinute: 0 }) === 'error:zero_window', 'D87.c3c open 00:00 and close 00:00 (not 24:00): zero-window error');
+    assert(codes({ ...DEFAULT_CALENDAR, dailyCloseHour: 0, dailyCloseMinute: 0 }) === '', 'D87.c4 close 00:00 after a later open means 24:00: no issue');
+    assert(codes({ ...DEFAULT_CALENDAR, dailyOpenHour: 0, dailyCloseHour: 24 }) === '', 'D87.c4b 00:00 to 24:00: no issue');
+    assert(codes(DEFAULT_CALENDAR, { ...DEFAULT_LABOR, dailyProductiveHours: 10.5 }) === 'error:productive_exceeds_window', 'D87.c5 productive hours above the window: error (same rule and tolerance as M1)');
+    assert(codes(DEFAULT_CALENDAR, { ...DEFAULT_LABOR, dailyProductiveHours: 10.04 }) === '', 'D87.c5b within the 0.05 h tolerance: no issue');
+    assert(codes({ ...DEFAULT_CALENDAR, holidays: ['2026-10-10'] }) === 'warning:holiday_on_closed_weekday', 'D87.c6 holiday on a Saturday (closed weekday): warning');
+    assert(/Holiday 2026-10-10 \(Saturday\) falls on a day that is already closed/.test(issues87({ ...DEFAULT_CALENDAR, holidays: ['2026-10-10'] }, DEFAULT_LABOR)[0].message), 'D87.c6c holiday note names the weekday');
+    assert(codes({ ...DEFAULT_CALENDAR, holidays: ['2026-10-12'] }) === '', 'D87.c6b holiday on a Monday: no issue');
+    assert(codes({ ...CAL_24X7, workingDays: [], dailyCloseHour: 0, holidays: ['2026-10-10'] }) === '', 'D87.c7 24x7 short-circuits: never blocked, no holiday note');
+  }
+
+  // ---- d: DQ gate ----
+  {
+    const map87 = { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any;
+    const ds87 = (t: 'claims' | 'support' | 'healthcare') => {
+      const ivs = mapRawRecordsToIntervals(buildSampleDataset(t, new Date(2026, 9, 5, 8, 0, 0, 0)).rows, map87);
+      return { ivs, cats: discoverAndSyncCategories(ivs, DEFAULT_CATEGORIES, DEFAULT_SLA) };
+    };
+    const dq87 = (t: 'claims' | 'support' | 'healthcare', calendar: CalendarConfig) => {
+      const { ivs, cats } = ds87(t);
+      return validateDataQuality({ intervals: ivs, mapping: map87, categories: cats, calendar, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, openingWIP: [] });
+    };
+    for (const t of ['claims', 'support', 'healthcare'] as const) {
+      const r = dq87(t, DEFAULT_CALENDAR);
+      assert(r.passed === true && !r.issues.some((i) => i.field === 'Working Days'), `D87.d1 sample (${t}) DQ unchanged: passes, no Working Days issue`);
+    }
+    const empty = dq87('claims', { ...DEFAULT_CALENDAR, workingDays: [] });
+    assert(empty.passed === false && empty.issues.some((i) => i.severity === 'error' && i.field === 'Working Days'), 'D87.d2 empty weekdays (non-24x7): DQ blocked with a Working Days error', JSON.stringify(empty.issues.filter((i) => i.severity === 'error').map((i) => i.field)));
+    const zero = dq87('claims', { ...DEFAULT_CALENDAR, dailyCloseHour: 8 });
+    assert(zero.passed === false, 'D87.d3 control: zero-length window already blocks the gate (via M1)');
+    const zeroErrs = zero.issues.filter((i) => i.severity === 'error' && /window/i.test(i.field + i.message)).length;
+    assert(zeroErrs === 1, 'D87.d3b zero window is reported once (no duplicate from the new check)', `count ${zeroErrs}`);
+    assert(!empty.issues.some((i) => /outside configured operating hours/.test(i.message)) && empty.operatingHoursBreakdown !== undefined, 'D87.d2b no working days: the off-hours "outside operating hours" diagnostic is suppressed (breakdown still reported)');
+    assert(dq87('claims', { ...DEFAULT_CALENDAR, workingDays: [1] }).issues.some((i) => /outside configured operating hours/.test(i.message)), 'D87.d2c control: one working day still shows the off-hours diagnostic');
+    const h24 = dq87('claims', { ...CAL_24X7, workingDays: [] });
+    assert(!h24.issues.some((i) => i.field === 'Working Days'), 'D87.d4 24x7 with an empty weekday list is not newly blocked');
+  }
+
+  // ---- e: wiring (source) ----
+  {
+    const app = src87('src/App.tsx');
+    const main = src87('src/main.tsx');
+    const eb = src87('src/components/ErrorBoundary.tsx');
+    const sens = src87('src/components/SensitivityFlow.tsx');
+    const side = src87('src/components/Sidebar.tsx');
+    assert(/validateImportedConfig\(/.test(app) && !/if \(json\.calendar\) setCalendar/.test(app), 'D87.e1 App import goes through validateImportedConfig (no raw json.* setters left)');
+    assert(/getDerivedStateFromError|componentDidCatch/.test(eb) && /extends (React\.)?Component/.test(eb) && /Reload/.test(eb), 'D87.e2 ErrorBoundary is a class component with a Reload button');
+    assert(/<ErrorBoundary/.test(main) && /<ErrorBoundary/.test(app), 'D87.e3 outer boundary in main.tsx and inner boundary in App.tsx');
+    assert(/key=\{currentFlow\}/.test(app), 'D87.e3b inner boundary resets on flow change (key = currentFlow)');
+    assert(/addEventListener\('beforeunload'/.test(app) && /removeEventListener\('beforeunload'/.test(app), 'D87.e4 leave-page warning registered and removed in App.tsx');
+    assert(/matrixScenarios/.test(app) && !/useState<SensitivityScenario\[\] \| null>/.test(sens), 'D87.e5 Sensitivity matrix state lives in App.tsx, not in SensitivityFlow');
+    assert(/cancelSensitivityRef\.current = true/.test(sens) && /useEffect\(\s*\(\) => \(\) => \{/.test(sens), 'D87.e6 SensitivityFlow cancels a running grid on unmount');
+    assert(/\.value = ''/.test(side), 'D87.e7 Sidebar resets the file input after reading (same file can be re-picked)');
+  }
+}
+
+// ---------------------------------------------------------------
+// Suite D89 — Lane E reset dialog: wording by trigger, dialog accessibility, DemandFlow remount on reset,
+// Sidebar state cues. Fail-first: the helper getResetDialogContent did not exist before.
+// ---------------------------------------------------------------
+console.log('\n--- Suite D89: reset dialog wording/a11y, DemandFlow remount, Sidebar cues ---');
+{
+  const root89 = resolve(import.meta.dirname, '..');
+  const src89 = (p: string) => (existsSync(join(root89, p)) ? readFileSync(join(root89, p), 'utf8').replace(/\r\n/g, '\n') : '');
+  let content89: ((t: string) => any) | undefined;
+  try { content89 = ((await import('../src/components/ResetConfirmModal')) as any).getResetDialogContent; } catch { content89 = undefined; }
+  assert(typeof content89 === 'function', 'D89.a0 getResetDialogContent is exported from ResetConfirmModal.tsx');
+  if (typeof content89 === 'function') {
+    const r = content89('reset'), u = content89('upload'), s = content89('sample');
+    const all = (c: any) => JSON.stringify(c);
+    for (const [k, c] of [['reset', r], ['upload', u], ['sample', s]] as const) {
+      assert(!/unsaved/i.test(all(c)), `D89.a1 ${k}: no "unsaved sizing runs" wording`, all(c));
+      assert(c.items.some((i: string) => /sensitivity/i.test(i)), `D89.a2 ${k}: item list includes the Sensitivity matrix`);
+      assert(/Export JSON/.test(c.exportNote) && /settings only/i.test(c.exportNote) && /not (the )?data/i.test(c.exportNote) && /results/i.test(c.exportNote), `D89.a3 ${k}: says Export JSON saves settings only, not data or results`, c.exportNote);
+    }
+    assert(r.title === 'Reset All Data & Parameters' && r.confirmLabel === 'Yes, Reset Everything' && r.afterNote === null, 'D89.b1 plain reset keeps its title/button and has no "new file loads" note');
+    assert(/Load new data/.test(u.title) && /replaces everything/i.test(u.title + u.body), 'D89.b2 upload: title says Load new data and that it replaces everything', u.title);
+    assert(/Load new data/.test(s.title) && /replaces everything/i.test(s.title + s.body), 'D89.b3 sample: title says Load new data and that it replaces everything', s.title);
+    assert(/new file/i.test(u.afterNote ?? '') && /after you confirm/i.test(u.afterNote ?? ''), 'D89.b4 upload: says the new file loads after confirming', String(u.afterNote));
+    assert(/sample/i.test(s.afterNote ?? '') && /after you confirm/i.test(s.afterNote ?? ''), 'D89.b5 sample: says the sample loads after confirming', String(s.afterNote));
+    assert(/Cancel/.test(u.afterNote ?? '') && /Cancel/.test(s.afterNote ?? ''), 'D89.b6 upload/sample: says Cancel keeps current work and drops the pick');
+    assert(u.confirmLabel !== r.confirmLabel && /Replace|Load/.test(u.confirmLabel), 'D89.b7 upload confirm button names the action', u.confirmLabel);
+  }
+  const modal89 = src89('src/components/ResetConfirmModal.tsx');
+  assert(/role="alertdialog"/.test(modal89) && /aria-modal="true"/.test(modal89) && /aria-labelledby=/.test(modal89) && /aria-describedby=/.test(modal89), 'D89.c1 dialog has alertdialog role, aria-modal, labelledby and describedby');
+  assert(/aria-label="Close"/.test(modal89), 'D89.c2 icon close button has aria-label="Close"');
+  assert(/key !== 'Tab'/.test(modal89) && /\.focus\(\)/.test(modal89) && /key === 'Escape'/.test(modal89), 'D89.c3 Tab is trapped, focus is moved in, Escape cancels');
+  assert(/document\.activeElement/.test(modal89) && /isConnected/.test(modal89), 'D89.c4 focus is remembered on open and returned to the trigger on close');
+  const app89 = src89('src/App.tsx');
+  assert(/<React\.Fragment key=\{resetEpoch\}>\s*<DemandFlow\b/.test(app89) && /setResetEpoch\(/.test(app89), 'D89.d1 DemandFlow is keyed on a reset counter bumped by handleConfirmResetAll (staged backlog CSV is cleared)');
+  assert(/trigger=\{/.test(app89), 'D89.d2 App passes the pending-action trigger to the modal');
+  const side89 = src89('src/components/Sidebar.tsx');
+  assert(/aria-current=\{isActive \? 'page' : undefined\}/.test(side89) && /aria-current=\{isTabActive \? 'page' : undefined\}/.test(side89), 'D89.e1 active flow and active tab carry aria-current');
+  assert(!/'OPEN' : 'HIDE'/.test(side89) && /aria-expanded=\{paramsPanelOpen\}/.test(side89), 'D89.e2 inspector toggle label matches state (no OPEN/HIDE mismatch) and has aria-expanded');
+  assert(/title="Import[^"]*replaces[^"]*"/i.test(side89), 'D89.e3 Import JSON tooltip says it replaces current settings');
+}
+
+// ---------------------------------------------------------------
+// Suite D90 — input safety + results wording: manual backlog "Remaining Work" parsing (thousands separator,
+// 100,000 cap, reasons), breach reason strings (incl. 366-day cap cut), shared staffing line.
+// Fail-first: parseRemainingText had no reason, breach-reason.ts and staffing-summary.ts did not exist.
+// ---------------------------------------------------------------
+console.log('\n--- Suite D90: backlog input safety + results wording ---');
+{
+  const root90 = resolve(import.meta.dirname, '..');
+  const src90 = (p: string) => (existsSync(join(root90, p)) ? readFileSync(join(root90, p), 'utf8').replace(/\r\n/g, '\n') : '');
+  const { parseRemainingText } = await import('../src/utils/wip-row');
+  const P = (t: string) => parseRemainingText(t) as { value: number | undefined; invalid: boolean; reason?: string };
+  assert(P('1,000').invalid === true && P('1,000').reason === 'thousands' && P('1,000').value === undefined, 'D90.a1 "1,000" is invalid with reason thousands (not 1.0)', JSON.stringify(P('1,000')));
+  assert(P('2,500').invalid === true && P('2,500').reason === 'thousands', 'D90.a2 "2,500" is invalid with reason thousands (not 2.5)', JSON.stringify(P('2,500')));
+  assert(P('100,000').reason === 'thousands', 'D90.a2b "100,000" is reason thousands', JSON.stringify(P('100,000')));
+  assert(P('12,5').invalid === false && P('12,5').value === 12.5, 'D90.a3 "12,5" stays valid 12.5', JSON.stringify(P('12,5')));
+  assert(P('100001').invalid === true && P('100001').reason === 'over_cap' && P('100001').value === undefined, 'D90.a4 "100001" is invalid, reason over_cap', JSON.stringify(P('100001')));
+  assert(P('100000').invalid === false && P('100000').value === 100000, 'D90.a5 "100000" is valid (cap inclusive)', JSON.stringify(P('100000')));
+  assert(P('99999.5').invalid === false && P('99999.5').value === 99999.5, 'D90.a6 "99999.5" is valid', JSON.stringify(P('99999.5')));
+  assert(P('1.000').invalid === false && P('1.000').value === 1, 'D90.a7 "1.000" stays 1 (documented)', JSON.stringify(P('1.000')));
+  assert(P('abc').reason === 'format' && P('0').reason === 'format' && P('-5').reason === 'format', 'D90.a8 text/zero/negative keep reason format');
+  assert(P('').invalid === false && P('').value === undefined && P('').reason === undefined, 'D90.a9 blank is not invalid');
+  const imp90 = await import('../src/utils/wip-import');
+  assert(/WIP_MAX_REMAINING_MINUTES/.test(src90('src/utils/wip-row.ts')) && imp90.WIP_MAX_REMAINING_MINUTES === 100000, 'D90.a10 manual cap reuses WIP_MAX_REMAINING_MINUTES (100000)');
+  const dem90 = src90('src/components/DemandFlow.tsx');
+  assert(/inputMode="decimal"/.test(dem90) && !/inputMode="numeric"[\s\S]{0,80}Blank = full/.test(dem90), 'D90.a11 Remaining Work input uses inputMode decimal');
+  assert(/thousands separator/.test(dem90) && /More than 100,000 minutes/.test(dem90), 'D90.a12 DemandFlow shows reason-specific thousands and over-cap messages');
+
+  // B2: breach reasons
+  let br90: any; try { br90 = await import('../src/utils/breach-reason'); } catch { br90 = undefined; }
+  assert(!!br90 && typeof br90.breachReason === 'function' && typeof br90.isCapCut === 'function', 'D90.b0 breach-reason util exports breachReason and isCapCut');
+  if (br90) {
+    const hEnd = new Date('2026-01-31T17:00:00Z');
+    const day = 86400000;
+    const mk = (done: boolean, dl: Date) => ({ isCompleted: done, primaryDeadline: dl }) as any;
+    const resCap = { drainCapped: true, horizonEnd: hEnd } as any;
+    const resNo = { horizonEnd: hEnd } as any;
+    const far = new Date(hEnd.getTime() + 400 * day);
+    const near = new Date(hEnd.getTime() + 5 * day);
+    assert(br90.breachReason(mk(true, near), resCap) === 'Completed after primary deadline', 'D90.b1 completed late keeps its reason');
+    assert(br90.breachReason(mk(false, near), resNo) === 'Not finished by end of simulation (deadline missed)', 'D90.b2 unfinished under the cap says deadline missed');
+    assert(br90.breachReason(mk(false, near), resCap) === 'Not finished by end of simulation (deadline missed)', 'D90.b3 capped run but deadline within cap still says deadline missed');
+    assert(br90.breachReason(mk(false, far), resCap) === 'Not finished — simulation stopped at the 366-day limit before its deadline', 'D90.b4 capped run, deadline beyond cap: stopped-at-limit wording');
+    assert(br90.breachReason(mk(false, far), resNo) === 'Not finished by end of simulation (deadline missed)', 'D90.b5 no drainCapped flag: never the cap wording');
+    assert(br90.breachReason(mk(true, far), resCap) === 'Completed after primary deadline', 'D90.b6 a completed case is never cap-cut');
+    assert(br90.isCapCut(mk(false, new Date(NaN)), resCap) === false, 'D90.b7 non-finite deadline is not cap-cut');
+    const { buildBreachExportRows } = await import('../src/utils/export-rows');
+    const row = (buildBreachExportRows as any)([{ ...mk(false, far), caseId: 'X', category: 'c', arrival: near, latestSafeStart: near, firstStartTime: null, completeTime: null, parkCount: 0 }], resCap)[0];
+    assert(row['Breach Reason'] === 'Not finished — simulation stopped at the 366-day limit before its deadline', 'D90.b8 breach export uses the cap-cut wording', String(row['Breach Reason']));
+    const row2 = (buildBreachExportRows as any)([{ ...mk(false, near), caseId: 'Y', category: 'c', arrival: near, latestSafeStart: near, firstStartTime: null, completeTime: null, parkCount: 0 }], resNo)[0];
+    assert(row2['Breach Reason'] === 'Not finished by end of simulation (deadline missed)', 'D90.b9 breach export unfinished wording matches the screen', String(row2['Breach Reason']));
+  }
+  const allSrc90 = ['src/utils/export-rows.ts', 'src/utils/hc-search.ts', 'src/components/ResultsFlow.tsx'].map(src90).join('\n');
+  assert(!/Unfinished by horizon end/.test(allSrc90), 'D90.b10 old "Unfinished by horizon end" string is gone from src');
+  const res90 = src90('src/components/ResultsFlow.tsx');
+  assert(/breachReason\(/.test(res90) && /breachReason\(/.test(src90('src/utils/export-rows.ts')) && (src90('src/utils/hc-search.ts').match(/breachReason\(/g) || []).length >= 2, 'D90.b11 Results, export and both searches use the one breachReason helper');
+
+  // B3: staffing line
+  let ss90: any; try { ss90 = await import('../src/utils/staffing-summary'); } catch { ss90 = undefined; }
+  assert(!!ss90 && typeof ss90.buildStaffingLine === 'function', 'D90.c0 staffing-summary util exports buildStaffingLine');
+  if (ss90) {
+    // primaryDrivenHC is the primary-loop result under ALL targets (= the recommendation in every feasible run),
+    // so the line must not claim "the primary SLA alone needs M" (found in the browser: support + 60 min answer time).
+    const l1 = ss90.buildStaffingLine({ recommendedN: 31, primaryDrivenHC: 31, bindingDescription: 'Backoffice ASA Target (≤ 30 min)' });
+    assert(l1 === 'Optimal Staffing: 31 Operational HC (binding: Backoffice ASA Target (≤ 30 min)).', 'D90.c1 line names the binding constraint and does not claim the primary SLA alone decided it', l1);
+    assert(!/Primary-Driven/.test(l1) && !/primary SLA alone/.test(l1), 'D90.c2 old "Primary-Driven" wording and the false "primary SLA alone needs" claim are absent');
+    const l2 = ss90.buildStaffingLine({ recommendedN: 31, primaryDrivenHC: 31, bindingDescription: undefined });
+    assert(l2 === 'Optimal Staffing: 31 Operational HC.', 'D90.c3 no binding text -> no parenthesis', l2);
+    const l3 = ss90.buildStaffingLine({ recommendedN: 31, primaryDrivenHC: 28, bindingDescription: 'X' });
+    assert(l3 === 'Optimal Staffing: 31 Operational HC (primary search result 28; binding: X).', 'D90.c3b a differing primary-loop value is still shown, labelled neutrally', l3);
+  }
+  assert(/buildStaffingLine\(/.test(res90) && /buildStaffingLine\(/.test(src90('src/utils/hc-search.ts')), 'D90.c4 Results and the async search final message both call buildStaffingLine');
+  assert(!/primary SLA alone needs/.test(res90 + src90('src/utils/hc-search.ts')), 'D90.c6 no progress or Results text claims the primary SLA alone needs M (hc-search audit-phase message included)');
+  assert(!/Primary-Driven:/.test(res90 + src90('src/utils/hc-search.ts')), 'D90.c5 no hand-built "Primary-Driven:" text left');
 }
 
 console.log('\n==================================================');

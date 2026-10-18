@@ -16,6 +16,7 @@ import {
   SLAPolicyConfig,
   StandardInterval,
   SearchProgressState,
+  SensitivityScenario,
 } from './types/wfm';
 import {
   autoSuggestColumnMapping,
@@ -35,6 +36,8 @@ import { ConfigFlow } from './components/ConfigFlow';
 import { RunFlow } from './components/RunFlow';
 import { ResultsFlow } from './components/ResultsFlow';
 import { SensitivityFlow } from './components/SensitivityFlow';
+import { ErrorBoundary } from './components/ErrorBoundary';
+import { validateImportedConfig } from './utils/config-import';
 import { SimulationProgressModal } from './components/SimulationProgressModal';
 import { ResetConfirmModal } from './components/ResetConfirmModal';
 import { buildSampleDataset, nextMondayAt8 } from './utils/sample-data';
@@ -128,9 +131,29 @@ export function App() {
     | { type: 'upload'; text: string; filename: string }
     | { type: 'sample'; sampleType: 'claims' | 'support' | 'healthcare' };
   const [pendingResetAction, setPendingResetAction] = useState<PendingResetAction | null>(null);
+  // Bumped on every confirmed reset: DemandFlow is keyed on it so its own local state (staged backlog CSV, form drafts) is dropped too.
+  const [resetEpoch, setResetEpoch] = useState(0);
   const [searchProgress, setSearchProgress] = useState<SearchProgressState | null>(null);
   const [simulationError, setSimulationError] = useState<string | null>(null);
-  const [importNotification, setImportNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  // success = green, auto-hides. warning (amber) and error (red) stay until dismissed; `problems` lists each rejected item.
+  const [importNotification, setImportNotification] = useState<{ type: 'success' | 'warning' | 'error'; message: string; problems?: string[]; technical?: string[]; tip?: string } | null>(null);
+  const notificationTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // One timer at a time: a newer message must never be removed by an older message's timeout.
+  function notify(n: { type: 'success' | 'warning' | 'error'; message: string; problems?: string[]; technical?: string[]; tip?: string } | null, autoHideMs?: number) {
+    if (notificationTimer.current) clearTimeout(notificationTimer.current);
+    notificationTimer.current = null;
+    setImportNotification(n);
+    if (n && autoHideMs) notificationTimer.current = setTimeout(() => setImportNotification(null), autoHideMs);
+  }
+
+  // Sensitivity matrix kept here (not in SensitivityFlow, which unmounts on every flow switch). `inputs` is what the
+  // grid was computed with, captured at click time; the outdated note compares it with the live settings and data.
+  const [sensitivityMatrix, setSensitivityMatrix] = useState<{
+    scenarios: SensitivityScenario[];
+    inputs: RunInputs & { data: RunDataFingerprints };
+  } | null>(null);
+  // Set when the planner left the tab while a grid was computing (leaving cancels it).
+  const [sensitivityStopped, setSensitivityStopped] = useState(false);
 
   const liveInputs = useMemo<RunInputs>(
     () => ({ calendar, labor, sla, categories, simParams }),
@@ -153,6 +176,26 @@ export function App() {
     () => diffRunData(runInputs?.data ?? null, { demand: liveDemandFp, backlog: liveBacklogFp }),
     [runInputs, liveDemandFp, liveBacklogFp]
   );
+  const matrixChangedSince = useMemo(
+    () => [
+      ...diffRunInputs(sensitivityMatrix?.inputs ?? null, liveInputs),
+      ...diffRunData(sensitivityMatrix?.inputs.data ?? null, { demand: liveDemandFp, backlog: liveBacklogFp }),
+    ],
+    [sensitivityMatrix, liveInputs, liveDemandFp, liveBacklogFp]
+  );
+
+  // Leave-page warning: only while there is something to lose (data loaded or results shown). Browsers show their
+  // own wording, and only after the page has had a user interaction; config-only edits without data are not covered.
+  const hasWorkToLose = rawRows.length > 0 || searchOutput !== null;
+  useEffect(() => {
+    if (!hasWorkToLose) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [hasWorkToLose]);
 
   // Synchronize Categories Discovery when Intervals change
   useEffect(() => {
@@ -207,6 +250,8 @@ export function App() {
   }
 
   function applyFileUpload(text: string, filename: string) {
+    setSensitivityMatrix(null);
+    setSensitivityStopped(false);
     setSimulationError(null);
     setSearchOutput(null);
     setRunInputs(null);
@@ -241,6 +286,8 @@ export function App() {
   }
 
   function applyLoadSample(sampleType: 'claims' | 'support' | 'healthcare') {
+    setSensitivityMatrix(null);
+    setSensitivityStopped(false);
     setSimulationError(null);
     setSearchOutput(null);
     setRunInputs(null);
@@ -376,6 +423,8 @@ export function App() {
   function handleConfirmResetAll() {
     const action = pendingResetAction;
 
+    setSensitivityMatrix(null);
+    setSensitivityStopped(false);
     setCalendar(DEFAULT_CALENDAR);
     setLabor(DEFAULT_LABOR);
     setSla(DEFAULT_SLA);
@@ -395,35 +444,24 @@ export function App() {
     setSearchProgress(null);
     setParamsPanelOpen(false);
     setPendingResetAction(null);
+    setResetEpoch((n) => n + 1);
     setCurrentFlow('demand');
     setCurrentTab('upload');
 
     if (action && action !== 'reset' && action.type === 'upload') {
       applyFileUpload(action.text, action.filename);
-      setImportNotification({
-        type: 'success',
-        message: 'Previous configuration and data were reset before loading the new file.',
-      });
+      notify({ type: 'success', message: 'Previous configuration and data were reset before loading the new file.' }, 4500);
     } else if (action && action !== 'reset' && action.type === 'sample') {
       applyLoadSample(action.sampleType);
-      setImportNotification({
-        type: 'success',
-        message: 'Previous configuration and data were reset before loading the sample dataset.',
-      });
+      notify({ type: 'success', message: 'Previous configuration and data were reset before loading the sample dataset.' }, 4500);
     } else {
-      setImportNotification({
-        type: 'success',
-        message: 'All configuration parameters, demand data, and simulation results have been reset to defaults.',
-      });
+      notify({ type: 'success', message: 'All configuration parameters, demand data, and simulation results have been reset to defaults.' }, 4500);
     }
-    setTimeout(() => {
-      setImportNotification(null);
-    }, 4500);
   }
 
   // Export JSON Parameters
   // Shared by the Config-screen export (live settings) and the Results export (run snapshot).
-  function buildConfigSnapshot(src: RunInputs) {
+  function buildConfigSnapshot(src: RunInputs, extra: Record<string, unknown> = {}) {
     return {
       calendar: src.calendar,
       labor: src.labor,
@@ -432,6 +470,7 @@ export function App() {
       simParams: src.simParams,
       columnMapping,
       exportedAt: new Date().toISOString(),
+      ...extra,
     };
   }
 
@@ -454,60 +493,57 @@ export function App() {
 
   // Results-screen export: the settings the displayed numbers were computed with.
   function handleExportRunSnapshotParams() {
-    downloadConfigSnapshot(buildConfigSnapshot(runInputs ?? liveInputs));
+    // `outdated` and the changed-section lists are informational; Import JSON ignores them.
+    const outdated = runInputs !== null && (settingsChangedSinceRun.length > 0 || dataChangedSinceRun.length > 0);
+    downloadConfigSnapshot(
+      buildConfigSnapshot(runInputs ?? liveInputs, {
+        outdated,
+        outdatedSettings: settingsChangedSinceRun,
+        outdatedData: dataChangedSinceRun,
+      })
+    );
   }
 
-  // Import JSON Parameters
+  // Import JSON Parameters. Everything goes through validateImportedConfig: a file with any invalid core section
+  // applies nothing and the banner lists every problem; success is announced only when everything was applied.
   function handleImportParams(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
+    reader.onerror = () => {
+      notify({ type: 'error', message: 'The file could not be read. Nothing was changed.' });
+    };
     reader.onload = (evt) => {
+      let json: unknown;
       try {
-        const json = JSON.parse(evt.target?.result as string);
-        if (json.calendar) setCalendar(json.calendar);
-        if (json.labor) setLabor(json.labor);
-        if (json.sla) {
-          const n = parseFloat(String(json.sla.confidenceLevelPct ?? ''));
-          const slackRaw = parseFloat(String(json.sla.slaAcceptanceSlackPct ?? ''));
-          const workloadReductionRaw = parseFloat(String(json.sla.workloadReductionPct ?? ''));
-          setSla({
-            ...DEFAULT_SLA,
-            ...json.sla,
-            confidenceLevelPct: Number.isFinite(n)
-              ? Math.min(99.9, Math.max(50, Math.round(n * 10) / 10))
-              : 95,
-            slaAcceptanceSlackEnabled: json.sla.slaAcceptanceSlackEnabled === true,
-            slaAcceptanceSlackPct: Number.isFinite(slackRaw)
-              ? Math.min(20, Math.max(1, Math.round(slackRaw)))
-              : DEFAULT_SLA.slaAcceptanceSlackPct,
-            workloadReductionEnabled: json.sla.workloadReductionEnabled === true,
-            workloadReductionPct: Number.isFinite(workloadReductionRaw)
-              ? Math.min(50, Math.max(1, Math.round(workloadReductionRaw)))
-              : DEFAULT_SLA.workloadReductionPct,
-            // Clock start is derived from the basis: business_time always starts at next open;
-            // wall_clock keeps the file's value (an absent value means 'arrival', not the default).
-            clockStartPolicy:
-              (json.sla.clockBasis ?? DEFAULT_SLA.clockBasis) === 'business_time'
-                ? 'next_open'
-                : (json.sla.clockStartPolicy ?? 'arrival'),
-          });
-        }
-        if (json.categories) setCategories(json.categories);
-        if (json.simParams) setSimParams(json.simParams);
-        if (json.columnMapping) setColumnMapping(json.columnMapping);
-        setImportNotification({
-          type: 'success',
-          message: 'Configuration successfully loaded from JSON file.',
-        });
-        setTimeout(() => setImportNotification(null), 4000);
-      } catch (err) {
-        setImportNotification({
+        json = JSON.parse(evt.target?.result as string);
+      } catch {
+        notify({ type: 'error', message: 'Invalid JSON configuration file format. Nothing was changed.' });
+        return;
+      }
+      const result = validateImportedConfig(json);
+      if ('problems' in result) {
+        notify({
           type: 'error',
-          message: 'Invalid JSON configuration file format.',
+          message: `Configuration file rejected: ${result.problems.length} problem${result.problems.length === 1 ? '' : 's'} found. Nothing was changed.`,
+          problems: result.problems,
+          technical: result.technical,
+          tip: 'Tip: export settings from this tool (Export JSON) and edit that file, or fix the values on screen and export again.',
         });
-        setTimeout(() => setImportNotification(null), 4000);
+        return;
+      }
+      const v = result.value;
+      if (v.calendar) setCalendar(v.calendar);
+      if (v.labor) setLabor(v.labor);
+      if (v.sla) setSla(v.sla);
+      if (v.categories) setCategories(v.categories);
+      if (v.simParams) setSimParams(v.simParams);
+      if (v.columnMapping) setColumnMapping(v.columnMapping);
+      if (result.notes.length > 0) {
+        notify({ type: 'warning', message: 'Configuration loaded, with a note.', problems: result.notes });
+      } else {
+        notify({ type: 'success', message: `Configuration successfully loaded from JSON file (${result.applied.join(', ')}).` }, 4000);
       }
     };
     reader.readAsText(file);
@@ -582,22 +618,36 @@ export function App() {
             {/* Import Notification Banner */}
             {importNotification && (
               <div
-                className={`p-4 rounded-xl border text-xs flex items-center justify-between shadow-xs ${
+                role={importNotification.type === 'success' ? 'status' : 'alert'}
+                data-testid="import-banner"
+                className={`p-4 rounded-xl border text-xs flex items-start justify-between gap-3 shadow-xs ${
                   importNotification.type === 'success'
                     ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                    : importNotification.type === 'warning'
+                    ? 'bg-amber-50 border-amber-300 text-amber-900'
                     : 'bg-rose-50 border-rose-200 text-rose-900'
                 }`}
               >
-                <div className="flex items-center gap-2 font-medium">
+                <div className="flex items-start gap-2 font-medium min-w-0">
                   {importNotification.type === 'success' ? (
                     <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
                   ) : (
-                    <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                    <AlertTriangle className={`w-4 h-4 shrink-0 ${importNotification.type === 'warning' ? 'text-amber-600' : 'text-rose-600'}`} />
                   )}
-                  <span>{importNotification.message}</span>
+                  <div className="space-y-1 min-w-0">
+                    <span>{importNotification.message}</span>
+                    {importNotification.problems && importNotification.problems.length > 0 && (
+                      <ul className="list-disc pl-4 font-normal space-y-0.5 max-h-48 overflow-y-auto break-words">
+                        {importNotification.problems.map((p, i) => (
+                          <li key={i} title={importNotification.technical?.[i] || undefined}>{p}</li>
+                        ))}
+                      </ul>
+                    )}
+                    {importNotification.tip && <p className="font-normal pt-1">{importNotification.tip}</p>}
+                  </div>
                 </div>
                 <button
-                  onClick={() => setImportNotification(null)}
+                  onClick={() => notify(null)}
                   className="text-xs font-semibold text-slate-500 hover:text-slate-700 px-2 py-0.5"
                 >
                   Dismiss
@@ -631,7 +681,9 @@ export function App() {
               </div>
             )}
 
+            <ErrorBoundary level="content" key={currentFlow}>
             {currentFlow === 'demand' && (
+              <React.Fragment key={resetEpoch}>
               <DemandFlow
                 currentTab={currentTab}
                 rawHeaders={rawHeaders}
@@ -652,6 +704,7 @@ export function App() {
                 onUpdateLabor={setLabor}
                 onToggle24x7={handleToggle24x7}
               />
+              </React.Fragment>
             )}
 
             {currentFlow === 'config' && (
@@ -724,8 +777,19 @@ export function App() {
                 openingWIP={openingWIP}
                 simParams={simParams}
                 onRunSizing={handleRunSizing}
+                matrixScenarios={sensitivityMatrix?.scenarios ?? null}
+                matrixChangedSince={matrixChangedSince}
+                matrixStopped={sensitivityStopped}
+                onMatrixStoppedChange={setSensitivityStopped}
+                demandFingerprint={liveDemandFp}
+                backlogFingerprint={liveBacklogFp}
+                onMatrixComputed={(scenarios, inputs) => {
+                  setSensitivityMatrix({ scenarios, inputs });
+                  setSensitivityStopped(false);
+                }}
               />
             )}
+            </ErrorBoundary>
           </div>
         </div>
       </main>
@@ -757,6 +821,7 @@ export function App() {
       {/* Confirmation Modal for Resetting All Data & Parameters */}
       <ResetConfirmModal
         isOpen={pendingResetAction !== null}
+        trigger={pendingResetAction === null || pendingResetAction === 'reset' ? 'reset' : pendingResetAction.type}
         onConfirm={handleConfirmResetAll}
         onCancel={() => setPendingResetAction(null)}
       />

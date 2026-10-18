@@ -22,6 +22,12 @@ export interface CategoryConfig {
   primaryWindowMinutes?: number; // In minutes for simulation calculations
   boAsaTarget?: number; // e.g. 60
   boAsaUnit?: TimeUnit; // 'minutes' | 'hours' | 'days'
+  /**
+   * Item 3 (H4 / L30): the category has its OWN answer-time target iff this is exactly `true` and `boAsaTarget` is a
+   * finite number > 0. Absent / false = the category follows the global target (CSV load, template apply, defaults
+   * and settings files from before this field all copy the global value into `boAsaTarget`; the copy is never a target).
+   */
+  boAsaOwn?: boolean;
 }
 
 export interface ShiftWindow {
@@ -192,6 +198,13 @@ export interface SLAPolicyConfig {
    * HCSearchOutput.belowWorkloadFloor.
    */
   nMinFloorEnabled?: boolean;
+  /**
+   * Volume variability (Item 7). undefined/false (default) = every interval's case count is its forecast volume
+   * (rounded), identical to today. true = each interval's count is drawn Poisson around the same rounded forecast volume
+   * (random arrival counts, day-to-day noise; NOT forecast error) from a seeded stream, so staffing is tested
+   * against volumes that wobble. N_min / N_occ / Gross stay on forecast volume.
+   */
+  volumeVariability?: boolean;
 }
 
 export interface SimulationParams {
@@ -249,7 +262,7 @@ export interface OpeningWIPCase {
   priority: number;
   arrival: Date;
   clockStart: Date;
-  remainingWorkMinutes: number;
+  remainingWorkMinutes?: number;
 }
 
 export interface DQIssue {
@@ -487,6 +500,13 @@ export interface DESResult {
   fixedShifts?: boolean;
 
   /**
+   * True when a case deadline lay beyond horizon end + 366 days and the drain was cut at that cap (Item 4).
+   * Absent / false in every normal run. The run still proceeds; cases not finished by the cap are counted
+   * unfinished as before.
+   */
+  drainCapped?: boolean;
+
+  /**
    * Assignments made to an agent that was still processing another case. Must always be 0 — an
    * agent works one case at a time. Tracked in every mode, gated replications included.
    */
@@ -636,6 +656,8 @@ export interface HCSearchOutput {
   workloadReductionAppliedPct?: number; // Set only when the reduction was ON for this run; undefined = no reduction applied.
   primaryDrivenHC: number;
   primaryStatistical?: PrimarySLAStatisticalResult;
+  /** Item 3: per-category answer-time verdict of the statistical gate (present only when answer time is ON): target used (own = ticked), mean, upper CI bound, replications used, met / missed / not checked. */
+  categoryAsa?: Record<string, { own: boolean; target: number; targetValue: number; targetUnit: TimeUnit; mean: number; ciLow: number; ciHigh: number; n: number; judged: boolean; passes: boolean }>;
   queueArchitecture: 'pooled' | 'siloed';
   recommendedHC: number | null;
   isInfeasible: boolean;

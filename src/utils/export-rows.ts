@@ -11,7 +11,8 @@
  * time than the screen for any non-UTC planner (e.g. 08:18 on screen vs 04:18Z in Excel at UTC+4).
  */
 
-import type { AgentRosterSource, AgentWorkSlice, CaseRunResult } from '../types/wfm';
+import type { AgentRosterSource, AgentWorkSlice, CaseRunResult, DESResult } from '../types/wfm';
+import { breachReason } from './breach-reason';
 import { formatDateTime24 } from './calendar';
 
 export function buildCaseExportRows(cases: CaseRunResult[]): Array<Record<string, unknown>> {
@@ -36,7 +37,7 @@ export function buildCaseExportRows(cases: CaseRunResult[]): Array<Record<string
   }));
 }
 
-export function buildBreachExportRows(cases: CaseRunResult[]): Array<Record<string, unknown>> {
+export function buildBreachExportRows(cases: CaseRunResult[], result: Pick<DESResult, 'horizonEnd' | 'drainCapped'>): Array<Record<string, unknown>> {
   return cases.map((c) => ({
     'Case ID': c.caseId,
     Category: c.category,
@@ -46,7 +47,7 @@ export function buildBreachExportRows(cases: CaseRunResult[]): Array<Record<stri
     'First Start Time': formatDateTime24(c.firstStartTime, 'UNSTARTED'),
     'Complete Time': formatDateTime24(c.completeTime, 'UNFINISHED'),
     'Park Count': c.parkCount,
-    'Breach Reason': c.isCompleted ? 'Completed after primary deadline' : 'Unfinished by horizon end',
+    'Breach Reason': breachReason(c, result),
   }));
 }
 

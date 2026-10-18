@@ -27,7 +27,9 @@ Workload_hours = Σ (Volume_c × AHT_c) / 60  +  Σ openingWIP remaining minutes
 Per category, because AHT differs by category and a mix shift changes workload without
 changing volume. **Opening WIP belongs here**: deferred work carries backlog across
 periods, and a model that ignores carry-in undersizes from day one. Use *remaining* work on
-partially-handled cases, not full AHT.
+partially-handled cases, not full AHT. In the manual backlog form a blank remaining time means
+not started and is counted at the category's full handling time (the form no longer defaults to
+30 minutes), so headcount can be higher than with the old default where AHT > 30.
 
 ## Stage 2 — Capacity baseline (`N_min` / Workload HC)
 
@@ -36,6 +38,10 @@ agentHours = Manual Override if source=override AND hours > 0
            else DailyProductiveHours × calendarWorkingDaysInHorizon
 N_min = floor( Workload_hours / (OccCap × agentHours × Adherence) )
 ```
+
+`Workload_hours` is the workload after the optional Workload Reduction (`× (1 − reduction%)`,
+when enabled). A 1e-9 tolerance is added before the `floor` so an exact whole ratio that arrives
+as 1.9999999999999998 does not lose a seat (`computeAnalyticalNMin`, `hc-search.ts:134-142`).
 
 **Uses `floor`, not `ceil` — confirmed, no further discussion (2026-08-28).** `N_min` is a
 *starting* floor for the DES search, not itself a claim that capacity clears demand at that
@@ -81,13 +87,13 @@ headcount actually meets the deadline distribution — see `06-simulation-des.md
 ```
 opHC_c    = OperationalHC × share_c            # share by workload
 grossHC_c = opHC_c / (1 − shrinkage_c)
-GrossHC   = ceil( Σ_c grossHC_c )
+GrossHC   = round( Σ_c grossHC_c )     # nearest whole; exact .5 rounds up (1e-9 tolerance)
 ```
 
 **Order of operations matters.** Gross up *per category with its own rate*, then sum, then
-apply a single ceiling:
+apply a single round:
 - Blending rates first and grossing the total loses the per-category structure.
-- Ceiling per category over-rounds systematically (a 5-category split rounds up 5 times).
+- Rounding per category drifts systematically (a 5-category split accumulates 5 rounding errors).
 
 ### Why the harmonic mean
 
@@ -152,7 +158,7 @@ formula.
 
 ## Sanity checks before trusting any number
 
-1. **Does `N_min` ≤ recommended HC?** If not, the search floor is broken.
+1. **Does `N_min` ≤ recommended HC?** With the Workload Floor ON (default), if not, the search floor is broken. With the Workload Floor OFF the recommendation may legitimately sit below `N_min`; Results then flag `belowWorkloadFloor`.
 2. **Does Gross HC ≥ Operational HC?** Equality only when shrinkage is zero.
 3. **Do category shares sum to 1?**
 4. **Is occupancy at the recommendation below the cap?** If it is *far* below, the binding
