@@ -814,6 +814,9 @@ export function DemandFlow({
                     <p id="wip-remaining-hint" className="text-[10px] text-slate-500 leading-snug">
                       Blank = not started (full handling time of the category). Enter minutes only for cases already partly worked — those are handled before new work.
                     </p>
+                    {!newWipRem.invalid && newWipRem.hint && (
+                      <p role="status" className="text-[10px] text-amber-700 leading-snug">{newWipRem.hint}</p>
+                    )}
                     {newWipRem.invalid && (
                       <p role="alert" className="text-[10px] text-amber-700 leading-snug">
                         {newWipRem.reason === 'thousands'

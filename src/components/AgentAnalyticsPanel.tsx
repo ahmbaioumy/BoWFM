@@ -8,12 +8,12 @@ import { CalendarConfig, DESResult, LaborConfig } from '../types/wfm';
 import {
   AgentAnalytics,
   AgentAnalyticsRow,
+  agentPanelText,
   buildAgentAnalyticsExport,
   buildAgentAnalyticsNotes,
   buildAgentInsights,
   computeAgentAnalytics,
   maskedCell,
-  POOLED_FILTER_NOTE,
   SHOW_UTILISATION,
   sortRowsByCases,
   utilisationReadsLowByDesign,
@@ -97,11 +97,12 @@ function CasesBarChart({ a }: { a: AgentAnalytics }) {
 
 function OccUtilChart({ a }: { a: AgentAnalytics }) {
   const id = useId();
-  // Pooled run + category filter: no bars, no tooltips, no figures in the title/description; the note replaces the chart body.
+  // Pooled run + category filter: no bars, no tooltips, no figures in the title/description; a short pointer to the header note replaces the chart body.
   if (a.maskedForPooledFilter) {
+    const maskedBody = agentPanelText(a, SHOW_UTILISATION).chartMaskedBody;
     return (
-      <div role="img" aria-label={`Occupancy not shown. ${POOLED_FILTER_NOTE}`} className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg p-3" data-testid="agent-analytics-chart-masked">
-        {POOLED_FILTER_NOTE}
+      <div role="img" aria-label={`Occupancy not shown. ${maskedBody}`} className="text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-lg p-3" data-testid="agent-analytics-chart-masked">
+        {maskedBody}
       </div>
     );
   }
@@ -263,7 +264,7 @@ function TrendChart({ a }: { a: AgentAnalytics }) {
 export function AgentAnalyticsPanel({ des, calendar, labor, outdatedNote }: Props) {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
-  const [category, setCategory] = useState('ALL');
+  const [selectedCategory, setCategory] = useState('ALL');
   const [agentIds, setAgentIds] = useState<number[]>([]);
 
   useEffect(() => {
@@ -274,10 +275,13 @@ export function AgentAnalyticsPanel({ des, calendar, labor, outdatedNote }: Prop
   }, [des]);
 
   const base = useMemo(() => computeAgentAnalytics({ des, calendar, labor }), [des, calendar, labor]);
+  // A stale selection that is no longer offered (e.g. the old synthetic 'Pooled' option) falls back to All categories.
+  const category = selectedCategory === 'ALL' || base.categories.includes(selectedCategory) ? selectedCategory : 'ALL';
   const a = useMemo(
     () => computeAgentAnalytics({ des, calendar, labor, filter: { fromDate: fromDate || null, toDate: toDate || null, category, agentIds } }),
     [des, calendar, labor, fromDate, toDate, category, agentIds]
   );
+  const text = agentPanelText(a, SHOW_UTILISATION);
   const insights = useMemo(() => buildAgentInsights(a), [a]);
   const notes = useMemo(() => buildAgentAnalyticsNotes(a, labor), [a, labor]);
   const modeNote = notes.find((n) => n.Item === 'Utilisation % vs Occupancy %')?.Note ?? '';
@@ -317,7 +321,7 @@ export function AgentAnalyticsPanel({ des, calendar, labor, outdatedNote }: Prop
           <p className="text-xs text-slate-500 mt-1 flex items-start gap-1.5">
             <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-slate-400" />
             <span title={DEFINITIONS}>
-              {SHOW_UTILISATION ? 'Per-agent workload, occupancy and utilisation for the filtered range.' : 'Per-agent workload and occupancy for the filtered range.'} Hover for full definitions.
+              {text.subtitle.endsWith(".") ? text.subtitle : text.subtitle + "."} Hover for full definitions.
             </span>
           </p>
           {SHOW_UTILISATION && (
@@ -412,9 +416,9 @@ export function AgentAnalyticsPanel({ des, calendar, labor, outdatedNote }: Prop
               <th className={th} title="Primary load metric. For each finished case: the agent's busy minutes on it / all agents' busy minutes on it. A case split 30/10 min counts 0.75 / 0.25. Sums to the number of finished cases.">Work share</th>
               <th className={th} title="Whole cases the agent closed (finisher credit). Overstates agents who only resume cases other agents parked.">Finished</th>
               <th className={th} title="Distinct cases the agent worked on, incl. split cases">Touched</th>
-              <th className={th}>Busy (min)</th>
+              <th className={th}>{text.busyHeader}</th>
               <th className={th} title="Busy + idle minutes while on shift and ready for work">Available (min)</th>
-              <th className={th}>Idle (min)</th>
+              <th className={th}>{text.idleHeader}</th>
               <th className={th} title="Busy / available">Occupancy %</th>
               {SHOW_UTILISATION && <th className={th} title="Busy / scheduled time. Scheduled = the minutes the agent was on the plan to work: when agents work fixed shifts, the agent's own shift (daily productive hours from their start); when agents have no fixed shift end, their whole day (so it reads low when the day is longer than the daily productive hours; expected). With fixed shifts it differs from occupancy only on days when the daily productive hours are used up before the shift ends. Shifts are fixed whenever the business has opening and closing hours; only a round-the-clock business without placed start times has no shift end.">Utilisation %</th>}
               <th className={th} title="Busy minutes on finished-case work / work share">Avg handle (min)</th>

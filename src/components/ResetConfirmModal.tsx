@@ -16,8 +16,12 @@ export interface ResetDialogContent {
   body: string;
   /** Everything the confirm clears (one chip each). */
   items: string[];
+  /** Heading above the item chips: "Items to be reset:" for a plain reset, "Will be cleared:" when a file/sample replaces the work. */
+  listHeading: string;
   /** Reminder that Export JSON does not save data or results. */
   exportNote: string;
+  /** Upload/sample only: how to keep the current settings across the replacement. null for a plain reset. */
+  keepHint: string | null;
   /** Upload/sample only: says the new file or sample loads after confirming. null for a plain reset. */
   afterNote: string | null;
   confirmLabel: string;
@@ -37,6 +41,8 @@ const ITEM_ICONS = [Database, Database, Sliders, Sliders, PlayCircle, BarChart3,
 const EXPORT_NOTE =
   'Export JSON saves settings only, not data or results. Export it first if you want to keep your settings.';
 
+const KEEP_HINT = 'To keep your settings: Cancel, Export JSON, load the file (or sample), then Import JSON.';
+
 /** Pure wording for the dialog by trigger (tested in suite D89). */
 export function getResetDialogContent(trigger: ResetTrigger): ResetDialogContent {
   if (trigger === 'reset') {
@@ -46,7 +52,9 @@ export function getResetDialogContent(trigger: ResetTrigger): ResetDialogContent
       question: 'Are you sure you want to reset everything?',
       body: 'This restores all settings to defaults and removes the uploaded demand, backlog, sizing results and Sensitivity matrix. They cannot be recovered.',
       items: RESET_ITEMS,
+      listHeading: 'Items to be reset:',
       exportNote: EXPORT_NOTE,
+      keepHint: null,
       afterNote: null,
       confirmLabel: 'Yes, Reset Everything',
     };
@@ -58,7 +66,9 @@ export function getResetDialogContent(trigger: ResetTrigger): ResetDialogContent
     question: 'Replace your current work with the new ' + what + '?',
     body: 'Loading new data replaces everything: the current demand, backlog, settings, sizing results and Sensitivity matrix are removed and cannot be recovered.',
     items: RESET_ITEMS,
+    listHeading: 'Will be cleared:',
     exportNote: EXPORT_NOTE,
+    keepHint: KEEP_HINT,
     afterNote:
       trigger === 'upload'
         ? 'The new file loads after you confirm. Cancel keeps your current work and drops the file you just picked.'
@@ -183,7 +193,7 @@ export function ResetConfirmModal({
 
           <div className="space-y-2 text-xs">
             <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-              Items to be reset:
+              {c.listHeading}
             </div>
             <div className="grid grid-cols-2 gap-2 text-slate-700 font-medium">
               {c.items.map((item, i) => {
@@ -197,6 +207,7 @@ export function ResetConfirmModal({
               })}
             </div>
             <p className="text-[11px] text-slate-600 leading-relaxed pt-1">{c.exportNote}</p>
+            {c.keepHint && <p className="text-[11px] text-slate-700 font-semibold leading-relaxed">{c.keepHint}</p>}
           </div>
         </div>
 

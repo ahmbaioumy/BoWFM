@@ -8766,6 +8766,76 @@ console.log('\n--- Suite D90: backlog input safety + results wording ---');
   assert(!/Primary-Driven:/.test(res90 + src90('src/utils/hc-search.ts')), 'D90.c5 no hand-built "Primary-Driven:" text left');
 }
 
+// ---------------------------------------------------------------
+// Suite D91 — screen polish: agent table on a pooled run (no dead 'Pooled' filter option, masked headers/subtitle,
+// one note), reset dialog hints per trigger, progress modal dialog semantics, "1.000" backlog hint (warn only).
+// Fail-first: none of these helpers/strings existed before.
+// ---------------------------------------------------------------
+console.log('\n--- Suite D91: screen polish ---');
+{
+  const root91 = resolve(import.meta.dirname, '..');
+  const src91 = (p: string) => (existsSync(join(root91, p)) ? readFileSync(join(root91, p), 'utf8').replace(/\r\n/g, '\n') : '');
+  const aa91 = await import('../src/utils/agent-analytics');
+
+  // A: agent table
+  const { rows: rows91 } = buildSampleDataset('support', new Date(2026, 9, 5, 8, 0, 0, 0));
+  const iv91 = mapRawRecordsToIntervals(rows91, { intervalStartCol: 'IntervalStart', volumeCol: 'Volume', categoryCol: 'Category' } as any);
+  const cat91 = discoverAndSyncCategories(iv91, DEFAULT_CATEGORIES, DEFAULT_SLA);
+  const run91 = (arch: 'pooled' | 'siloed', hc: number) => runBackofficeDES({ operationalHC: hc, intervals: iv91, openingWIP: [], categories: cat91, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, seed: DEFAULT_SIM_PARAMS.seed, queueArchitecture: arch });
+  const pooled91 = aa91.computeAgentAnalytics({ des: run91('pooled', 12), calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR });
+  const siloed91 = aa91.computeAgentAnalytics({ des: run91('siloed', 21), calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR });
+  const realCats91 = cat91.map((c) => c.name).sort();
+  assert(!pooled91.categories.includes('Pooled') && pooled91.categories.length > 0, 'D91.a1 pooled run: the category list has no synthetic "Pooled" option', pooled91.categories.join(','));
+  assert(JSON.stringify([...pooled91.categories].sort()) === JSON.stringify(realCats91), 'D91.a2 pooled run: the list is exactly the real case categories', pooled91.categories.join(','));
+  assert(JSON.stringify([...siloed91.categories].sort()) === JSON.stringify(realCats91) && siloed91.rows.every((r) => realCats91.includes(r.category)), 'D91.a3 siloed run still offers every real category', siloed91.categories.join(','));
+  const namedPooled = cat91.map((c, i) => (i === 0 ? { ...c, name: 'Pooled' } : c));
+  const ivNP = iv91.map((x: any) => (x.category === cat91[0].name ? { ...x, category: 'Pooled' } : x));
+  const dNP = runBackofficeDES({ operationalHC: 12, intervals: ivNP, openingWIP: [], categories: namedPooled, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, sla: DEFAULT_SLA, seed: DEFAULT_SIM_PARAMS.seed, queueArchitecture: 'pooled' });
+  assert(aa91.computeAgentAnalytics({ des: dNP, calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR }).categories.includes('Pooled'), 'D91.a4 a real case category literally named "Pooled" stays in the list');
+  const goldM = aa91.computeAgentAnalytics({ des: run91('pooled', 12), calendar: DEFAULT_CALENDAR, labor: DEFAULT_LABOR, filter: { category: pooled91.categories[0] } });
+  assert(goldM.maskedForPooledFilter === true, 'D91.a5 masked predicate unchanged (pooled + category)');
+  const apt = (aa91 as any).agentPanelText;
+  const t91 = typeof apt === 'function' ? apt(goldM, true) : null;
+  const u91 = typeof apt === 'function' ? apt(pooled91, true) : null;
+  assert(!!t91 && t91.busyHeader === `Busy (${pooled91.categories[0]}, min)` && t91.idleHeader === 'Idle (all work, min)', 'D91.a6 masked headers name the category and "all work"', JSON.stringify(t91));
+  assert(!!t91 && t91.subtitle === 'Per-agent workload for the selected category' && !/occupancy|utilisation/i.test(t91.subtitle), 'D91.a7 masked subtitle drops occupancy/utilisation', JSON.stringify(t91));
+  assert(!!u91 && u91.busyHeader === 'Busy (min)' && u91.idleHeader === 'Idle (min)' && /occupancy and utilisation/.test(u91.subtitle), 'D91.a8 unmasked headers/subtitle unchanged', JSON.stringify(u91));
+  assert(!!t91 && /see note above/i.test(t91.chartMaskedBody) && !/Pooled team:/.test(t91.chartMaskedBody) && t91.chartMaskedBody.length < 120, 'D91.a9 chart body is a short pointer, not the full note again', t91?.chartMaskedBody);
+  assert(/^Pooled team: agents serve every category/.test(aa91.POOLED_FILTER_NOTE) && aa91.buildAgentAnalyticsNotes(goldM, DEFAULT_LABOR).some((n: any) => n.Item === 'Category filter' && n.Note === aa91.POOLED_FILTER_NOTE), 'D91.a10 POOLED_FILTER_NOTE unchanged and still in the notes/export');
+  const exH = aa91.buildAgentAnalyticsExport(goldM, DEFAULT_LABOR).sections[0].rows[0] as any;
+  assert('Busy (min)' in exH && 'Idle (min)' in exH, 'D91.a11 export column names unchanged');
+  const panel91 = src91('src/components/AgentAnalyticsPanel.tsx');
+  assert(/agentPanelText\(/.test(panel91) && !/aria-label=\{`Occupancy not shown\. \$\{POOLED_FILTER_NOTE\}`\}/.test(panel91), 'D91.a12 panel uses the helper; chart no longer repeats the full note');
+
+  // B: reset dialog
+  const rd91 = (await import('../src/components/ResetConfirmModal')) as any;
+  const r91 = rd91.getResetDialogContent('reset'), u9 = rd91.getResetDialogContent('upload'), s91 = rd91.getResetDialogContent('sample');
+  const KEEP = 'To keep your settings: Cancel, Export JSON, load the file (or sample), then Import JSON.';
+  assert(u9.keepHint === KEEP && s91.keepHint === KEEP, 'D91.b1 upload/sample carry the keepHint', String(u9.keepHint));
+  assert(r91.keepHint === null || r91.keepHint === undefined, 'D91.b2 plain reset has no keepHint (nothing to load after)');
+  assert(r91.listHeading === 'Items to be reset:' && u9.listHeading === 'Will be cleared:' && s91.listHeading === 'Will be cleared:', 'D91.b3 list heading per trigger', [r91.listHeading, u9.listHeading, s91.listHeading].join(' | '));
+  assert(/Export JSON saves settings only/.test(u9.exportNote), 'D91.b4 exportNote kept');
+  const modal91 = src91('src/components/ResetConfirmModal.tsx');
+  assert(/c\.listHeading/.test(modal91) && /c\.keepHint/.test(modal91), 'D91.b5 modal renders the heading and keepHint fields');
+
+  // B3: progress modal semantics (keyboard behaviour is browser-tested)
+  const pm91 = src91('src/components/SimulationProgressModal.tsx');
+  assert(/role="dialog"/.test(pm91) && /aria-modal="true"/.test(pm91) && /aria-labelledby=/.test(pm91), 'D91.c1 progress modal is a labelled modal dialog');
+  assert(/key !== 'Tab'/.test(pm91) && /document\.activeElement/.test(pm91) && /isConnected/.test(pm91), 'D91.c2 Tab is trapped and focus returns to the opener');
+  const escIdx = pm91.indexOf("key === 'Escape'");
+  assert(escIdx > 0 && /finished/.test(pm91.slice(escIdx, escIdx + 200)), 'D91.c3 Escape is gated on the finished state (never stops a running search)');
+  assert(!/autoFocus/.test(pm91) && /tabIndex=\{-1\}/.test(pm91), 'D91.c4 default focus is a safe element (title), never the Stop button');
+  assert(pm91.indexOf('useEffect(') > 0 && pm91.lastIndexOf('useEffect(') < pm91.indexOf('if (!isOpen || !progress) return null'), 'D91.c5 all hooks sit above the early return');
+
+  // C: "1.000" warn only (owner decision a)
+  const P91 = (t: string) => parseRemainingText(t) as { value: number | undefined; invalid: boolean; reason?: string; hint?: string };
+  for (const t of ['1.000', '2.500', '999.999']) assert(P91(t).invalid === false && P91(t).value === Number(t), `D91.d1 "${t}" keeps its value (valid)`, JSON.stringify(P91(t)));
+  assert(P91('1.000').hint === 'Did you mean 1000? A dot is read as a decimal point.' && P91('2.500').hint === 'Did you mean 2500? A dot is read as a decimal point.', 'D91.d2 "1.000"/"2.500" carry the non-blocking hint with the digits without the dot', JSON.stringify([P91('1.000'), P91('2.500')]));
+  for (const t of ['0.125', '12.5', '1.5', '1.50', '1000.000', '10.0005', '1', '12,5']) assert(P91(t).hint === undefined, `D91.d3 "${t}" has no hint`, JSON.stringify(P91(t)));
+  assert(P91('1,000').reason === 'thousands' && P91('1,000').invalid === true, 'D91.d4 comma thousands unchanged (invalid)');
+  assert(/newWipRem\.hint/.test(src91('src/components/DemandFlow.tsx')), 'D91.d5 DemandFlow renders newWipRem.hint');
+}
+
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');
