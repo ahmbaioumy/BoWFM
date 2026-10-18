@@ -2473,3 +2473,48 @@ R3. **A3:** screen headers renamed while masked; export column names unchanged (
 R4. **B1:** new `keepHint` field (exportNote kept, D89.a3 intact): "To keep your settings: Cancel, Export JSON, load the file (or sample), then Import JSON." Heading stays "Items to be reset:" for reset, "Will be cleared:" for upload/sample (pinned in D91).
 R5. **B3 progress modal:** role=dialog, aria-modal, aria-labelledby; focus trap; default focus on a safe element (the dialog title / "View Results" once finished) — never on Stop; Escape does nothing while running (no unconfirmed stop); after finish Escape = View Results only if that is non-destructive; focus returns to the Run button; hooks above the early return. Browser-tested behaviour, not only source grep.
 R6. **C "1.000": OWNER DECISION** — options: (a) warn only (value kept, hint "Did you mean 1000? A dot is read as a decimal point."); (b) hard reject only "N.000" (all-zero fraction); (c) leave as is. Recommended (a). Message names the separator correctly. Note in docs/wfm/07 that file import reads "1.000" as 1.
+
+---
+
+# Optional ideas round (planned 2026-10-18)
+
+Task: speed up runs without changing numbers, then offer the two number-changing ideas as separate owner decisions.
+End user: WFM planner opening BoWFM.html offline (recorded above).
+Skills: wfm-engine-testing (fail-first, determinism), wfm-sizing-simulation (search/CI gate), wfm-domain-guide (not needed).
+Evidence: investigator report 2026-10-18 (profile scripts in scratchpad prof/). AJM_Only defaults 28.0 s; getDailyOpenClose = 40.1% self time; calendar fns ≈ 52%.
+
+## Phase S — Speed, numbers unchanged (Tier 3: core calendar math; reviewers tester + auditor + user-side? no UI → tester + auditor + challenger)
+S1. Per-run day-window cache inside runBackofficeDES (open, close, working-day flag keyed on local day; DST-safe; no global WeakMap on mutable calendar). Used by dispatchSingleQueue, isWorking calls in the loop, countAgentsOnShiftNow/sampleCoverage, workingDuration. Calendar logic stays in calendar.ts (new helper exported there), engine only calls it.
+S2. dispatchSingleQueue: check idleList/queue empty before isWorking (des-engine.ts:1389-1390).
+S3. isHoliday: precomputed Set, no per-call string building (calendar.ts).
+Scope: src/utils/calendar.ts, src/utils/des-engine.ts, scripts/verify-sizing-fixes.mts (new suite D92), PRD.md, project_context.md, BoWFM.html.
+Acceptance + proof:
+- AS1 Bit-identical: searchOptimalHC full result deep-equal before/after on the 3 samples + AJM_Only + AJM_Simu → `npm run test:audit` matches docs/audit/sample-hc-after-2026-10-15.jsonl; plus a before/after JSON diff script = empty.
+- AS2 Randomised equivalence: cached window == getDailyOpenClose/isWorking/isHoliday over DST transition dates, holidays, 24x7, 24:00 close, non-midnight timestamps (D92, written fail-first against a stub).
+- AS3 Speed: AJM_Only defaults ≥ 1.3x faster than 28.0 s baseline, measured same machine back-to-back, 3 runs each, median.
+- AS4 `npm run lint && npm test` green (counts quoted), D46/D71 shift-window suites pass, `npm run check:artifact` passes.
+- AS5 Sync ≡ async unchanged (existing suites).
+
+## Phase L — Leap cap for random-volume mode (OWNER DECISION; Tier 3; may change headcount in rare noisy cases, only lower-or-equal)
+Root cause: 5-rep probes false-fail under volumeVariability (CI 3x wider), step doubles, overshoot, long −1 walk-down (AJM_Only ON: 11 full-R evals vs 4 OFF).
+Option recommended: B — when volumeVariability is ON and a probe fails, re-check at full R before doubling. OFF path byte-identical.
+Must be ONE shared leap state machine (D11: sync :3554-3608, async :4431-4520) — no patching both copies.
+Proof: OFF audit byte-identical; AJM_Only ON stays 17 / gross 21 and time drops; D86.e1/e5 seeds 1-5; sync ≡ async deep-equal; fail-first fixture where 5-rep probe false-fails.
+
+## Phase O — Spread layout with Minimum Coverage OFF (OWNER DECISION; Tier 3; lowers OFF headcount, e.g. D33 OFF 28 → ?)
+Changes meaning of OFF ("everyone starts at opening"). Recommended: not built; instead C — Results line saying which roster passed (spread/repair/uniform). Numbers unchanged, Tier 1.
+
+## Minor edge cases — leave as is (documented or unreachable in real runs)
+- Siloed dropdown without caseResults: only synthetic results reach it.
+- Leave warning ignores config-only edits: PRD L31.
+- "1.000" in file import: documented docs/wfm/07.
+
+Order: S first (merge, push on "push"), then L/O only on owner yes.
+
+## Amendments after challenge (2026-10-18)
+C1. S1 one implementation: new day-window helper in calendar.ts (numeric cache: dayStartMs, nextDayStartMs, open/close ms; hit when t in [dayStart, nextDay)); getDailyOpenClose/isWorking/workingDuration/nextOpen/addWorkingTime delegate to it (optional cache arg). No second copy of any calendar loop. Doc comment: calendar treated as frozen for the run. Cache per DES run (rebuilt per replication — accepted).
+C2. AS1 strengthened: differential harness (scripts/verify-speed-equivalence.mts) runs the pre-change engine copy vs new engine and deep-equals full runBackofficeDES and searchOptimalHC output over a grid: 24x7, 24:00 close, midnight-spanning window, mid-horizon holidays, non-zero open minutes, staggered with/without start distribution, clockStartPolicy variants, min coverage ON/OFF. Run in child processes under ≥2 DST zones (e.g. Europe/London, America/New_York) + Etc/GMT-4; assert the zone really has a 23h/25h day or fail loudly. Plus test:audit byte-identical.
+C3. AS3 replaced: gate = getDailyOpenClose call count in engine loop drops >90% (deterministic counter) AND no slower. Timing = interleaved A/B ≥5 runs each, median CPU time; 1.3x is a target, reported, not a gate.
+C4. S3: holiday Set cached via WeakMap on the array; grep scripts for in-place holidays mutation first.
+C5. AS4 adds sync≡async suites and check:artifact after rebuild.
+C6. Phase L option B dropped. Before choosing, measure (investigator) three variants on AJM_Only ON + seeds: (i) skip 5-rep probe under variability, (ii) recheck at min(R,10) with no evalCache/rescue side effects, (iii) step cap. Leap logic first extracted into one createLeapSearch state machine with sync≡async test (own task). Property test across ≥20 seeds: new recommendedHC ≤ old; report any output-text diffs (evaluatedHCs, failing reason, binding).
