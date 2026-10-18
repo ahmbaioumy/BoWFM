@@ -804,7 +804,7 @@ export function DemandFlow({
                     </label>
                     <input
                       type="text"
-                      inputMode="numeric"
+                      inputMode="decimal"
                       placeholder="Blank = full"
                       value={newWipRemText}
                       onChange={(e) => setNewWipRemText(e.target.value)}
@@ -816,7 +816,11 @@ export function DemandFlow({
                     </p>
                     {newWipRem.invalid && (
                       <p role="alert" className="text-[10px] text-amber-700 leading-snug">
-                        Not a valid number of minutes — this row will use the full handling time.
+                        {newWipRem.reason === 'thousands'
+                          ? 'Looks like a thousands separator — type 1000 without the comma.'
+                          : newWipRem.reason === 'over_cap'
+                            ? 'More than 100,000 minutes — this row will use the full handling time.'
+                            : 'Not a valid number of minutes — this row will use the full handling time.'}
                       </p>
                     )}
                   </div>

@@ -1104,3 +1104,6 @@ P1-11: `validateImportedConfig` checks a settings file before applying it (the f
 
 ### 2026-10-17 — Housekeeping (PRD 1.29.1)
 `vite`, `@vitejs/plugin-react` and `@tailwindcss/vite` moved to `devDependencies` (`dependencies` is exactly `react`, `react-dom`, `lucide-react`; suite D9.5b pins it); the unused `test_files/UAT_BO.xlsx` and `test_files/test_breaks.xlsx` removed. The built `BoWFM.html` is byte-identical.
+
+### 2026-10-18 — Input safety + results wording (PRD 1.29.3)
+Before: typing "1,000" in the manual backlog box was read as 1.0 minute; there was no upper limit (file import caps at 100,000); the staffing line said "Primary-Driven: M with 95% CI" even when an answer-time or occupancy target decided N; the breach CSV and boundary samples said "Unfinished by horizon end" while the screen said "Not finished by end of simulation (deadline missed)"; rows cut by the 366-day limit were also called "deadline missed". After: a comma plus exactly three digits is refused with a thousands-separator message, above 100,000 is refused (rows still added at full handling time), the keyboard hint is decimal; one shared line "(binding: ...)" and one shared breach-reason helper, with a separate wording for cap-cut rows. Wording and input validation only: no headcount changes (samples 31/40, 28/35, 31/39). Suite D90.

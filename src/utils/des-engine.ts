@@ -789,7 +789,7 @@ export function resolveMinAgentsPerInterval(
 /** Fixed part of the drain after the planning horizon: 14 calendar days (millisecond arithmetic, kept as-is - no DST re-derivation). */
 const DRAIN_BASE_MS = 14 * 24 * 60 * 60 * 1000;
 /** Hard upper bound on the drain: a bad (far-future) deadline cannot make a run endless. */
-const DRAIN_CAP_MS = 366 * 24 * 60 * 60 * 1000;
+export const DRAIN_CAP_MS = 366 * 24 * 60 * 60 * 1000;
 
 /**
  * Where the simulation stops (Item 4, G9 / DES-10): the later of horizon end + 14 days and the latest finite

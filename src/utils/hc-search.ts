@@ -35,7 +35,9 @@ import {
   getValidSlapStarts,
   isWorkingDay,
 } from './calendar';
-import { allocateAgentsToCategories, allocateSiloedSeats, generateCaseEntities, resolveEffectiveAdherence, resolveMinAgentsPerInterval, resolveOccupancyCapPct, resolveShiftSlapMinutes, runBackofficeDES } from './des-engine';
+import { breachReason } from './breach-reason';
+import { buildStaffingLine } from './staffing-summary';
+import { allocateAgentsToCategories,allocateSiloedSeats, generateCaseEntities, resolveEffectiveAdherence, resolveMinAgentsPerInterval, resolveOccupancyCapPct, resolveShiftSlapMinutes, runBackofficeDES } from './des-engine';
 
 /**
  * Net extra OFF (post-DES) and the roster coverage uplift derived from it.
@@ -3818,9 +3820,7 @@ export function searchOptimalHC(params: {
         arrival: formatDateTime24(fb.arrival),
         deadline: formatDateTime24(fb.primaryDeadline),
         latestSafeStart: formatDateTime24(fb.latestSafeStart),
-        reason: !fb.isCompleted
-          ? 'Unfinished by horizon end'
-          : 'Completed after primary deadline',
+        reason: breachReason(fb, failedNResult),
       });
     }
 
@@ -4645,7 +4645,7 @@ export async function searchOptimalHCAsync(params: {
     evaluatedHistory: buildHistorySnapshot(),
     currentMessage: isInfeasible
       ? `Audit at cap N = ${evalN}: Constraints breached. Generating diagnostic evidence...`
-      : `Running full DES audit at recommended N = ${evalN} (Primary-driven: ${primaryDrivenHC})...`,
+      : `Running full DES audit at recommended N = ${evalN} (primary SLA alone needs ${primaryDrivenHC})...`,
   });
 
   await new Promise((r) => setTimeout(r, 40));
@@ -4781,9 +4781,7 @@ export async function searchOptimalHCAsync(params: {
         arrival: formatDateTime24(fb.arrival),
         deadline: formatDateTime24(fb.primaryDeadline),
         latestSafeStart: formatDateTime24(fb.latestSafeStart),
-        reason: !fb.isCompleted
-          ? 'Unfinished by horizon end'
-          : 'Completed after primary deadline',
+        reason: breachReason(fb, failedNResult),
       });
     }
 
@@ -4823,7 +4821,7 @@ export async function searchOptimalHCAsync(params: {
     evaluatedHistory: buildHistorySnapshot(),
     currentMessage: isInfeasible
       ? `Search Infeasible: ${infeasibleReason}`
-      : `Optimal Staffing: ${recommendedHC} Operational HC (Primary-Driven: ${primaryDrivenHC} with ${clampConfidenceLevelPct(sla.confidenceLevelPct)}% CI).`,
+      : buildStaffingLine({ recommendedN: recommendedHC ?? primaryDrivenHC, primaryDrivenHC, bindingDescription: bindingConstraintDescription }),
   });
 
   await new Promise((r) => setTimeout(r, 50));

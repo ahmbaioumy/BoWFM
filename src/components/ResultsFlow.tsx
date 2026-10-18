@@ -23,8 +23,10 @@ import { idleAgentCategoryLabel } from '../utils/results-display';
 import { AgentAnalyticsPanel } from './AgentAnalyticsPanel';
 import { formatDateTime24, getCalendarWorkingDaysInHorizon, getDailyWindowLengthHours } from '../utils/calendar';
 import { resolveClockStartPolicy, verifyAgentTimelineInvariants } from '../utils/des-engine';
-import { buildBreachExportRows, buildCaseExportRows, buildSliceExportRows } from '../utils/export-rows';
-import { clampConfidenceLevelPct, effectivePrimaryTarget, resolveCategoryAsaTargets } from '../utils/hc-search';
+import { breachReason } from '../utils/breach-reason';
+import { buildStaffingLine } from '../utils/staffing-summary';
+import { buildBreachExportRows,buildCaseExportRows, buildSliceExportRows } from '../utils/export-rows';
+import { effectivePrimaryTarget, resolveCategoryAsaTargets } from '../utils/hc-search';
 import { CONFIRMED_TWO_SETS_TEXT, HISTORY_SECOND_SET_BADGE, historyPrimaryPasses, historyReasonText, representativeTone, startTimeSplitLines, startTimeSplitNotes } from '../utils/results-display';
 import {
   Users,
@@ -488,7 +490,7 @@ function ResultsFlowBody({
   }
 
   function handleExportBreachedCasesCSV() {
-    exportWithOutdatedNote(buildBreachExportRows(breachedCases), 'wfm_sla_breach_cases.csv', outdatedNote);
+    exportWithOutdatedNote(buildBreachExportRows(breachedCases, des), 'wfm_sla_breach_cases.csv', outdatedNote);
   }
 
   function handleExportQueueWipCSV() {
@@ -727,13 +729,12 @@ function ResultsFlowBody({
                 : searchOutput.primaryDrivenHC;
             const nMin = searchOutput.nMinAnalytical;
             const history = searchOutput.searchHistory || [];
-            const ciPct = clampConfidenceLevelPct(sla.confidenceLevelPct);
             const phase = isInfeasible
               ? 'Search Infeasible at Cap'
               : 'Sizing & Verification Complete';
             const currentMessage = isInfeasible
               ? `Search Infeasible: ${searchOutput.infeasibleReason || 'No compliant headcount found within search bounds.'}`
-              : `Optimal Staffing: ${recommendedN} Operational HC (Primary-Driven: ${searchOutput.primaryDrivenHC} with ${ciPct}% CI).`;
+              : buildStaffingLine({ recommendedN, primaryDrivenHC: searchOutput.primaryDrivenHC, bindingDescription: searchOutput.bindingConstraintDescription });
 
             return (
               <div className="bg-white rounded-2xl shadow-xs border border-slate-200 overflow-hidden flex flex-col">
@@ -2431,7 +2432,7 @@ function ResultsFlowBody({
                           <td className="py-2 px-3 whitespace-nowrap">{c.completeTime ? formatSafeDateTime(c.completeTime) : <span title="Not finished by end of simulation">Unfinished</span>}</td>
                           <td className="py-2 px-3">{c.parkCount}</td>
                           <td className="py-2 px-3 font-sans text-rose-700 font-medium whitespace-nowrap">
-                            {c.isCompleted ? 'Completed after primary deadline' : 'Not finished by end of simulation (deadline missed)'}
+                            {breachReason(c, des)}
                           </td>
                         </tr>
                       ))}
