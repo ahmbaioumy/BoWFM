@@ -32,13 +32,16 @@ import {
   convertSlaDurationToMinutes,
   formatDateTime24,
   formatTime24,
+  createDayWindowCache,
   getCalendarWorkingDaysInHorizon,
   getDailyOpenClose,
+  getDayWindow,
   isWorking,
   isWorkingDay,
   nextOpen,
   subtractWorkingTime,
   workingDuration,
+  type DayWindowCache,
 } from './calendar';
 
 // Event type numeric precedence for strict tie-breaking (1 = highest precedence)
@@ -557,14 +560,17 @@ export function buildOpeningWipCases(params: {
   calendar: CalendarConfig;
   sla: SLAPolicyConfig;
   horizonStart: Date;
+  /** Optional shared day-window memo (calendar frozen for its life); a private one is made when omitted. */
+  dayCache?: DayWindowCache;
 }): { cases: CaseEntity[]; idlessCount: number } {
   const { openingWIP, categoryMap, calendar, sla, horizonStart } = params;
+  const dayCache = params.dayCache && params.dayCache.calendar === calendar ? params.dayCache : createDayWindowCache(calendar);
   const cases: CaseEntity[] = [];
   let nextSyntheticId = 1;
   let idlessCount = 0;
   const defaultPrimaryWinMin = convertSlaDurationToMinutes(sla.primaryWindow, sla.primaryUnit, sla.clockBasis, calendar);
   const clockStartPolicy = resolveClockStartPolicy(sla);
-  const firstWorkInstantMs = openingWIP.length > 0 ? nextOpen(horizonStart, calendar).getTime() : horizonStart.getTime();
+  const firstWorkInstantMs = openingWIP.length > 0 ? nextOpen(horizonStart, calendar, dayCache).getTime() : horizonStart.getTime();
 
   for (const wip of openingWIP) {
     const cat = categoryMap.get(wip.category) || {
@@ -578,7 +584,7 @@ export function buildOpeningWipCases(params: {
     };
 
     const arrival = wip.arrival && !isNaN(wip.arrival.getTime()) ? new Date(wip.arrival) : new Date(horizonStart);
-    const clockStart = clockStartPolicy === 'next_open' ? nextOpen(arrival, calendar) : new Date(arrival);
+    const clockStart = clockStartPolicy === 'next_open' ? nextOpen(arrival, calendar, dayCache) : new Date(arrival);
 
     const primaryWinMin =
       cat.primaryWindow !== undefined && cat.primaryUnit
@@ -587,7 +593,7 @@ export function buildOpeningWipCases(params: {
 
     const primaryDeadline =
       sla.clockBasis === 'business_time'
-        ? addWorkingTime(clockStart, primaryWinMin, calendar)
+        ? addWorkingTime(clockStart, primaryWinMin, calendar, dayCache)
         : new Date(clockStart.getTime() + primaryWinMin * 60 * 1000);
 
     const totalAht = cat.ahtMinutes;
@@ -598,7 +604,7 @@ export function buildOpeningWipCases(params: {
 
     const latestSafeStart =
       sla.clockBasis === 'business_time'
-        ? subtractWorkingTime(primaryDeadline, remainingAht, calendar)
+        ? subtractWorkingTime(primaryDeadline, remainingAht, calendar, dayCache)
         : new Date(primaryDeadline.getTime() - remainingAht * 60 * 1000);
 
     const sId = nextSyntheticId++;
@@ -634,6 +640,7 @@ export function generateCaseEntities(params: {
   seed: number;
 }): { cases: CaseEntity[]; horizonStart: Date; horizonEnd: Date; forecastCases?: CaseEntity[] } {
   const { intervals, openingWIP, categories, calendar, sla, seed } = params;
+  const dayCache = createDayWindowCache(calendar); // one memo for this whole generation (calendar is frozen during it)
   const varyVolume = sla.volumeVariability === true;
   // Volume variability ON: roster design and siloed seats read the forecast (replay) case set, not the noisy draw.
   const forecastCases = varyVolume ? generateCaseEntities({ ...params, sla: { ...sla, volumeVariability: false } }).cases : undefined;
@@ -659,7 +666,7 @@ export function generateCaseEntities(params: {
   const clockStartPolicy = resolveClockStartPolicy(sla);
 
   // Add opening WIP (shared builder — also used by the data-quality check; flags rule D4 'overdue at start').
-  const wipBuilt = buildOpeningWipCases({ openingWIP, categoryMap, calendar, sla, horizonStart });
+  const wipBuilt = buildOpeningWipCases({ openingWIP, categoryMap, calendar, sla, horizonStart, dayCache });
   for (const c of wipBuilt.cases) allCases.push(c);
   nextSyntheticId = wipBuilt.cases.length + 1;
   caseIdCounter = 1 + wipBuilt.idlessCount;
@@ -695,18 +702,18 @@ export function generateCaseEntities(params: {
       const offsetMs = Math.floor(prng() * intervalDurationMs);
       const arrival = new Date(intervalStartMs + offsetMs);
       const clockStart =
-        clockStartPolicy === 'next_open' && !isWorking(arrival, calendar)
-          ? nextOpen(arrival, calendar)
+        clockStartPolicy === 'next_open' && !isWorking(arrival, calendar, dayCache)
+          ? nextOpen(arrival, calendar, dayCache)
           : new Date(arrival);
 
       const primaryDeadline =
         sla.clockBasis === 'business_time'
-          ? addWorkingTime(clockStart, primaryWinMin, calendar)
+          ? addWorkingTime(clockStart, primaryWinMin, calendar, dayCache)
           : new Date(clockStart.getTime() + primaryWinMin * 60 * 1000);
 
       const latestSafeStart =
         sla.clockBasis === 'business_time'
-          ? subtractWorkingTime(primaryDeadline, totalAht, calendar)
+          ? subtractWorkingTime(primaryDeadline, totalAht, calendar, dayCache)
           : new Date(primaryDeadline.getTime() - totalAht * 60 * 1000);
 
       const sId = nextSyntheticId++;
@@ -852,6 +859,8 @@ export function runBackofficeDES(params: {
     shiftDistribution,
     dispatchFairness,
   } = params;
+
+  const dayCache = createDayWindowCache(calendar); // per-run day-window memo; the calendar is frozen for the run
 
   const categoryMap = new Map<string, CategoryConfig>();
   categories.forEach((c) => categoryMap.set(c.name, c));
@@ -1113,10 +1122,10 @@ export function runBackofficeDES(params: {
   // every agent, for the legacy unscoped event — at AgentAvailable.
   const agentOnShiftToday: Uint8Array | null = staggeredMode ? new Uint8Array(operationalHC) : null;
   if (staggeredMode) {
-    const isStartBizForShift = isWorking(horizonStart, calendar);
+    const isStartBizForShift = isWorking(horizonStart, calendar, dayCache);
     let minutesFromOpenAtStartForShift = 0;
     if (isStartBizForShift) {
-      const { openTime: dayOpenAtStart } = getDailyOpenClose(horizonStart, calendar);
+      const { openTime: dayOpenAtStart } = getDailyOpenClose(horizonStart, calendar, dayCache);
       minutesFromOpenAtStartForShift = (horizonStart.getTime() - dayOpenAtStart.getTime()) / 60000;
     }
     for (let i = 0; i < operationalHC; i++) {
@@ -1181,8 +1190,8 @@ export function runBackofficeDES(params: {
     }
   }
   // Horizon opens mid-day: agents already on the floor start accruing from horizonStart.
-  if (operationalHC > 0 && isWorking(horizonStart, calendar)) {
-    const { openTime: dOpen, closeTime: dClose } = getDailyOpenClose(horizonStart, calendar);
+  if (operationalHC > 0 && isWorking(horizonStart, calendar, dayCache)) {
+    const { openTime: dOpen, closeTime: dClose } = getDailyOpenClose(horizonStart, calendar, dayCache);
     for (let i = 0; i < operationalHC; i++) {
       if (staggeredMode && agentOnShiftToday![i] !== 1) continue; // its own AgentAvailable will open the window
       const ownEndMs = staggeredMode
@@ -1225,8 +1234,8 @@ export function runBackofficeDES(params: {
   curDay.setHours(0, 0, 0, 0);
 
   while (curDay.getTime() <= drainHorizonEnd.getTime()) {
-    if (isWorkingDay(curDay, calendar)) {
-      const { openTime, closeTime } = getDailyOpenClose(curDay, calendar);
+    if (isWorkingDay(curDay, calendar, dayCache)) {
+      const { openTime, closeTime } = getDailyOpenClose(curDay, calendar, dayCache);
       // 24x7: openTime/closeTime are midnight-to-next-midnight (getDailyOpenClose), so the
       // staggered scheduling below applies unchanged — offsets are non-wrapping minutes from
       // that midnight, per getValidSlapStarts. Fixed 2026-08-28 (24x7 multi-start): this used
@@ -1287,7 +1296,7 @@ export function runBackofficeDES(params: {
   // agentTimeline and is legitimately skip-gated). staggeredMode false collapses this to the
   // original check.
   if (!skipCaseResultsAndTimeline && operationalHC > 0) {
-    const isStartBiz = isWorking(horizonStart, calendar);
+    const isStartBiz = isWorking(horizonStart, calendar, dayCache);
     for (let i = 0; i < operationalHC; i++) {
       const shiftAlreadyStarted = !staggeredMode || agentOnShiftToday![i] === 1;
       agentState[i] = isStartBiz && shiftAlreadyStarted && agentDailyMinutesRemaining[i] > 0.01 ? 'idle' : 'off';
@@ -1319,7 +1328,7 @@ export function runBackofficeDES(params: {
   // caught while validating the 24x7 multi-start fix, suite D36).
   let minOnShiftDuringOpenHours = Infinity;
   function countAgentsOnShiftNow(atMs: number): number {
-    const dayOpenMs = getDailyOpenClose(new Date(atMs), calendar).openTime.getTime();
+    const dayOpenMs = getDayWindow(atMs, calendar, dayCache).openMs;
     const shiftMs = shiftLengthMinutes * 60000;
     let count = 0;
     for (let i = 0; i < operationalHC; i++) {
@@ -1330,7 +1339,7 @@ export function runBackofficeDES(params: {
   }
   function sampleCoverage(atTime: Date) {
     if (operationalHC === 0) return;
-    if (!isWorking(atTime, calendar)) return;
+    if (!isWorking(atTime, calendar, dayCache)) return;
     const c = countAgentsOnShiftNow(atTime.getTime());
     if (c < minOnShiftDuringOpenHours) minOnShiftDuringOpenHours = c;
   }
@@ -1370,7 +1379,7 @@ export function runBackofficeDES(params: {
     const maxLogMs = Math.min(timeMs, horizonEnd.getTime());
     while (nextTimelineLogTimeMs <= maxLogMs) {
       const logDate = new Date(nextTimelineLogTimeMs);
-      const isBiz = isWorking(logDate, calendar);
+      const isBiz = isWorking(logDate, calendar, dayCache);
       timelineIntervals.push({
         time: logDate,
         label: formatTime24(logDate),
@@ -1386,20 +1395,20 @@ export function runBackofficeDES(params: {
 
   // Queue Dispatcher for a specific queue + idle list
   function dispatchSingleQueue(currTime: Date, queue: CaseMinHeap, idleList: number[]) {
-    if (!isWorking(currTime, calendar)) return;
+    // Cheap emptiness test first: most calls find nothing to dispatch, and isWorking has no side effects.
     if (idleList.length === 0 || queue.length === 0) return;
+    if (!isWorking(currTime, calendar, dayCache)) return;
 
     const currMs = currTime.getTime();
     let openMinutesRemainingInDay = Infinity;
     if (!calendar.is24x7) {
-      const { closeTime } = getDailyOpenClose(currTime, calendar);
-      openMinutesRemainingInDay = Math.max(0, (closeTime.getTime() - currMs) / 60000);
+      openMinutesRemainingInDay = Math.max(0, (getDayWindow(currMs, calendar, dayCache).closeMs - currMs) / 60000);
       if (openMinutesRemainingInDay <= 0) return;
     }
 
     // Day-open instant for the per-agent shift-end bound (staggered mode only) — constant for
     // this whole dispatch call, so resolve it once instead of per candidate.
-    const dispatchDayOpenMs = staggeredMode ? getDailyOpenClose(currTime, calendar).openTime.getTime() : 0;
+    const dispatchDayOpenMs = staggeredMode ? getDayWindow(currMs, calendar, dayCache).openMs : 0;
 
     while (queue.length > 0 && idleList.length > 0) {
       // --- WHO: collect the eligible idle agents, then pick fairly (selectFairAgent) ---------
@@ -1501,8 +1510,7 @@ export function runBackofficeDES(params: {
       // agent's presence must not outlast their assigned shift length.
       let shiftMinutesRemainingToday = Infinity;
       if (staggeredMode) {
-        const { openTime: dayOpenTime } = getDailyOpenClose(currTime, calendar);
-        const ownShiftEndMs = dayOpenTime.getTime() + agentSlapStartMinutes[agentId] * 60000 + shiftLengthMinutes * 60000;
+        const ownShiftEndMs = getDayWindow(currMs, calendar, dayCache).openMs + agentSlapStartMinutes[agentId] * 60000 + shiftLengthMinutes * 60000;
         shiftMinutesRemainingToday = Math.max(0, (ownShiftEndMs - currMs) / 60000);
       }
       const maxWorkPossible = Math.min(agentBudget, openMinutesRemainingInDay, shiftMinutesRemainingToday);
@@ -1690,7 +1698,7 @@ export function runBackofficeDES(params: {
           if (selCases !== repCases) selCases[proc.agentIndex]++;
 
           const hasBudget = agentDailyMinutesRemaining[proc.agentIndex] > 0.01;
-          const canWork = isWorking(currTime, calendar) && hasBudget;
+          const canWork = isWorking(currTime, calendar, dayCache) && hasBudget;
           if (canWork) {
             returnAgentToIdle(proc.agentIndex, ev.data?.category);
             transitionAgent(proc.agentIndex, 'idle', simTimeMs);
@@ -1731,7 +1739,7 @@ export function runBackofficeDES(params: {
             parkedWIP.set(c.id, c);
 
             const hasBudget = agentDailyMinutesRemaining[proc.agentIndex] > 0.01;
-            const canWork = isWorking(currTime, calendar) && hasBudget;
+            const canWork = isWorking(currTime, calendar, dayCache) && hasBudget;
             if (canWork) {
               returnAgentToIdle(proc.agentIndex, ev.data?.category);
               transitionAgent(proc.agentIndex, 'idle', simTimeMs);
@@ -1741,7 +1749,7 @@ export function runBackofficeDES(params: {
 
             let nextResumeTime: Date | null = null;
             try {
-              nextResumeTime = nextOpen(currTime, calendar);
+              nextResumeTime = nextOpen(currTime, calendar, dayCache);
             } catch {
               nextResumeTime = null;
             }
@@ -1816,8 +1824,7 @@ export function runBackofficeDES(params: {
 
         // Fair-assignment availability: this cohort's working day starts now (mode-independent).
         {
-          const { closeTime: availCloseTime } = getDailyOpenClose(currTime, calendar);
-          startAvailabilityDay(scopedAgentIds ?? fairAllIds, simTimeMs, availCloseTime.getTime());
+          startAvailabilityDay(scopedAgentIds ?? fairAllIds, simTimeMs, getDayWindow(currTime.getTime(), calendar, dayCache).closeMs);
         }
 
         // Mark the affected cohort on-shift for today — mode-independent (never gated behind
@@ -1950,7 +1957,7 @@ export function runBackofficeDES(params: {
 
             let nextResumeTime: Date | null = null;
             try {
-              nextResumeTime = nextOpen(currTime, calendar);
+              nextResumeTime = nextOpen(currTime, calendar, dayCache);
             } catch {
               nextResumeTime = null;
             }
@@ -2075,9 +2082,9 @@ export function runBackofficeDES(params: {
 
     if (sla.asaClockBasis === 'business_window') {
       if (c.firstStartTime) {
-        asaDurationMinutes = workingDuration(waitFrom, c.firstStartTime, calendar);
+        asaDurationMinutes = workingDuration(waitFrom, c.firstStartTime, calendar, dayCache);
       } else {
-        asaDurationMinutes = workingDuration(waitFrom, horizonEnd, calendar);
+        asaDurationMinutes = workingDuration(waitFrom, horizonEnd, calendar, dayCache);
         asaCensored = true;
       }
     } else {

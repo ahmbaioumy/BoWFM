@@ -47,36 +47,74 @@ export function formatDuration(minutes: number, targetUnit: TimeUnit = 'hours'):
   }
 }
 
+// Holiday lookup: one Set per holidays array (WeakMap, so it dies with the array). The entry remembers the array
+// length and is rebuilt when it changes, so a push/splice/clear on the same array is still seen. Replacing an element
+// in place at the same length is NOT detected; callers replace the array (the UI always does: CalendarConfigPanel).
+const holidaySets = new WeakMap<string[], { len: number; set: Set<string> }>();
+
 export function isHoliday(date: Date, holidays: string[]): boolean {
   if (!date || isNaN(date.getTime())) return false;
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
   const d = String(date.getDate()).padStart(2, '0');
   const dateStr = `${y}-${m}-${d}`;
-  return holidays.includes(dateStr);
-}
-
-export function isWorkingDay(date: Date, calendar: CalendarConfig): boolean {
-  if (!date || isNaN(date.getTime())) return false;
-  if (calendar.is24x7) return true;
-  const dayOfWeek = date.getDay(); // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
-  if (!calendar.workingDays.includes(dayOfWeek)) return false;
-  if (isHoliday(date, calendar.holidays)) return false;
-  return true;
-}
-
-export function getDailyOpenClose(date: Date, calendar: CalendarConfig): { openTime: Date; closeTime: Date } {
-  if (!date || isNaN(date.getTime())) {
-    return { openTime: new Date(NaN), closeTime: new Date(NaN) };
+  if (!holidays || typeof holidays !== 'object') return holidays.includes(dateStr); // unchanged failure mode for bad input
+  let entry = holidaySets.get(holidays);
+  if (entry === undefined || entry.len !== holidays.length) {
+    entry = { len: holidays.length, set: new Set(holidays) };
+    holidaySets.set(holidays, entry);
   }
-  const openTime = new Date(date);
-  const closeTime = new Date(date);
+  return entry.set.has(dateStr);
+}
+
+/**
+ * One local calendar day of a calendar, as plain numbers: [startMs, endMs) is the local day (midnight to next
+ * midnight, so a DST day is 23h or 25h), `working` is the working-day flag (24x7, weekday and holiday rules), and
+ * openMs / closeMs are that day's business window (close may equal endMs for a 24:00 close).
+ * Every instant inside [startMs, endMs) has the same window, so one computation serves the whole day.
+ */
+export interface DayWindow {
+  readonly startMs: number;
+  readonly endMs: number;
+  readonly working: boolean;
+  readonly openMs: number;
+  readonly closeMs: number;
+}
+
+/**
+ * Per-run memo of DayWindow values: a small set-associative table keyed by UTC day number. One UTC day can overlap
+ * two or three local days (any non-UTC zone, and DST), so each set holds four windows; every candidate is checked by
+ * its [startMs, endMs) range, so a hit is always exact. It is bound to one CalendarConfig object and
+ * the calendar is treated as FROZEN for the life of the cache: create one per simulation run / case generation and
+ * drop it afterwards. A cache is ignored (bypassed) when passed with a different calendar object.
+ */
+export interface DayWindowCache {
+  readonly calendar: CalendarConfig;
+  readonly slots: Array<DayWindow | undefined>;
+  /** Round-robin replacement counter (mutated). */
+  victim: number;
+}
+
+const DAY_MS = 86400000;
+const WAYS = 4; // power of two
+const SETS = 256; // power of two: set = UTC day number & (SETS - 1)
+
+export function createDayWindowCache(calendar: CalendarConfig): DayWindowCache {
+  return { calendar, slots: new Array<DayWindow | undefined>(SETS * WAYS), victim: 0 };
+}
+
+const NAN_DAY_WINDOW: DayWindow = { startMs: NaN, endMs: NaN, working: false, openMs: NaN, closeMs: NaN };
+
+function computeDayWindow(tMs: number, calendar: CalendarConfig): DayWindow {
+  const date = new Date(tMs);
+  const dayStart = new Date(date);
+  dayStart.setHours(0, 0, 0, 0);
+  const nextDayStart = new Date(date);
+  nextDayStart.setDate(nextDayStart.getDate() + 1);
+  nextDayStart.setHours(0, 0, 0, 0);
 
   if (calendar.is24x7) {
-    openTime.setHours(0, 0, 0, 0);
-    closeTime.setDate(closeTime.getDate() + 1);
-    closeTime.setHours(0, 0, 0, 0);
-    return { openTime, closeTime };
+    return { startMs: dayStart.getTime(), endMs: nextDayStart.getTime(), working: true, openMs: dayStart.getTime(), closeMs: nextDayStart.getTime() };
   }
 
   const openH = calendar.dailyOpenHour ?? 8;
@@ -90,34 +128,72 @@ export function getDailyOpenClose(date: Date, calendar: CalendarConfig): { openT
     closeM = 0;
   }
 
+  const openTime = new Date(date);
+  const closeTime = new Date(date);
   openTime.setHours(openH, openM, 0, 0);
   closeTime.setHours(closeH, closeM, 0, 0);
-
-  return { openTime, closeTime };
+  // getDailyOpenClose never read workingDays/holidays, so a calendar object missing them (outside the type) must
+  // still yield its open/close here; such a day is simply not a working day.
+  const working = Array.isArray(calendar.workingDays) && calendar.workingDays.includes(date.getDay()) && !(calendar.holidays && isHoliday(date, calendar.holidays));
+  return { startMs: dayStart.getTime(), endMs: nextDayStart.getTime(), working, openMs: openTime.getTime(), closeMs: closeTime.getTime() };
 }
 
-export function isWorking(date: Date, calendar: CalendarConfig): boolean {
+/**
+ * The single day-window computation behind getDailyOpenClose, isWorkingDay, isWorking, nextOpen, workingDuration,
+ * addWorkingTime and subtractWorkingTime. With a cache it returns the memoised window when `tMs` falls inside it
+ * (results are bit-identical to computing it afresh; D92 and scripts/verify-speed-equivalence.mts). The returned
+ * object must be treated as read-only. A NaN time returns a non-working NaN window and is never cached.
+ */
+export function getDayWindow(tMs: number, calendar: CalendarConfig, cache?: DayWindowCache): DayWindow {
+  if (tMs !== tMs) return NAN_DAY_WINDOW;
+  if (cache === undefined || cache.calendar !== calendar) return computeDayWindow(tMs, calendar);
+  const slots = cache.slots;
+  const base = (Math.floor(tMs / DAY_MS) & (SETS - 1)) * WAYS;
+  for (let i = 0; i < WAYS; i++) {
+    const hit = slots[base + i];
+    if (hit !== undefined && tMs >= hit.startMs && tMs < hit.endMs) return hit;
+  }
+  const fresh = computeDayWindow(tMs, calendar);
+  slots[base + (cache.victim++ & (WAYS - 1))] = fresh;
+  return fresh;
+}
+
+export function isWorkingDay(date: Date, calendar: CalendarConfig, cache?: DayWindowCache): boolean {
   if (!date || isNaN(date.getTime())) return false;
   if (calendar.is24x7) return true;
-  if (!isWorkingDay(date, calendar)) return false;
-  const { openTime, closeTime } = getDailyOpenClose(date, calendar);
+  return getDayWindow(date.getTime(), calendar, cache).working;
+}
+
+export function getDailyOpenClose(date: Date, calendar: CalendarConfig, cache?: DayWindowCache): { openTime: Date; closeTime: Date } {
+  if (!date || isNaN(date.getTime())) {
+    return { openTime: new Date(NaN), closeTime: new Date(NaN) };
+  }
+  const w = getDayWindow(date.getTime(), calendar, cache);
+  return { openTime: new Date(w.openMs), closeTime: new Date(w.closeMs) };
+}
+
+export function isWorking(date: Date, calendar: CalendarConfig, cache?: DayWindowCache): boolean {
+  if (!date || isNaN(date.getTime())) return false;
+  if (calendar.is24x7) return true;
+  const w = getDayWindow(date.getTime(), calendar, cache);
+  if (!w.working) return false;
   const t = date.getTime();
-  return t >= openTime.getTime() && t < closeTime.getTime();
+  return t >= w.openMs && t < w.closeMs;
 }
 
 /**
  * Returns the next timestamp when the business window is open.
  * If the given date is already during open working hours, returns date (or copy).
  */
-export function nextOpen(date: Date, calendar: CalendarConfig): Date {
+export function nextOpen(date: Date, calendar: CalendarConfig, cache?: DayWindowCache): Date {
   if (!date || isNaN(date.getTime())) return new Date();
   if (calendar.is24x7) return new Date(date);
   let curr = new Date(date);
   // Loop up to 5 years ahead to find next open window across long closures
   const maxDays = 366 * 5;
   for (let i = 0; i < maxDays; i++) {
-    if (isWorkingDay(curr, calendar)) {
-      const { openTime, closeTime } = getDailyOpenClose(curr, calendar);
+    if (isWorkingDay(curr, calendar, cache)) {
+      const { openTime, closeTime } = getDailyOpenClose(curr, calendar, cache);
       if (curr.getTime() < openTime.getTime()) {
         return new Date(openTime);
       }
@@ -135,7 +211,7 @@ export function nextOpen(date: Date, calendar: CalendarConfig): Date {
 /**
  * Calculates working time (in minutes) between start and end timestamps.
  */
-export function workingDuration(startDate: Date, endDate: Date, calendar: CalendarConfig): number {
+export function workingDuration(startDate: Date, endDate: Date, calendar: CalendarConfig, cache?: DayWindowCache): number {
   if (!startDate || !endDate || isNaN(startDate.getTime()) || isNaN(endDate.getTime())) return 0;
   if (startDate.getTime() >= endDate.getTime()) return 0;
 
@@ -149,8 +225,8 @@ export function workingDuration(startDate: Date, endDate: Date, calendar: Calend
     startDate.getMonth() === endDate.getMonth() &&
     startDate.getDate() === endDate.getDate()
   ) {
-    if (!isWorkingDay(startDate, calendar)) return 0;
-    const { openTime, closeTime } = getDailyOpenClose(startDate, calendar);
+    if (!isWorkingDay(startDate, calendar, cache)) return 0;
+    const { openTime, closeTime } = getDailyOpenClose(startDate, calendar, cache);
     const windowStart = Math.max(startDate.getTime(), openTime.getTime());
     const windowEnd = Math.min(endDate.getTime(), closeTime.getTime());
     return windowEnd > windowStart ? (windowEnd - windowStart) / (60 * 1000) : 0;
@@ -162,8 +238,8 @@ export function workingDuration(startDate: Date, endDate: Date, calendar: Calend
 
   // Iterate day by day
   while (curr.getTime() < end.getTime()) {
-    if (isWorkingDay(curr, calendar)) {
-      const { openTime, closeTime } = getDailyOpenClose(curr, calendar);
+    if (isWorkingDay(curr, calendar, cache)) {
+      const { openTime, closeTime } = getDailyOpenClose(curr, calendar, cache);
       
       const windowStart = Math.max(curr.getTime(), openTime.getTime());
       const windowEnd = Math.min(end.getTime(), closeTime.getTime());
@@ -184,7 +260,7 @@ export function workingDuration(startDate: Date, endDate: Date, calendar: Calend
 /**
  * Adds working duration (in minutes) to a start timestamp, jumping across non-working hours, weekends, and holidays.
  */
-export function addWorkingTime(startDate: Date, durationMinutes: number, calendar: CalendarConfig): Date {
+export function addWorkingTime(startDate: Date, durationMinutes: number, calendar: CalendarConfig, cache?: DayWindowCache): Date {
   if (!startDate || isNaN(startDate.getTime())) return new Date();
   if (durationMinutes <= 0) return new Date(startDate);
 
@@ -195,7 +271,7 @@ export function addWorkingTime(startDate: Date, durationMinutes: number, calenda
   let remainingMin = durationMinutes;
   let curr: Date;
   try {
-    curr = nextOpen(startDate, calendar);
+    curr = nextOpen(startDate, calendar, cache);
   } catch {
     return new Date(startDate);
   }
@@ -204,7 +280,7 @@ export function addWorkingTime(startDate: Date, durationMinutes: number, calenda
   let iterations = 0;
 
   while (remainingMin > 0 && iterations++ < maxIterations) {
-    const { closeTime } = getDailyOpenClose(curr, calendar);
+    const { closeTime } = getDailyOpenClose(curr, calendar, cache);
     const availableMinutesInDay = Math.max(0, (closeTime.getTime() - curr.getTime()) / (60 * 1000));
 
     if (availableMinutesInDay <= 0) {
@@ -212,7 +288,7 @@ export function addWorkingTime(startDate: Date, durationMinutes: number, calenda
       nextDay.setDate(nextDay.getDate() + 1);
       nextDay.setHours(0, 0, 0, 0);
       try {
-        curr = nextOpen(nextDay, calendar);
+        curr = nextOpen(nextDay, calendar, cache);
       } catch {
         break;
       }
@@ -228,7 +304,7 @@ export function addWorkingTime(startDate: Date, durationMinutes: number, calenda
       nextDay.setDate(nextDay.getDate() + 1);
       nextDay.setHours(0, 0, 0, 0);
       try {
-        curr = nextOpen(nextDay, calendar);
+        curr = nextOpen(nextDay, calendar, cache);
       } catch {
         break;
       }
@@ -246,7 +322,7 @@ export function addWorkingTime(startDate: Date, durationMinutes: number, calenda
  * Subtracts working duration (in minutes) from an end timestamp, moving backwards across non-working periods.
  * Used to calculate LatestSafeStart = subtractWorkingTime(Deadline, AHT).
  */
-export function subtractWorkingTime(endDate: Date, durationMinutes: number, calendar: CalendarConfig): Date {
+export function subtractWorkingTime(endDate: Date, durationMinutes: number, calendar: CalendarConfig, cache?: DayWindowCache): Date {
   if (!endDate || isNaN(endDate.getTime())) return new Date();
   if (durationMinutes <= 0) return new Date(endDate);
 
@@ -261,8 +337,8 @@ export function subtractWorkingTime(endDate: Date, durationMinutes: number, cale
   let daysEvaluated = 0;
 
   while (remainingMin > 0 && daysEvaluated++ < maxDays) {
-    if (isWorkingDay(curr, calendar)) {
-      const { openTime, closeTime } = getDailyOpenClose(curr, calendar);
+    if (isWorkingDay(curr, calendar, cache)) {
+      const { openTime, closeTime } = getDailyOpenClose(curr, calendar, cache);
 
       let effectiveEnd = curr.getTime();
       if (effectiveEnd > closeTime.getTime()) {
@@ -286,7 +362,7 @@ export function subtractWorkingTime(endDate: Date, durationMinutes: number, cale
 
     // Skip non-working days
     let skipped = 0;
-    while (skipped < maxDays && !isWorkingDay(prevWorkDay, calendar)) {
+    while (skipped < maxDays && !isWorkingDay(prevWorkDay, calendar, cache)) {
       prevWorkDay.setDate(prevWorkDay.getDate() - 1);
       skipped++;
     }
@@ -297,7 +373,7 @@ export function subtractWorkingTime(endDate: Date, durationMinutes: number, cale
     }
 
     // Get this working day's close time, being explicit about the target date
-    const { closeTime: probe } = getDailyOpenClose(prevWorkDay, calendar);
+    const { closeTime: probe } = getDailyOpenClose(prevWorkDay, calendar, cache);
     // If close time is at or after the next calendar day's midnight, rewind it by one day
     // (this handles the case where close hour normalizes to 24)
     const nextDayMidnight = new Date(prevWorkDay);
