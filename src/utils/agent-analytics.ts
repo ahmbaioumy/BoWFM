@@ -194,6 +194,30 @@ export function maskedCell(a: Pick<AgentAnalytics, 'maskedForPooledFilter'>, tex
   return a.maskedForPooledFilter ? MASK_DASH : text;
 }
 
+/**
+ * Panel wording that depends on the mask (single source, tested in D91). Screen only: export column names are unchanged
+ * ('Busy (min)', 'Idle (min)') so files stay stable; the export carries POOLED_FILTER_NOTE instead.
+ */
+export function agentPanelText(
+  a: Pick<AgentAnalytics, 'maskedForPooledFilter' | 'filter'>,
+  showUtilisation: boolean
+): { subtitle: string; busyHeader: string; idleHeader: string; chartMaskedBody: string } {
+  if (a.maskedForPooledFilter) {
+    return {
+      subtitle: 'Per-agent workload for the selected category',
+      busyHeader: `Busy (${a.filter.category ?? 'category'}, min)`,
+      idleHeader: 'Idle (all work, min)',
+      chartMaskedBody: 'Not shown while a category is selected on a pooled team — see note above.',
+    };
+  }
+  return {
+    subtitle: showUtilisation ? 'Per-agent workload, occupancy and utilisation for the filtered range.' : 'Per-agent workload and occupancy for the filtered range.',
+    busyHeader: 'Busy (min)',
+    idleHeader: 'Idle (min)',
+    chartMaskedBody: '',
+  };
+}
+
 interface Cell {
   busy: number;
   /** Busy minutes across ALL categories (accumulated before the category filter) — used only to cap the scheduled tail. */
@@ -247,7 +271,9 @@ export function computeAgentAnalytics(input: {
     const set = sliceCats.get(id);
     return set && set.size === 1 ? [...set][0] : POOLED_CATEGORY;
   };
-  const categories = Array.from(new Set(Array.from({ length: hc }, (_, i) => agentCategory(i)))).sort();
+  // 'Pooled' is the synthetic label of shared-pool agents, not a case category: it is not offered as a filter option
+  // (a real case category literally named "Pooled" is re-added from the case results below). The compute filter still accepts it.
+  const categories = Array.from(new Set(Array.from({ length: hc }, (_, i) => agentCategory(i)))).filter((c) => c !== POOLED_CATEGORY).sort();
   if (des.caseResults) {
     for (const c of des.caseResults) if (!categories.includes(c.category)) categories.push(c.category);
     categories.sort();

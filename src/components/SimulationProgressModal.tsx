@@ -3,9 +3,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useId, useRef } from 'react';
 import { SearchProgressState, SLAPolicyConfig } from '../types/wfm';
 import { Cpu, Loader2, CheckCircle2, AlertTriangle, Activity, Square, ArrowRight, XCircle } from 'lucide-react';
+
+const FOCUSABLE =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 interface SimulationProgressModalProps {
   progress: SearchProgressState | null;
@@ -23,6 +26,13 @@ export function SimulationProgressModal({
   onClose,
 }: SimulationProgressModalProps) {
   const tableScrollRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  const titleId = useId();
+  const open = isOpen && !!progress;
+  const finished = progress?.status === 'completed' || progress?.status === 'infeasible';
 
   useEffect(() => {
     const el = tableScrollRef.current;
@@ -30,6 +40,56 @@ export function SimulationProgressModal({
       el.scrollTop = el.scrollHeight;
     }
   }, [progress?.evaluatedHistory.length]);
+
+  // Remember the opener, put focus on the dialog title (never on Stop: one stray Enter must not cancel a long run),
+  // and give focus back when the dialog closes (if that element still exists).
+  useEffect(() => {
+    if (!open) return;
+    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    titleRef.current?.focus();
+    return () => {
+      const el = returnFocusRef.current;
+      returnFocusRef.current = null;
+      if (el && el.isConnected) el.focus();
+    };
+  }, [open]);
+
+  // When the search finishes, the safe next action (View Results) takes focus.
+  useEffect(() => {
+    if (open && finished) closeBtnRef.current?.focus();
+  }, [open, finished]);
+
+  // Tab stays inside the dialog. Escape never stops a running search (no unconfirmed stop); once finished it
+  // does the same as View Results (navigation only, nothing is lost).
+  useEffect(() => {
+    if (!open) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        if (finished && onClose) onClose();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const nodes: HTMLElement[] = dialogRef.current ? Array.from(dialogRef.current.querySelectorAll<HTMLElement>(FOCUSABLE)) : [];
+      if (nodes.length === 0) {
+        e.preventDefault();
+        titleRef.current?.focus();
+        return;
+      }
+      const first = nodes[0];
+      const last = nodes[nodes.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+      const onNode = !!active && nodes.includes(active);
+      if (e.shiftKey && (!onNode || active === first)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (!onNode || active === last)) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [open, finished, onClose]);
 
   if (!isOpen || !progress) return null;
 
@@ -47,7 +107,13 @@ export function SimulationProgressModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]"
+      >
         {/* Header */}
         <div className="bg-slate-900 text-white p-5 flex items-center justify-between border-b border-slate-800">
           <div className="flex items-center gap-3">
@@ -56,7 +122,7 @@ export function SimulationProgressModal({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="font-bold text-sm text-white">Backoffice DES Sizing Engine</h3>
+                <h3 id={titleId} ref={titleRef} tabIndex={-1} className="font-bold text-sm text-white outline-none">Backoffice DES Sizing Engine</h3>
                 <span
                   className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border ${
                     status === 'completed'
@@ -295,6 +361,7 @@ export function SimulationProgressModal({
             {isFinished && onClose && (
               <button
                 id="btn-close-simulation-modal"
+                ref={closeBtnRef}
                 onClick={onClose}
                 className="flex items-center gap-1.5 px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition shadow-sm"
               >
