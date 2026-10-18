@@ -122,6 +122,7 @@ export function Sidebar({
                 <div key={f.id} className="space-y-0.5">
                   <button
                     id={`sidebar-flow-${f.id}`}
+                    aria-current={isActive ? 'page' : undefined}
                     onClick={() => {
                       const firstTab = FLOW_TABS[f.id][0].id;
                       onSelectFlow(f.id, firstTab);
@@ -162,6 +163,7 @@ export function Sidebar({
                           <button
                             key={tab.id}
                             id={`sidebar-tab-${tab.id}`}
+                            aria-current={isTabActive ? 'page' : undefined}
                             onClick={() => onSelectTab(tab.id)}
                             className={`w-full text-left px-2.5 py-1 rounded text-[11px] font-medium transition ${
                               isTabActive
@@ -185,6 +187,7 @@ export function Sidebar({
         <div className="pt-2 border-t border-slate-800/70">
           <button
             id="sidebar-toggle-params-btn"
+            aria-expanded={paramsPanelOpen}
             onClick={onToggleParamsPanel}
             className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-semibold transition ${
               paramsPanelOpen
@@ -196,7 +199,7 @@ export function Sidebar({
               <Layers className="w-4 h-4 text-blue-400" />
               <span>Params & Logic Inspector</span>
             </div>
-            <span className="text-[10px] font-mono">{paramsPanelOpen ? 'OPEN' : 'HIDE'}</span>
+            <span className="text-[10px] font-mono">{paramsPanelOpen ? 'ON' : 'OFF'}</span>
           </button>
         </div>
       </div>
@@ -218,7 +221,7 @@ export function Sidebar({
             id="sidebar-import-params-btn"
             onClick={() => fileInputRef.current?.click()}
             className="flex items-center justify-center gap-1 px-2 py-1.5 text-[11px] font-semibold rounded bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
-            title="Import parameter configuration from JSON file"
+            title="Import settings from a JSON file. Replaces the current settings (calendar, labor, SLA, categories, simulation); invalid files are refused as a whole."
           >
             <Upload className="w-3 h-3" />
             <span>Import JSON</span>

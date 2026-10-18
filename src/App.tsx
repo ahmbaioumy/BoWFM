@@ -131,6 +131,8 @@ export function App() {
     | { type: 'upload'; text: string; filename: string }
     | { type: 'sample'; sampleType: 'claims' | 'support' | 'healthcare' };
   const [pendingResetAction, setPendingResetAction] = useState<PendingResetAction | null>(null);
+  // Bumped on every confirmed reset: DemandFlow is keyed on it so its own local state (staged backlog CSV, form drafts) is dropped too.
+  const [resetEpoch, setResetEpoch] = useState(0);
   const [searchProgress, setSearchProgress] = useState<SearchProgressState | null>(null);
   const [simulationError, setSimulationError] = useState<string | null>(null);
   // success = green, auto-hides. warning (amber) and error (red) stay until dismissed; `problems` lists each rejected item.
@@ -442,6 +444,7 @@ export function App() {
     setSearchProgress(null);
     setParamsPanelOpen(false);
     setPendingResetAction(null);
+    setResetEpoch((n) => n + 1);
     setCurrentFlow('demand');
     setCurrentTab('upload');
 
@@ -680,6 +683,7 @@ export function App() {
 
             <ErrorBoundary level="content" key={currentFlow}>
             {currentFlow === 'demand' && (
+              <React.Fragment key={resetEpoch}>
               <DemandFlow
                 currentTab={currentTab}
                 rawHeaders={rawHeaders}
@@ -700,6 +704,7 @@ export function App() {
                 onUpdateLabor={setLabor}
                 onToggle24x7={handleToggle24x7}
               />
+              </React.Fragment>
             )}
 
             {currentFlow === 'config' && (
@@ -816,6 +821,7 @@ export function App() {
       {/* Confirmation Modal for Resetting All Data & Parameters */}
       <ResetConfirmModal
         isOpen={pendingResetAction !== null}
+        trigger={pendingResetAction === null || pendingResetAction === 'reset' ? 'reset' : pendingResetAction.type}
         onConfirm={handleConfirmResetAll}
         onCancel={() => setPendingResetAction(null)}
       />
