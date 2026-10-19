@@ -2525,3 +2525,4 @@ C6. Phase L option B dropped. Before choosing, measure (investigator) three vari
 - Cost (DES runs, deterministic): ii = 0.38x on false-fail seeds (7/12 AJM), worst +19% on lucky seeds, +15% healthcare. i = worst 1.46x. iii4 = 0.66x unlucky, OFF output-identical; iii2 changes OFF history (rejected).
 - Only searchHistory rows differ (overshoot rows 18–25 dropped). Binding/failing text identical. #8 CI gate and #9 CRN untouched.
 - Recommended: ii, built as one shared createLeapSearch state machine (D11) with sync≡async test; guard R > 10 && volumeVariability; fail-first fixture AJM seed 1/2 (17@5F false-fail).
+- STATUS: DEFERRED by owner 2026-10-19 — not built; resume from this section when asked.
