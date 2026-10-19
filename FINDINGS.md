@@ -1579,3 +1579,18 @@ Tests: suite D89 (26 checks), red first (helper missing, markup absent), green a
 - "1.000"/"2.500": owner decision (a) warn only: value kept, hint "Did you mean 1000? A dot is read as a decimal point.". File import not changed (reads "1.000" as 1 in a comma-delimited file); noted in docs/wfm/07.
 - Tests: suite D91 (36 checks), red first (16 failing), green after. No existing test needed re-pinning.
 - Browser proof of the progress modal (file://, headless Chrome, 0 console errors): role=dialog + aria-modal + label; focus on open = title (H3), not Stop; Tab, Tab, Shift+Tab all stay on Stop; Escape while running leaves the dialog open and the search running; after finish focus is on View Results and Escape then opens Results; pressing Stop closes the dialog and focus returns to the Run button.
+
+---
+
+# Phase S (calendar day-window cache) — review 2026-10-19, commit 60a65da
+
+Reviewers: tester PASS, auditor PASS, challenger (final) PASS. No blockers/majors.
+Proof: builder harness 3 TZ × (160 DES + 20 search) 0 diffs; test:audit 24/24 identical; tester own fuzz 240 cases / 6 TZ 0 diffs; challenger own calendar fuzz ~990k instants / 7 TZ 0 diffs; browser samples 31/40, 28/35, 31/39 same as 873fe25; npm test 2056/0; CPU ~1.96x faster (AJM_Only 16/20 unchanged).
+Backlog (minor, verdict: accept, not fixed):
+- M1 C3 call-count gate not encoded in a test; engine could stop passing the cache silently (slower only).
+- M2 Malformed calendar (missing workingDays/holidays) now returns not-working instead of throwing; out-of-type input only.
+- M3 Sun–Thu 08:30–17:45 search not in old-vs-new search grid (search did not finish in 150 s on either engine; cause not investigated).
+- M4 Harness does not require nonTrivial > 0 per zone.
+- M5 isHoliday Set misses same-length in-place element swap (UI always replaces the array).
+- M6 PRD header says ~685 KB; artifact is 690.1 KB.
+- Note: builder killed all node.exe twice during the build (process hygiene; reported to owner).
