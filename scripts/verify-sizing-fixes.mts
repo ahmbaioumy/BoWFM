@@ -8836,6 +8836,121 @@ console.log('\n--- Suite D91: screen polish ---');
   assert(/newWipRem\.hint/.test(src91('src/components/DemandFlow.tsx')), 'D91.d5 DemandFlow renders newWipRem.hint');
 }
 
+// ---------------------------------------------------------------------------------------------
+// Suite D92 — Phase S speed: the per-run day-window cache must be a pure memo. getDayWindow / the cached
+// calendar functions must equal the ORIGINAL getDailyOpenClose / isWorking / isHoliday semantics (re-stated
+// below as the reference) over random timestamps incl. DST transition days, holidays, 24x7, a 24:00 close,
+// a non-midnight open and a midnight-spanning window. Written fail-first (the helper did not exist).
+// Full-engine bit-identity (runBackofficeDES / searchOptimalHC old vs new) lives in scripts/verify-speed-equivalence.mts.
+// ---------------------------------------------------------------------------------------------
+console.log('\n--- Suite D92: day-window cache is a pure memo of the calendar ---');
+{
+  const getDayWindow92 = (calNs as any).getDayWindow as undefined | ((t: number, c: CalendarConfig, k?: any) => any);
+  const mkCache92 = (calNs as any).createDayWindowCache as undefined | ((c: CalendarConfig) => any);
+  assert(typeof getDayWindow92 === 'function' && typeof mkCache92 === 'function', 'D92.a1 calendar.ts exports getDayWindow + createDayWindowCache');
+
+  // Reference = the pre-Phase-S implementations, verbatim semantics.
+  const refHoliday = (d: Date, hs: string[]) => hs.includes(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
+  const refOpenClose = (date: Date, c: CalendarConfig) => {
+    const o = new Date(date), cl = new Date(date);
+    if (c.is24x7) { o.setHours(0, 0, 0, 0); cl.setDate(cl.getDate() + 1); cl.setHours(0, 0, 0, 0); return { o: o.getTime(), c: cl.getTime() }; }
+    const oh = c.dailyOpenHour ?? 8, om = c.dailyOpenMinute ?? 0; let ch = c.dailyCloseHour ?? 18, cm = c.dailyCloseMinute ?? 0;
+    if ((ch === 0 && cm === 0 && (oh > 0 || om > 0)) || ch >= 24) { ch = 24; cm = 0; }
+    o.setHours(oh, om, 0, 0); cl.setHours(ch, cm, 0, 0);
+    return { o: o.getTime(), c: cl.getTime() };
+  };
+  const refWorkingDay = (d: Date, c: CalendarConfig) => c.is24x7 ? true : (c.workingDays.includes(d.getDay()) && !refHoliday(d, c.holidays));
+  const refIsWorking = (d: Date, c: CalendarConfig) => {
+    if (c.is24x7) return true;
+    if (!refWorkingDay(d, c)) return false;
+    const r = refOpenClose(d, c); const t = d.getTime(); return t >= r.o && t < r.c;
+  };
+  const same = (a: number, b: number) => (Number.isNaN(a) && Number.isNaN(b)) || a === b;
+
+  const hol92 = ['2026-03-09', '2026-03-29', '2026-03-30', '2026-10-26', '2026-11-02', '2026-12-25'];
+  const cals92: Array<[string, CalendarConfig]> = [
+    ['default 8-18', { workingDays: [1, 2, 3, 4, 5], dailyOpenHour: 8, dailyCloseHour: 18, holidays: hol92 } as CalendarConfig],
+    ['24x7', { is24x7: true, workingDays: [0, 1, 2, 3, 4, 5, 6], holidays: hol92 } as CalendarConfig],
+    ['close 24:00', { workingDays: [0, 1, 2, 3, 4, 5, 6], dailyOpenHour: 6, dailyCloseHour: 24, holidays: hol92 } as CalendarConfig],
+    ['close 00:00 (open>0)', { workingDays: [1, 2, 3, 4, 5, 6], dailyOpenHour: 9, dailyCloseHour: 0, holidays: hol92 } as CalendarConfig],
+    ['non-midnight 08:30-17:45', { workingDays: [1, 2, 3, 4, 5], dailyOpenHour: 8, dailyOpenMinute: 30, dailyCloseHour: 17, dailyCloseMinute: 45, holidays: hol92 } as CalendarConfig],
+    ['midnight-spanning 22-02', { workingDays: [0, 1, 2, 3, 4, 5, 6], dailyOpenHour: 22, dailyCloseHour: 2, holidays: hol92 } as CalendarConfig],
+    ['01:30 open (DST gap hour)', { workingDays: [0, 1, 2, 3, 4, 5, 6], dailyOpenHour: 1, dailyOpenMinute: 30, dailyCloseHour: 3, dailyCloseMinute: 30, holidays: [] } as CalendarConfig],
+  ];
+  let seed92 = 92_000_001;
+  const rnd92 = () => { seed92 = (Math.imul(seed92, 1664525) + 1013904223) >>> 0; return seed92 / 4294967296; };
+  const dstDays: Array<[number, number, number]> = [[2026, 2, 8], [2026, 2, 29], [2026, 9, 25], [2026, 10, 1], [2026, 2, 9], [2026, 10, 2]];
+  const baseMs = new Date(2026, 0, 1).getTime(), spanMs = 365 * 86400000;
+  let n92 = 0, bad92 = 0, firstBad92 = '';
+  if (typeof getDayWindow92 === 'function' && typeof mkCache92 === 'function') {
+    for (const [name, cal] of cals92) {
+      const cache = mkCache92(cal);
+      const stamps: number[] = [];
+      for (let i = 0; i < 4000; i++) stamps.push(baseMs + Math.floor(rnd92() * spanMs));
+      for (const [y, m, d] of dstDays) for (let h = 0; h < 26; h++) for (const mi of [0, 15, 30, 45, 59]) stamps.push(new Date(y, m, d, 0, h * 60 + mi - 30).getTime());
+      for (let i = 0; i < 1500; i++) stamps.push(baseMs + Math.floor(rnd92() * 20) * 86400000 * 18 + Math.floor(rnd92() * 86400000)); // revisit-heavy: slot hits and evictions
+      for (const t of stamps) {
+        const dt = new Date(t);
+        const ref = refOpenClose(dt, cal), refW = refIsWorking(dt, cal), refWD = refWorkingDay(dt, cal);
+        const w = getDayWindow92(t, cal), wc = getDayWindow92(t, cal, cache);
+        const goc = calNs.getDailyOpenClose(dt, cal), gocC = (calNs.getDailyOpenClose as any)(dt, cal, cache);
+        const checks: Array<[string, boolean]> = [
+          ['window contains t', w.startMs <= t && t < w.endMs && wc.startMs <= t && t < wc.endMs],
+          ['open/close', same(w.openMs, ref.o) && same(w.closeMs, ref.c) && same(wc.openMs, ref.o) && same(wc.closeMs, ref.c)],
+          ['working flag', w.working === refWD && wc.working === refWD],
+          ['getDailyOpenClose', same(goc.openTime.getTime(), ref.o) && same(goc.closeTime.getTime(), ref.c) && same(gocC.openTime.getTime(), ref.o) && same(gocC.closeTime.getTime(), ref.c)],
+          ['isWorking', calNs.isWorking(dt, cal) === refW && (calNs.isWorking as any)(dt, cal, cache) === refW],
+          ['isWorkingDay', calNs.isWorkingDay(dt, cal) === refWD && (calNs.isWorkingDay as any)(dt, cal, cache) === refWD],
+          ['isHoliday', calNs.isHoliday(dt, cal.holidays) === refHoliday(dt, cal.holidays)],
+        ];
+        for (const [what, ok] of checks) { n92++; if (!ok) { bad92++; if (!firstBad92) firstBad92 = `${name} ${dt.toString()} ${what}`; } }
+      }
+    }
+  }
+  assert(n92 > 0 && bad92 === 0, `D92.a2 cached/uncached window, getDailyOpenClose, isWorking, isWorkingDay, isHoliday == original semantics (${n92} checks over ${cals92.length} calendars incl. DST days)`, firstBad92);
+
+  // Delegating loops give the same answer with and without the cache (a stale or wrong cache would show here).
+  let bad92b = 0, n92b = 0;
+  if (typeof mkCache92 === 'function') {
+    for (const [, cal] of cals92.filter(([nm]) => !nm.startsWith('midnight'))) {
+      const cache = mkCache92(cal);
+      for (let i = 0; i < 600; i++) {
+        const a = new Date(baseMs + Math.floor(rnd92() * spanMs)), b = new Date(a.getTime() + Math.floor(rnd92() * 9 * 86400000));
+        const dur = Math.floor(rnd92() * 3000) + 1;
+        const eq = (x: Date, y: Date) => same(x.getTime(), y.getTime());
+        const tryBoth = (f: (k?: any) => Date) => { let u: Date | string, c: Date | string; try { u = f(); } catch (e) { u = String(e); } try { c = f(cache); } catch (e) { c = String(e); } return typeof u === 'string' || typeof c === 'string' ? u === c : eq(u, c); };
+        const a1h = new Date(a.getTime() + 3600000);
+        n92b += 5;
+        if (!same(calNs.workingDuration(a, b, cal), (calNs.workingDuration as any)(a, b, cal, cache))) bad92b++;
+        if (!tryBoth((k) => (calNs.nextOpen as any)(a, cal, k))) bad92b++;
+        if (!tryBoth((k) => (calNs.addWorkingTime as any)(a, dur, cal, k))) bad92b++;
+        if (!tryBoth((k) => (calNs.subtractWorkingTime as any)(b, dur, cal, k))) bad92b++;
+        if (!same(calNs.workingDuration(a, a1h, cal), (calNs.workingDuration as any)(a, a1h, cal, cache))) bad92b++;
+      }
+    }
+  }
+  assert(n92b > 0 && bad92b === 0, `D92.a3 workingDuration/nextOpen/addWorkingTime/subtractWorkingTime identical with and without cache (${n92b} checks)`, `diffs=${bad92b}`);
+
+  // A cache built for one calendar object is bypassed for another (never answers for the wrong calendar).
+  if (typeof getDayWindow92 === 'function' && typeof mkCache92 === 'function') {
+    const c1 = cals92[0][1], c2 = cals92[1][1], k = mkCache92(c1), t = new Date(2026, 5, 3, 12, 0).getTime();
+    getDayWindow92(t, c1, k);
+    const other = getDayWindow92(t, c2, k);
+    assert(other.closeMs - other.openMs === 86400000 && other.working === true, 'D92.a4 a cache is ignored for a different calendar object');
+    const nanW = getDayWindow92(NaN, c1, k);
+    assert(Number.isNaN(nanW.openMs) && nanW.working === false && getDayWindow92(t, c1, k).working === true, 'D92.a5 NaN time yields a non-working NaN window and does not poison the cache');
+  } else assert(false, 'D92.a4/a5 need the helper');
+
+  // isHoliday: holiday Set is cached per array but follows in-place edits (verify-fixes pushes into the array before use).
+  const hArr = ['2026-04-01'];
+  const dH = new Date(2026, 3, 2, 10, 0);
+  const before = calNs.isHoliday(dH, hArr);
+  hArr.push('2026-04-02');
+  const after = calNs.isHoliday(dH, hArr);
+  hArr.length = 0;
+  assert(before === false && after === true && calNs.isHoliday(dH, hArr) === false && calNs.isHoliday(new Date(NaN), hArr) === false, 'D92.a6 isHoliday follows push/clear on the same array and rejects invalid dates');
+}
+
 console.log('\n==================================================');
 console.log(` RESULTS: ${passedTests} PASSED, ${failedTests} FAILED`);
 console.log('==================================================\n');
