@@ -2518,3 +2518,10 @@ C3. AS3 replaced: gate = getDailyOpenClose call count in engine loop drops >90% 
 C4. S3: holiday Set cached via WeakMap on the array; grep scripts for in-place holidays mutation first.
 C5. AS4 adds sync≡async suites and check:artifact after rebuild.
 C6. Phase L option B dropped. Before choosing, measure (investigator) three variants on AJM_Only ON + seeds: (i) skip 5-rep probe under variability, (ii) recheck at min(R,10) with no evalCache/rescue side effects, (iii) step cap. Leap logic first extracted into one createLeapSearch state machine with sync≡async test (own task). Property test across ≥20 seeds: new recommendedHC ≤ old; report any output-text diffs (evaluatedHCs, failing reason, binding).
+
+## Phase L measurement result (2026-10-19, scratchpad phaseL/, repo untouched)
+- Variants i (skip probe), ii (recheck failed 5-rep probe at 10 reps, side-effect free), iii (step cap 4/2) measured on AJM_Only ON 12 seeds, claims 24, healthcare 5, support 5; OFF 4 datasets × 4 seeds for caps.
+- Headcount: identical to baseline on EVERY seed, every variant (AJM 17/21). Invariant new ≤ old holds by construction (power-of-2 caps only).
+- Cost (DES runs, deterministic): ii = 0.38x on false-fail seeds (7/12 AJM), worst +19% on lucky seeds, +15% healthcare. i = worst 1.46x. iii4 = 0.66x unlucky, OFF output-identical; iii2 changes OFF history (rejected).
+- Only searchHistory rows differ (overshoot rows 18–25 dropped). Binding/failing text identical. #8 CI gate and #9 CRN untouched.
+- Recommended: ii, built as one shared createLeapSearch state machine (D11) with sync≡async test; guard R > 10 && volumeVariability; fail-first fixture AJM seed 1/2 (17@5F false-fail).
