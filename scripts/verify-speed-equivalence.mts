@@ -234,9 +234,9 @@ for (const w of engineOnly ? [] : wins) {
 }
 
 if (!quick) {
-  // searchOptimalHC is the expensive path (many DES runs per search): a trimmed 10-day horizon (still containing the DST day) and 4 variants.
+  // searchOptimalHC is the expensive path: trimmed 10-day horizon (still containing the DST day), 4 variants. The Sun-Thu 08:30-17:45 calendar is DES-grid only: its search did not finish in 150 s on EITHER engine (pre-existing, unrelated to the cache).
   const w = { ...wins[0], days: 10 }, wf = { ...wins[1], days: 10 };
-  for (const [win, specTemplate] of [[w, calSpecs(w)[0]], [w, calSpecs(w)[1]], [w, calSpecs(w)[2]], [wf, calSpecs(wf)[3]], [wf, calSpecs(wf)[4]]] as Array<[Win, CalSpec]>) {
+  for (const [win, specTemplate] of [[w, calSpecs(w)[0]], [w, calSpecs(w)[1]], [w, calSpecs(w)[2]], [wf, calSpecs(wf)[3]], [wf, calSpecs(wf)[0]]] as Array<[Win, CalSpec]>) {
     if (expectDst && countOddDays(win) === 0) throw new Error(`TZ ${process.env.TZ}: trimmed search window ${win.name} has no 23h/25h day`);
     const all = vars();
     const pick = (basis: string, pol: string, minCov: boolean) => all.find((x) => x.clockBasis === basis && x.clockStartPolicy === pol && x.minCov === minCov && !x.dist)!;
